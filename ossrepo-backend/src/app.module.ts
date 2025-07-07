@@ -1,10 +1,8 @@
+// src/app.module.ts
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { WatchlistModule } from './features/watchlist/watchlist.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [WatchlistModule],
 })
 export class AppModule {}
