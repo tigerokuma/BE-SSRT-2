@@ -13,3 +13,65 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model User {
+  user_id         String            @id @default(uuid())
+  email           String            @unique
+  name            String?
+  created_at      DateTime          @default(now())
+
+  // Relations
+  userWatchlists  UserWatchlist[]
+
+  @@map("users") // optional: map to existing table name if needed
+}
+
+model RepositoryMetadata {
+  repo_id        String   @id @default(uuid())
+  package_name   String
+  downloads      Int?
+  last_updated   DateTime?
+  stars          Int?
+  contributors   Int?
+  pushed_at      DateTime?
+  risk_score     Float?
+  fetched_at     DateTime?
+  repo_url       String
+  repo_name      String
+
+  // Relations
+  watchlists     Watchlist[]
+}
+
+model Watchlist {
+  watchlist_id                  String               @id @default(uuid())
+  repo_id                       String
+  alert_cve_ids                 String[]             // clearer as array of CVEs
+  updated_at                    DateTime?
+  default_branch                String?
+  latest_commit_sha            String?
+  commits_since_last_health_update Int?
+  
+  // Removed duplicated repo_url and repo_name
+
+  // Relations
+  metadata                      RepositoryMetadata   @relation(fields: [repo_id], references: [repo_id])
+  userWatchlistEntries          UserWatchlist[]
+}
+
+model UserWatchlist {
+  id           String    @id @default(uuid())
+  user_id      String
+  watchlist_id String
+  added_at     DateTime  @default(now())
+  alerts       String?
+  notes        String?
+  created_at   DateTime  @default(now())
+
+  // Relations
+  watchlist    Watchlist @relation(fields: [watchlist_id], references: [watchlist_id])
+  user         User      @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id])
+  @@index([watchlist_id])
+}
