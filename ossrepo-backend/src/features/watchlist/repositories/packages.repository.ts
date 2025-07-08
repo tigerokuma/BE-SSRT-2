@@ -53,114 +53,185 @@ export class PackagesRepository {
   }
 
   async searchPackages(name: string): Promise<Package[]> {
-    // 1. First, search in our database (your existing logic)
-    const dbResults = await this.findPackagesByName(name);
+    console.log(`Searching for packages: ${name}`);
     
-    if (dbResults.length > 0) {
-      // Check if data is fresh (less than 12 hours old)
-      const freshResults = dbResults.filter(pkg => 
-        pkg.fetched_at && this.isDataFresh(pkg.fetched_at)
+    // 1. ALWAYS return database results immediately (fast path)
+    const dbResults = await this.searchPackagesInDb(name);
+    
+    // 2. Deduplicate immediately (safety net)
+    const uniqueResults = this.deduplicateByPackageId(dbResults);
+    
+    // 3. Check if we have ANY results to return
+    if (uniqueResults.length > 0) {
+      console.log(`Found ${uniqueResults.length} packages in database`);
+      
+      // 4. Check staleness and trigger background refresh if needed
+      const hasStaleData = uniqueResults.some(pkg => 
+        !pkg.fetched_at || !this.isDataFresh(pkg.fetched_at)
       );
       
-      if (freshResults.length > 0) {
-        console.log(`Found ${freshResults.length} fresh results in database`);
-        return freshResults;
+      if (hasStaleData) {
+        console.log('Triggering background refresh for stale data');
+        // Fire-and-forget background refresh (don't await!)
+        this.refreshPackagesInBackground(name).catch(err => 
+          console.warn('Background refresh failed:', err.message)
+        );
       }
+      
+      // Return immediately with cached data
+      return uniqueResults;
     }
-  
-    // 2. If no fresh data, try NPM Registry first (no rate limits!)
-    console.log(`Searching NPM Registry for: ${name}`);
+    
+    // 5. No database results - do ONE external search (blocking)
+    console.log('No cached data, searching external APIs');
+    return this.searchExternalAndCache(name);
+  }
+
+  private async searchPackagesInDb(name: string): Promise<Package[]> {
+    return this.prisma.package.findMany({
+      where: {
+        OR: [
+          { package_name: { equals: name, mode: 'insensitive' } },      // Exact match first
+          { package_name: { contains: name, mode: 'insensitive' } },    // Partial match
+          { repo_name: { contains: name, mode: 'insensitive' } }        // Repo name match
+        ]
+      },
+      orderBy: [
+        { package_name: 'asc' },  // Exact matches first
+        { stars: 'desc' },        // Popular packages first
+        { fetched_at: 'desc' }    // Fresh data first
+      ],
+      take: 20  // Limit results for performance
+    });
+  }
+
+  // Simplified external search (only for cache misses)
+  private async searchExternalAndCache(name: string): Promise<Package[]> {
     try {
-      const npmResults = await this.npmService.searchPackages(name, 10);
+      // Try NPM first (fastest, most relevant)
+      const npmResults = await this.npmService.searchPackages(name, 5); // Limit to 5 for speed
       
       if (npmResults.length > 0) {
-        // 3. Transform NPM results and enrich with GitHub data
-        const cachedResults: Package[] = [];
-        
-        for (const npmPkg of npmResults) {
-          try {
-            let packageData;
-            
-            if (npmPkg.repoUrl) {
-              // Extract owner/repo from GitHub URL
-              const match = npmPkg.repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-              if (match) {
-                const [, owner, repo] = match;
-                const githubData = await this.githubService.getRepositoryDetails(owner, repo);
-                
-                // Combine NPM + GitHub data (using your existing pattern)
-                packageData = {
-                  package_name: npmPkg.name,
-                  repo_name: githubData.full_name,
-                  repo_url: npmPkg.repoUrl,
-                  stars: githubData.stargazers_count,
-                  downloads: null,
-                  last_updated: new Date(githubData.updated_at),
-                  pushed_at: new Date(githubData.pushed_at),
-                  contributors: githubData.contributors_count || null,
-                  risk_score: null
-                };
-              } else {
-                // NPM package without valid GitHub URL
-                packageData = this.transformNpmData(npmPkg);
-              }
-            } else {
-              // NPM package without repository URL
-              packageData = this.transformNpmData(npmPkg);
-            }
-            
-            const cachedPackage = await this.createOrUpdatePackage(packageData);
-            cachedResults.push(cachedPackage);
-            
-          } catch (githubError) {
-            // If GitHub fails for individual package, still include NPM data
-            console.warn(`GitHub data failed for ${npmPkg.name}:`, githubError.message);
-            const packageData = this.transformNpmData(npmPkg);
-            const cachedPackage = await this.createOrUpdatePackage(packageData);
-            cachedResults.push(cachedPackage);
-          }
-        }
-        
-        console.log(`Cached ${cachedResults.length} packages from NPM`);
-        return cachedResults;
+        console.log(`Found ${npmResults.length} packages from NPM`);
+        const cachedResults = await this.quickCacheNpmResults(npmResults);
+        return this.deduplicateByPackageId(cachedResults);
       }
-      
     } catch (npmError) {
-      console.warn('NPM Registry search failed, falling back to GitHub:', npmError.message);
+      console.warn('NPM search failed:', npmError.message);
     }
-  
-    // 3. Fallback to your existing GitHub search logic
-    return this.searchGitHubFallback(name, dbResults);
-  }
-  
-  private async searchGitHubFallback(name: string, dbResults: Package[]): Promise<Package[]> {
-    // Your existing GitHub search logic as fallback
-    console.log(`Searching GitHub API for: ${name}`);
+    
+    // Fallback to GitHub (only if NPM completely fails)
     try {
-      const gitHubResults = await this.githubService.searchRepositories(name);
-      
-      // Transform and cache the results (your existing logic)
-      const cachedResults: Package[] = [];
-      for (const gitHubRepo of gitHubResults) {
-        const packageData = this.transformGitHubData(gitHubRepo);
-        const cachedPackage = await this.createOrUpdatePackage(packageData);
-        cachedResults.push(cachedPackage);
-      }
-      
-      console.log(`Cached ${cachedResults.length} packages from GitHub`);
-      return cachedResults;
-      
-    } catch (error) {
-      // Fallback to stale database data if API fails (your existing logic)
-      if (dbResults.length > 0) {
-        console.log('GitHub API failed, returning stale database results');
-        return dbResults;
-      }
-      
-      throw error;
+      const githubResults = await this.githubService.searchRepositories(name);
+      const cachedResults = await this.quickCacheGitHubResults(githubResults.slice(0, 5)); // Limit for speed
+      return this.deduplicateByPackageId(cachedResults);
+    } catch (githubError) {
+      console.warn('GitHub search failed:', githubError.message);
+      return [];
     }
   }
-  
+
+  // Background refresh (fire-and-forget)
+  private async refreshPackagesInBackground(name: string): Promise<void> {
+    try {
+      console.log(`Background refresh starting for: ${name}`);
+      
+      // Get current stale packages
+      const stalePackages = await this.prisma.package.findMany({
+        where: {
+          package_name: { contains: name, mode: 'insensitive' },
+          OR: [
+            { fetched_at: null },
+            { fetched_at: { lt: new Date(Date.now() - 12 * 60 * 60 * 1000) } } // 12 hours ago
+          ]
+        }
+      });
+      
+      if (stalePackages.length === 0) return;
+      
+      // Refresh each package individually (no batch for simplicity)
+      for (const pkg of stalePackages.slice(0, 5)) { // Limit to 5 for background job
+        try {
+          if (pkg.repo_url) {
+            const match = pkg.repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+            if (match) {
+              const [, owner, repo] = match;
+              const githubData = await this.githubService.getRepositoryDetails(owner, repo);
+              await this.updatePackageFromGitHub(pkg.package_id, githubData);
+            }
+          }
+        } catch (error) {
+          console.warn(`Failed to refresh package ${pkg.package_name}:`, error.message);
+        }
+      }
+      
+      console.log(`Background refresh completed for ${stalePackages.length} packages`);
+    } catch (error) {
+      console.error('Background refresh error:', error.message);
+    }
+  }
+
+  // Quick NPM caching (minimal GitHub enrichment)
+  private async quickCacheNpmResults(npmResults: any[]): Promise<Package[]> {
+    const results: Package[] = [];
+    
+    for (const npmPkg of npmResults) {
+      try {
+        const packageData = this.transformNpmData(npmPkg);
+        const cached = await this.createOrUpdatePackage(packageData);
+        results.push(cached);
+      } catch (error) {
+        console.warn(`Failed to cache NPM package ${npmPkg.name}:`, error.message);
+      }
+    }
+    
+    return results;
+  }
+
+  // Quick GitHub caching
+  private async quickCacheGitHubResults(githubResults: any[]): Promise<Package[]> {
+    const results: Package[] = [];
+    
+    for (const repo of githubResults) {
+      try {
+        const packageData = this.transformGitHubData(repo);
+        const cached = await this.createOrUpdatePackage(packageData);
+        results.push(cached);
+      } catch (error) {
+        console.warn(`Failed to cache GitHub repo ${repo.name}:`, error.message);
+      }
+    }
+    
+    return results;
+  }
+
+  // Simple deduplication utility
+  private deduplicateByPackageId(packages: Package[]): Package[] {
+    const seen = new Set<string>();
+    return packages.filter(pkg => {
+      if (seen.has(pkg.package_id)) {
+        console.warn(`Duplicate package_id detected: ${pkg.package_id} (${pkg.package_name})`);
+        return false;
+      }
+      seen.add(pkg.package_id);
+      return true;
+    });
+  }
+
+  // Update existing package with GitHub data
+  private async updatePackageFromGitHub(packageId: string, githubData: any): Promise<void> {
+    await this.prisma.package.update({
+      where: { package_id: packageId },
+      data: {
+        stars: githubData.stargazers_count,
+        contributors: githubData.contributors_count || null,
+        pushed_at: new Date(githubData.pushed_at),
+        last_updated: new Date(githubData.updated_at),
+        fetched_at: new Date()
+      }
+    });
+  }
+
   private transformNpmData(npmPkg: any) {
     return {
       package_name: npmPkg.name,
