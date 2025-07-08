@@ -2,10 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Package } from 'generated/prisma';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 import { GitHubService } from '../services/github.service';
+import { NPMService } from '../services/npm.service';
 
 @Injectable()
 export class PackagesRepository {
-  constructor(private readonly prisma: PrismaService, private readonly githubService: GitHubService) {}
+  constructor(private readonly prisma: PrismaService, private readonly githubService: GitHubService, private readonly npmService: NPMService) {}
 
   async findPackageByUrl(repoUrl: string): Promise<Package | null> {
     return this.prisma.package.findUnique({
@@ -51,9 +52,8 @@ export class PackagesRepository {
     });
   }
 
-
   async searchPackages(name: string): Promise<Package[]> {
-    // 1. First, search in our database
+    // 1. First, search in our database (your existing logic)
     const dbResults = await this.findPackagesByName(name);
     
     if (dbResults.length > 0) {
@@ -67,13 +67,79 @@ export class PackagesRepository {
         return freshResults;
       }
     }
-
-    // 2. If no fresh data, search GitHub API
+  
+    // 2. If no fresh data, try NPM Registry first (no rate limits!)
+    console.log(`Searching NPM Registry for: ${name}`);
+    try {
+      const npmResults = await this.npmService.searchPackages(name, 10);
+      
+      if (npmResults.length > 0) {
+        // 3. Transform NPM results and enrich with GitHub data
+        const cachedResults: Package[] = [];
+        
+        for (const npmPkg of npmResults) {
+          try {
+            let packageData;
+            
+            if (npmPkg.repoUrl) {
+              // Extract owner/repo from GitHub URL
+              const match = npmPkg.repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+              if (match) {
+                const [, owner, repo] = match;
+                const githubData = await this.githubService.getRepositoryDetails(owner, repo);
+                
+                // Combine NPM + GitHub data (using your existing pattern)
+                packageData = {
+                  package_name: npmPkg.name,
+                  repo_name: githubData.full_name,
+                  repo_url: npmPkg.repoUrl,
+                  stars: githubData.stargazers_count,
+                  downloads: null,
+                  last_updated: new Date(githubData.updated_at),
+                  pushed_at: new Date(githubData.pushed_at),
+                  contributors: githubData.contributors_count || null,
+                  risk_score: null
+                };
+              } else {
+                // NPM package without valid GitHub URL
+                packageData = this.transformNpmData(npmPkg);
+              }
+            } else {
+              // NPM package without repository URL
+              packageData = this.transformNpmData(npmPkg);
+            }
+            
+            const cachedPackage = await this.createOrUpdatePackage(packageData);
+            cachedResults.push(cachedPackage);
+            
+          } catch (githubError) {
+            // If GitHub fails for individual package, still include NPM data
+            console.warn(`GitHub data failed for ${npmPkg.name}:`, githubError.message);
+            const packageData = this.transformNpmData(npmPkg);
+            const cachedPackage = await this.createOrUpdatePackage(packageData);
+            cachedResults.push(cachedPackage);
+          }
+        }
+        
+        console.log(`Cached ${cachedResults.length} packages from NPM`);
+        return cachedResults;
+      }
+      
+    } catch (npmError) {
+      console.warn('NPM Registry search failed, falling back to GitHub:', npmError.message);
+    }
+  
+    // 3. Fallback to your existing GitHub search logic
+    return this.searchGitHubFallback(name, dbResults);
+  }
+  
+  private async searchGitHubFallback(name: string, dbResults: Package[]): Promise<Package[]> {
+    // Your existing GitHub search logic as fallback
     console.log(`Searching GitHub API for: ${name}`);
     try {
       const gitHubResults = await this.githubService.searchRepositories(name);
       
-      // 3. Transform and cache the results
+      // Transform and cache the results (your existing logic)
       const cachedResults: Package[] = [];
       for (const gitHubRepo of gitHubResults) {
         const packageData = this.transformGitHubData(gitHubRepo);
@@ -85,7 +151,7 @@ export class PackagesRepository {
       return cachedResults;
       
     } catch (error) {
-      // 4. Fallback to stale database data if API fails
+      // Fallback to stale database data if API fails (your existing logic)
       if (dbResults.length > 0) {
         console.log('GitHub API failed, returning stale database results');
         return dbResults;
@@ -93,6 +159,20 @@ export class PackagesRepository {
       
       throw error;
     }
+  }
+  
+  private transformNpmData(npmPkg: any) {
+    return {
+      package_name: npmPkg.name,
+      repo_name: npmPkg.name,
+      repo_url: npmPkg.repoUrl || npmPkg.npmUrl || '',
+      stars: null,
+      downloads: null,
+      last_updated: npmPkg.lastUpdated,
+      pushed_at: npmPkg.lastUpdated,
+      contributors: null,
+      risk_score: npmPkg.score ? Math.round(npmPkg.score * 100) : null
+    };
   }
 
   async getPackageSummary(name: string): Promise<Package | null> {
@@ -151,7 +231,7 @@ export class PackagesRepository {
     return this.getPackageSummary(name);
   }
 
-  
+
   // TODO: Implement similar packages recommendation logic
   // - Analyze package categories/tags
   // - Find packages with similar usage patterns
