@@ -26,7 +26,7 @@ model User {
   @@map("users") // optional: map to existing table name if needed
 }
 
-model RepositoryMetadata {
+model Package {
   repo_id        String   @id @default(uuid())
   package_name   String
   downloads      Int?
@@ -55,7 +55,7 @@ model Watchlist {
   // Removed duplicated repo_url and repo_name
 
   // Relations
-  metadata                      RepositoryMetadata   @relation(fields: [repo_id], references: [repo_id])
+  package                       Package   @relation(fields: [repo_id], references: [repo_id])
   userWatchlistEntries          UserWatchlist[]
 }
 
