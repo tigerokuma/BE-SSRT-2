@@ -9,7 +9,7 @@ import { HistoryService } from './services/history.service';
 import { WatchlistRepository } from './repositories/watchlist.repository';
 import { PackagesRepository } from './repositories/packages.repository';
 import { HistoryRepository } from './repositories/history.repository';
-
+import { GitHubService } from './services/github.service';
 @Module({
   controllers: [
     WatchlistController,
@@ -23,6 +23,7 @@ import { HistoryRepository } from './repositories/history.repository';
     WatchlistRepository,
     PackagesRepository,
     HistoryRepository,
+    GitHubService,
   ],
 })
 export class WatchlistModule {}

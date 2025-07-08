@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param } from '@nestjs/common';
+import { Controller, Get, Query, Param, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PackagesService } from '../services/packages.service';
 
 @Controller('packages')
@@ -7,25 +7,53 @@ export class PackagesController {
 
   @Get('search')
   async searchPackages(@Query('name') name: string) {
-    // TODO: Implement package search functionality
-    return this.packagesService.searchPackages(name);
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('Package name is required');
+    }
+    
+    if (name.length < 2) {
+      throw new BadRequestException('Package name must be at least 2 characters');
+    }
+
+    return this.packagesService.searchPackages(name.trim());
   }
 
   @Get(':name/summary')
   async getPackageSummary(@Param('name') name: string) {
-    // TODO: Implement package summary retrieval
-    return this.packagesService.getPackageSummary(name);
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('Package name is required');
+    }
+
+    const result = await this.packagesService.getPackageSummary(name.trim());
+    
+    if (!result) {
+      throw new NotFoundException(`Package '${name}' not found`);
+    }
+
+    return result;
   }
 
   @Get(':name/details')
   async getPackageDetails(@Param('name') name: string) {
-    // TODO: Implement detailed package metadata retrieval
-    return this.packagesService.getPackageDetails(name);
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('Package name is required');
+    }
+
+    const result = await this.packagesService.getPackageDetails(name.trim());
+    
+    if (!result) {
+      throw new NotFoundException(`Package '${name}' not found`);
+    }
+
+    return result;
   }
 
   @Get(':name/similar')
   async getSimilarPackages(@Param('name') name: string) {
-    // TODO: Implement similar packages recommendation
-    return this.packagesService.getSimilarPackages(name);
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('Package name is required');
+    }
+
+    return this.packagesService.getSimilarPackages(name.trim());
   }
-} 
+}
