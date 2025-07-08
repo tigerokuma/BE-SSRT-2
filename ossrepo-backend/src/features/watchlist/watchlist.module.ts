@@ -9,7 +9,8 @@ import { HistoryService } from './services/history.service';
 import { WatchlistRepository } from './repositories/watchlist.repository';
 import { PackagesRepository } from './repositories/packages.repository';
 import { HistoryRepository } from './repositories/history.repository';
-
+import { GitHubService } from './services/github.service';
+import { NPMService } from './services/npm.service';
 @Module({
   controllers: [
     WatchlistController,
@@ -23,6 +24,8 @@ import { HistoryRepository } from './repositories/history.repository';
     WatchlistRepository,
     PackagesRepository,
     HistoryRepository,
+    GitHubService,
+    NPMService,
   ],
 })
 export class WatchlistModule {}

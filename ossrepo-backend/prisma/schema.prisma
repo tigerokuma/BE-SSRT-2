@@ -26,9 +26,11 @@ model User {
   @@map("users") // optional: map to existing table name if needed
 }
 
-model RepositoryMetadata {
-  repo_id        String   @id @default(uuid())
-  package_name   String
+model Package {
+  package_id     String   @id @default(uuid())
+  package_name   String                            // Not unique - can have duplicates
+  repo_url       String   @unique                   // Unique identifier!
+  repo_name      String
   downloads      Int?
   last_updated   DateTime?
   stars          Int?
@@ -36,8 +38,6 @@ model RepositoryMetadata {
   pushed_at      DateTime?
   risk_score     Float?
   fetched_at     DateTime?
-  repo_url       String
-  repo_name      String
 
   // Relations
   watchlists     Watchlist[]
@@ -45,17 +45,15 @@ model RepositoryMetadata {
 
 model Watchlist {
   watchlist_id                  String               @id @default(uuid())
-  repo_id                       String
-  alert_cve_ids                 String[]             // clearer as array of CVEs
+  package_id                    String               // Changed from repo_id
+  alert_cve_ids                 String[]
   updated_at                    DateTime?
   default_branch                String?
   latest_commit_sha            String?
   commits_since_last_health_update Int?
-  
-  // Removed duplicated repo_url and repo_name
 
   // Relations
-  metadata                      RepositoryMetadata   @relation(fields: [repo_id], references: [repo_id])
+  package                       Package              @relation(fields: [package_id], references: [package_id])  // Fixed both field names
   userWatchlistEntries          UserWatchlist[]
 }
 
