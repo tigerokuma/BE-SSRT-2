@@ -15,7 +15,18 @@ export class PackagesController {
       throw new BadRequestException('Package name must be at least 2 characters');
     }
 
-    return this.packagesService.searchPackages(name.trim());
+    const startTime = Date.now();
+    const results = await this.packagesService.searchPackages(name.trim());
+    const responseTime = Date.now() - startTime;
+    
+    console.log(`Search "${name}" completed in ${responseTime}ms, returned ${results.length} packages`);
+    
+    return {
+      query: name.trim(),
+      results,
+      count: results.length,
+      responseTime: `${responseTime}ms`
+    };
   }
 
   @Get(':name/summary')
