@@ -15,61 +15,75 @@ datasource db {
 }
 
 model User {
-  user_id         String            @id @default(uuid())
-  email           String            @unique
-  name            String?
-  created_at      DateTime          @default(now())
+  user_id    String   @id @default(uuid())
+  email      String   @unique
+  name       String?
+  created_at DateTime @default(now())
 
   // Relations
-  userWatchlists  UserWatchlist[]
+  userWatchlists UserWatchlist[]
 
   @@map("users") // optional: map to existing table name if needed
 }
 
 model Package {
-  package_id     String   @id @default(uuid())
-  package_name   String                            // Not unique - can have duplicates
-  repo_url       String   @unique                   // Unique identifier!
-  repo_name      String
-  downloads      Int?
-  last_updated   DateTime?
-  stars          Int?
-  contributors   Int?
-  pushed_at      DateTime?
-  risk_score     Float?
-  fetched_at     DateTime?
+  package_id   String    @id @default(uuid())
+  package_name String // Not unique - can have duplicates
+  repo_url     String    @unique // Unique identifier!
+  repo_name    String
+  downloads    Int?
+  last_updated DateTime?
+  stars        Int?
+  contributors Int?
+  pushed_at    DateTime?
+  risk_score   Float?
+  fetched_at   DateTime?
 
   // Relations
-  watchlists     Watchlist[]
+  watchlists Watchlist[]
 }
 
 model Watchlist {
-  watchlist_id                  String               @id @default(uuid())
-  package_id                    String               // Changed from repo_id
-  alert_cve_ids                 String[]
-  updated_at                    DateTime?
-  default_branch                String?
-  latest_commit_sha            String?
+  watchlist_id                     String    @id @default(uuid())
+  package_id                       String // Changed from repo_id
+  alert_cve_ids                    String[]
+  updated_at                       DateTime?
+  default_branch                   String?
+  latest_commit_sha                String?
   commits_since_last_health_update Int?
 
   // Relations
-  package                       Package              @relation(fields: [package_id], references: [package_id])  // Fixed both field names
-  userWatchlistEntries          UserWatchlist[]
+  package              Package         @relation(fields: [package_id], references: [package_id]) // Fixed both field names
+  userWatchlistEntries UserWatchlist[]
 }
 
 model UserWatchlist {
-  id           String    @id @default(uuid())
+  id           String   @id @default(uuid())
   user_id      String
   watchlist_id String
-  added_at     DateTime  @default(now())
+  added_at     DateTime @default(now())
   alerts       String?
   notes        String?
-  created_at   DateTime  @default(now())
+  created_at   DateTime @default(now())
 
   // Relations
-  watchlist    Watchlist @relation(fields: [watchlist_id], references: [watchlist_id])
-  user         User      @relation(fields: [user_id], references: [user_id])
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id])
+  user      User      @relation(fields: [user_id], references: [user_id])
 
   @@index([user_id])
   @@index([watchlist_id])
+}
+
+model BuildTask {
+  task_id     String    @id @default(uuid())
+  repo_id     String
+  status      String // e.g., 'queued', 'in_progress', 'completed', 'failed'
+  logs        String[]
+  created_at  DateTime  @default(now())
+  started_at  DateTime?
+  finished_at DateTime?
+  // Optionally add commit_id, assigned_to, retry_count, etc.
+  commit_id   String?
+  assigned_to String?
+  retry_count Int       @default(0)
 }
