@@ -1,67 +1,39 @@
--- Table: build_tasks
-CREATE TABLE build_tasks (
-  task_id      UUID PRIMARY KEY,
-  repo_id      UUID NOT NULL,
-  repo_path    TEXT NOT NULL,
-  status       TEXT NOT NULL CHECK (status IN ('queued', 'in_progress', 'completed', 'failed')),
-  created_at   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-  started_at   TIMESTAMPTZ,
-  finished_at  TIMESTAMPTZ,
-  logs         TEXT[],
-  assigned_to  TEXT,
-  retry_count  INTEGER DEFAULT 0
-);
+## Table: graphs
 
--- Table: build_subtasks
-CREATE TABLE build_subtasks (
-  subtask_id   UUID PRIMARY KEY,
-  task_id      UUID REFERENCES build_tasks(task_id) ON DELETE CASCADE,
-  language     TEXT NOT NULL,
-  commit_id    TEXT,  -- nullable for timestamp/manual builds
-  status       TEXT CHECK (status IN ('queued', 'in_progress', 'completed', 'failed')),
-  analyzer     TEXT,
-  started_at   TIMESTAMPTZ,
-  finished_at  TIMESTAMPTZ,
-  graph_type   TEXT[],
-  logs         TEXT[]
-);
+- repo_id               UUID PRIMARY KEY
+- current_snapshot_id   UUID REFERENCES graph_snapshots(snapshot_id)
+- status                TEXT CHECK (status IN ('none','pending','in_progress','ready','error'))
+- last_updated          TIMESTAMPTZ
+- last_error            TEXT
 
--- Table: graph_snapshots
-CREATE TABLE graph_snapshots (
-  snapshot_id  UUID PRIMARY KEY,
-  subtask_id   UUID REFERENCES build_subtasks(subtask_id) ON DELETE CASCADE,
-  repo_id      UUID NOT NULL,
-  commit_id    TEXT,    -- nullable for timestamp/manual snapshots
-  language     TEXT NOT NULL,
-  graph_type   TEXT NOT NULL,
-  version      INTEGER NOT NULL,
-  created_at   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-  node_count   INTEGER,
-  edge_count   INTEGER,
-  s3_url       TEXT,
-  status       TEXT CHECK (status IN ('stored', 'invalidated', 'expired'))
-);
+## Table: graph_exports
 
--- Table: graph_nodes
-CREATE TABLE graph_nodes (
-  node_id      UUID PRIMARY KEY,
-  snapshot_id  UUID REFERENCES graph_snapshots(snapshot_id),
-  type         TEXT NOT NULL,
-  name         TEXT,
-  file_path    TEXT,
-  commit_id    TEXT,
-  metadata     JSONB
-);
-CREATE INDEX idx_graph_nodes_snapshot ON graph_nodes(snapshot_id);
-CREATE INDEX idx_graph_nodes_name ON graph_nodes(name);
+- export_id     UUID PRIMARY KEY
+- repo_id       UUID REFERENCES graphs(repo_id)
+- snapshot_id   UUID REFERENCES graph_snapshots(snapshot_id)
+- format        TEXT CHECK (format IN ('graphml','json'))
+- request_time  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+- ready_time    TIMESTAMPTZ
+- s3_url        TEXT
+- status        TEXT CHECK (status IN ('queued','in_progress','ready','failed'))
+- actor         TEXT
 
--- Table: graph_edges
-CREATE TABLE graph_edges (
-  edge_id      UUID PRIMARY KEY,
-  snapshot_id  UUID REFERENCES graph_snapshots(snapshot_id),
-  source_id    UUID REFERENCES graph_nodes(node_id),
-  target_id    UUID REFERENCES graph_nodes(node_id),
-  relation     TEXT,
-  metadata     JSONB
-);
-CREATE INDEX idx_graph_edges_rel ON graph_edges(relation);
+## Table: graph_views
+
+- view_id      UUID PRIMARY KEY
+- repo_id      UUID REFERENCES graphs(repo_id)
+- snapshot_id  UUID REFERENCES graph_snapshots(snapshot_id)
+- generated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+- status       TEXT CHECK (status IN ('generating','ready','error'))
+- actor        TEXT
+
+## Table: service_logs
+
+- log_id      UUID PRIMARY KEY
+- endpoint    TEXT
+- repo_id     UUID
+- actor       TEXT
+- timestamp   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+- status      INTEGER
+- latency_ms  INTEGER
+- details     JSONB

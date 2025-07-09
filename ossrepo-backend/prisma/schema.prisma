@@ -87,3 +87,14 @@ model BuildTask {
   assigned_to String?
   retry_count Int       @default(0)
 }
+
+model GraphExport {
+  export_id  String    @id @default(uuid())
+  repo_id    String
+  format     String
+  ready_time DateTime?
+  s3_url     String?
+  status     String
+  actor      String?
+  created_at DateTime  @default(now())
+}
