@@ -61,7 +61,7 @@ export class AppModule {}
 ```typescript
 // src/features/graph/graph.module.ts
 import { Module } from '@nestjs/common';
-import { GraphController } from './controllers/graph.controller';
+import { GraphController } from './controllers/graph.controllers';
 import { GraphService } from './services/graph.service';
 import { GraphRepository } from './repositories/graph.repository';
 
@@ -76,7 +76,7 @@ export class GraphModule {}
 ### 4. Implement REST Endpoints
 
 ```typescript
-// src/features/graph/controllers/graph.controller.ts
+// src/features/graph/controllers/graph.controllers.ts
 @Controller('graph')
 export class GraphController {
   constructor(private readonly graphService: GraphService) {}
