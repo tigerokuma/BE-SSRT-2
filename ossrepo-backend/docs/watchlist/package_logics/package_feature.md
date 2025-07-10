@@ -33,11 +33,6 @@ flowchart TD
     
     G --> K[🔄 Background: Refresh Stale Data]
     K --> L[Update Cache for Next Request]
-    
-    style F fill:#90EE90
-    style G fill:#87CEEB  
-    style J fill:#FFE4B5
-    style K fill:#E6E6FA
 ```
 
 ---

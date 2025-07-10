@@ -22,35 +22,58 @@ export class PackagesRepository {
 
   async createOrUpdatePackage(packageData: Partial<Package>): Promise<Package> {
     return this.prisma.package.upsert({
-      where: { repo_url: packageData.repo_url! },  // Use repo_url for lookup
+      where: { repo_url: packageData.repo_url! },
       update: {
-
-        // Update these fields:
-        package_name: packageData.package_name,
-        repo_name: packageData.repo_name,
-        downloads: packageData.downloads,
-        last_updated: packageData.last_updated,
-        stars: packageData.stars,
-        contributors: packageData.contributors,
-        pushed_at: packageData.pushed_at,
-        risk_score: packageData.risk_score,
-        fetched_at: new Date()
-      },
-      create: {
-        // Create needs all required fields:
-        repo_url: packageData.repo_url!,        // Required unique field
-        package_name: packageData.package_name!,
-        repo_name: packageData.repo_name || '',
-        downloads: packageData.downloads,
-        last_updated: packageData.last_updated,
-        stars: packageData.stars,
-        contributors: packageData.contributors,
-        pushed_at: packageData.pushed_at,
-        risk_score: packageData.risk_score,
-        fetched_at: new Date()
-      }
-    });
-  }
+      // Existing fields
+      package_name: packageData.package_name,
+      repo_name: packageData.repo_name,
+      downloads: packageData.downloads,
+      last_updated: packageData.last_updated,
+      stars: packageData.stars,
+      contributors: packageData.contributors,
+      pushed_at: packageData.pushed_at,
+      risk_score: packageData.risk_score,
+      fetched_at: new Date(),
+      
+      // NEW: Add the NPM summary fields
+      description: packageData.description,
+      version: packageData.version,
+      published_at: packageData.published_at,
+      maintainers: packageData.maintainers,
+      keywords: packageData.keywords,
+      npm_url: packageData.npm_url,
+      homepage: packageData.homepage,
+      license: packageData.license,
+      forks: packageData.forks // NEW: Add forks
+    },
+    create: {
+      // Required fields
+      repo_url: packageData.repo_url!,
+      package_name: packageData.package_name!,
+      repo_name: packageData.repo_name || '',
+      
+      // Existing fields
+      downloads: packageData.downloads,
+      last_updated: packageData.last_updated,
+      stars: packageData.stars,
+      contributors: packageData.contributors,
+      pushed_at: packageData.pushed_at,
+      risk_score: packageData.risk_score,
+      fetched_at: new Date(),
+      
+      // NEW: Add the NPM summary fields
+      description: packageData.description,
+      version: packageData.version,
+      published_at: packageData.published_at,
+      maintainers: packageData.maintainers || [],
+      keywords: packageData.keywords || [],
+      npm_url: packageData.npm_url,
+      homepage: packageData.homepage,
+      license: packageData.license,
+      forks: packageData.forks // NEW: Add forks
+    }
+  });
+}
 
   async searchPackages(name: string): Promise<Package[]> {
     console.log(`Searching for packages: ${name}`);
@@ -171,14 +194,51 @@ export class PackagesRepository {
     }
   }
 
-  // Quick NPM caching (minimal GitHub enrichment)
+  // Enhanced NPM caching with complete data
   private async quickCacheNpmResults(npmResults: any[]): Promise<Package[]> {
     const results: Package[] = [];
     
     for (const npmPkg of npmResults) {
       try {
-        const packageData = this.transformNpmData(npmPkg);
-        const cached = await this.createOrUpdatePackage(packageData);
+        // Get basic search data
+        const basicData = this.transformNpmData(npmPkg);
+        
+        // ENHANCED: Fetch complete package details
+        const detailedData = await this.npmService.getPackageDetails(npmPkg.name);
+        
+        // Merge basic + detailed data
+        const completeData = {
+          ...basicData,
+          // Override with detailed info
+          description: detailedData?.description || basicData.description,
+          homepage: detailedData?.homepage,
+          keywords: detailedData?.keywords || [],
+          license: detailedData?.license,
+          // Keep the repo URL from GitHub if available
+          repo_url: detailedData?.repoUrl || basicData.repo_url,
+        };
+        
+        // If we have a GitHub repo, enrich with GitHub data too
+        if (completeData.repo_url && completeData.repo_url.includes('github.com')) {
+          try {
+            const match = completeData.repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+            if (match) {
+              const [, owner, repo] = match;
+              const githubData = await this.githubService.getRepositoryDetails(owner, repo);
+              
+              // Merge NPM + GitHub data for complete package info
+              completeData.stars = githubData.stargazers_count;
+              completeData.contributors = githubData.contributors_count || null;
+              completeData.repo_name = githubData.full_name;
+              // Keep NPM description if better, otherwise use GitHub
+              completeData.description = completeData.description || githubData.description;
+            }
+          } catch (githubError) {
+            console.warn(`Failed to enrich ${npmPkg.name} with GitHub data:`, githubError.message);
+          }
+        }
+        
+        const cached = await this.createOrUpdatePackage(completeData);
         results.push(cached);
       } catch (error) {
         console.warn(`Failed to cache NPM package ${npmPkg.name}:`, error.message);
@@ -232,19 +292,6 @@ export class PackagesRepository {
     });
   }
 
-  private transformNpmData(npmPkg: any) {
-    return {
-      package_name: npmPkg.name,
-      repo_name: npmPkg.name,
-      repo_url: npmPkg.repoUrl || npmPkg.npmUrl || '',
-      stars: null,
-      downloads: null,
-      last_updated: npmPkg.lastUpdated,
-      pushed_at: npmPkg.lastUpdated,
-      contributors: null,
-      risk_score: npmPkg.score ? Math.round(npmPkg.score * 100) : null
-    };
-  }
 
   async getPackageSummary(name: string): Promise<Package | null> {
     // 1. Try to find by exact package name
@@ -281,17 +328,51 @@ export class PackagesRepository {
     return hoursAgo < 12; // Fresh if less than 12 hours old
   }
 
+  private transformNpmData(npmPkg: any) {
+    return {
+      package_name: npmPkg.name,
+      repo_name: npmPkg.name,
+      repo_url: npmPkg.repoUrl || npmPkg.npmUrl || '',
+      stars: null, // Will be filled by GitHub API
+      downloads: npmPkg.weeklyDownloads,
+      last_updated: npmPkg.lastUpdated,
+      pushed_at: npmPkg.lastUpdated,
+      contributors: null, // Will be filled by GitHub API
+      risk_score: npmPkg.score ? Math.round(npmPkg.score * 100) : null,
+      
+      // NPM fields
+      description: npmPkg.description,
+      version: npmPkg.version,
+      published_at: npmPkg.lastUpdated,
+      maintainers: [], // Will be enhanced by getPackageDetails
+      keywords: npmPkg.keywords || [],
+      npm_url: `https://npm.im/${npmPkg.name}`,
+      homepage: null, // Will be enhanced by getPackageDetails
+      license: null // Will be enhanced by getPackageDetails
+    };
+  }
+  
   private transformGitHubData(gitHubRepo: any) {
     return {
       package_name: gitHubRepo.name,
       repo_name: gitHubRepo.full_name,
       repo_url: gitHubRepo.html_url,
       stars: gitHubRepo.stargazers_count,
+      forks: gitHubRepo.forks_count,                    // NEW: Add forks
+      contributors: gitHubRepo.contributors_count || null,
       last_updated: new Date(gitHubRepo.updated_at),
       pushed_at: new Date(gitHubRepo.pushed_at),
-      contributors: gitHubRepo.contributors_count || null,
       downloads: null,
-      risk_score: null
+      risk_score: null,
+      
+      description: gitHubRepo.description,
+      version: null,
+      published_at: new Date(gitHubRepo.created_at),
+      maintainers: [gitHubRepo.owner?.login || ''],
+      keywords: gitHubRepo.topics || [],
+      npm_url: null,
+      homepage: gitHubRepo.homepage,
+      license: gitHubRepo.license?.spdx_id
     };
   }
 
