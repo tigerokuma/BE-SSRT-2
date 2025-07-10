@@ -37,13 +37,13 @@ describe('Graph Build Task (e2e)', () => {
   });
 
   it('/graph/build/:repoId (POST) should trigger a build', async () => {
-    const repoId = 'XiaoxinHe/Awesome-Graph-LLM'; // <--- use org/repo
-    const payload = { commitId: 'fc0d44b' };
+    const repoId = 'microsoft/vscode'; // <--- use org/repo
+    const payload = { commitId: '01d4012' };
 
     const res = await request(app.getHttpServer())
       .post(`/graph/build/${encodeURIComponent(repoId)}`) // encode if repoId has slashes
       .send(payload)
-      .expect(202); // match your actual endpoint status
+      .expect(202);
 
     expect(res.body).toHaveProperty('message', 'Build triggered');
     expect(res.body).toHaveProperty('repoId', repoId);
@@ -52,7 +52,7 @@ describe('Graph Build Task (e2e)', () => {
   });
 
   it('/graph/status/:repoId (GET) should return latest build status', async () => {
-    const repoId = 'XiaoxinHe/Awesome-Graph-LLM';
+    const repoId = 'microsoft/vscode';
 
     const res = await request(app.getHttpServer())
       .get(`/graph/status/${encodeURIComponent(repoId)}`)

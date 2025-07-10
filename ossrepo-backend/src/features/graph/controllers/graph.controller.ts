@@ -1,4 +1,4 @@
-import {Controller, Post, Get, Param, Body, Query} from '@nestjs/common';
+import {Controller, Post, Get, Param, Body, Query, HttpCode} from '@nestjs/common';
 import {GraphService} from '../services/graph.service';
 import {TriggerBuildDto} from '../dto/trigger-build.dto';
 import {BuildResponseDto} from '../dto/build-response.dto';
@@ -11,6 +11,7 @@ export class GraphController {
     }
 
     @Post('build/:repoId')
+    @HttpCode(202)
     async triggerBuild(
         @Param('repoId') repoId: string,
         @Body() dto: TriggerBuildDto

@@ -75,17 +75,31 @@ model UserWatchlist {
 }
 
 model BuildTask {
-  task_id     String    @id @default(uuid())
-  repo_id     String
-  status      String // e.g., 'queued', 'in_progress', 'completed', 'failed'
-  logs        String[]
+  task_id      String         @id @default(uuid())
+  repo_id      String
+  status       String // e.g., 'queued', 'in_progress', 'completed', 'failed'
+  logs         String[]
+  created_at   DateTime       @default(now())
+  started_at   DateTime?
+  finished_at  DateTime?
+  // Optionally add commit_id, assigned_to, retry_count, etc.
+  commit_id    String?
+  assigned_to  String?
+  retry_count  Int            @default(0)
+  BuildSubtask BuildSubtask[]
+}
+
+model BuildSubtask {
+  subtask_id  String    @id @default(uuid())
+  buildTask   BuildTask @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
+  task_id     String
+  language    String // e.g., 'python', 'java', etc.
+  step        String // e.g., 'parse', 'graph', 'save'
+  status      String // e.g., 'pending', 'in_progress', 'completed', 'failed'
+  message     String? // details, errors, etc.
   created_at  DateTime  @default(now())
   started_at  DateTime?
   finished_at DateTime?
-  // Optionally add commit_id, assigned_to, retry_count, etc.
-  commit_id   String?
-  assigned_to String?
-  retry_count Int       @default(0)
 }
 
 model GraphExport {
