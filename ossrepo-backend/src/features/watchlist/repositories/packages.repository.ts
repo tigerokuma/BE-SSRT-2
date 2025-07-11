@@ -120,8 +120,9 @@ export class PackagesRepository {
         ]
       },
       orderBy: [
-        { package_name: 'asc' },  // Exact matches first
-        { stars: 'desc' },        // Popular packages first
+        { package_name: 'asc' },  //  Exact matches first
+        { downloads: 'desc' },    //  Most weekly downloads first
+        { stars: 'desc' },        //  Then by stars
         { fetched_at: 'desc' }    // Fresh data first
       ],
       take: 20  // Limit results for performance
@@ -434,24 +435,6 @@ export class PackagesRepository {
     // For now, use the same logic as getPackageSummary
     // Later you can add more detailed logic here
     return this.getPackageSummary(name);
-  }
-
-
-  // Similar packages recommendation based on name matching
-  async getSimilarPackages(name: string): Promise<Package[]> {
-    // Simple implementation: search for packages with similar names
-    if (name.length < 2) return [];
-    
-    try {
-      const results = await this.searchPackages(name);
-      // Return up to 5 similar packages, excluding exact matches
-      return results
-        .filter(pkg => pkg.package_name !== name)
-        .slice(0, 5);
-    } catch (error) {
-      console.error('Error finding similar packages:', error);
-      return [];
-    }
   }
 
   async cachePackageData(packageName: string, data: any) {
