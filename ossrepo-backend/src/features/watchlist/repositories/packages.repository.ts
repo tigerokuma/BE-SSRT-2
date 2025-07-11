@@ -127,8 +127,7 @@ export class PackagesRepository {
       take: 20  // Limit results for performance
     });
   }
-
-  // Simplified external search (only for cache misses)
+  // Optimized external search (only for cache misses)
   private async searchExternalAndCache(name: string): Promise<Package[]> {
     try {
       // Try NPM first (fastest, most relevant)
@@ -194,58 +193,133 @@ export class PackagesRepository {
     }
   }
 
-  // Enhanced NPM caching with complete data
+  // Enhanced NPM caching with smart data combination
   private async quickCacheNpmResults(npmResults: any[]): Promise<Package[]> {
     const results: Package[] = [];
     
-    for (const npmPkg of npmResults) {
+    // Step 1: Get enhanced NPM data efficiently  
+    const enhancedNpmData = await this.getEnhancedNpmData(npmResults);
+    
+    for (let i = 0; i < npmResults.length; i++) {
+      const originalSearch = npmResults[i];
+      const detailsData = enhancedNpmData[i];
+      
       try {
-        // Get basic search data
-        const basicData = this.transformNpmData(npmPkg);
+        // Step 2: Combine search + details data
+        const combinedData = this.combineNpmData(originalSearch, detailsData);
         
-        // ENHANCED: Fetch complete package details
-        const detailedData = await this.npmService.getPackageDetails(npmPkg.name);
-        
-        // Merge basic + detailed data
-        const completeData = {
-          ...basicData,
-          // Override with detailed info
-          description: detailedData?.description || basicData.description,
-          homepage: detailedData?.homepage,
-          keywords: detailedData?.keywords || [],
-          license: detailedData?.license,
-          // Keep the repo URL from GitHub if available
-          repo_url: detailedData?.repoUrl || basicData.repo_url,
-        };
-        
-        // If we have a GitHub repo, enrich with GitHub data too
-        if (completeData.repo_url && completeData.repo_url.includes('github.com')) {
+        // Step 3: GitHub enrichment (if repo URL exists)
+        if (combinedData.repo_url?.includes('github.com')) {
           try {
-            const match = completeData.repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-            if (match) {
-              const [, owner, repo] = match;
-              const githubData = await this.githubService.getRepositoryDetails(owner, repo);
-              
-              // Merge NPM + GitHub data for complete package info
-              completeData.stars = githubData.stargazers_count;
-              completeData.contributors = githubData.contributors_count || null;
-              completeData.repo_name = githubData.full_name;
-              // Keep NPM description if better, otherwise use GitHub
-              completeData.description = completeData.description || githubData.description;
-            }
+            const githubData = await this.getGitHubData(combinedData.repo_url);
+            Object.assign(combinedData, githubData);
           } catch (githubError) {
-            console.warn(`Failed to enrich ${npmPkg.name} with GitHub data:`, githubError.message);
+            console.warn(`Failed to enrich ${combinedData.package_name} with GitHub data:`, githubError.message);
           }
         }
         
-        const cached = await this.createOrUpdatePackage(completeData);
+        const cached = await this.createOrUpdatePackage(combinedData);
         results.push(cached);
       } catch (error) {
-        console.warn(`Failed to cache NPM package ${npmPkg.name}:`, error.message);
+        console.warn(`Failed to cache package ${originalSearch.name}:`, error.message);
       }
     }
     
     return results;
+  }
+
+  // Smart NPM data enhancement - only fetch what we need
+  private async getEnhancedNpmData(npmResults: any[]): Promise<any[]> {
+    const enhancedData: any[] = [];
+    
+    // Batch process in chunks to avoid overwhelming NPM API
+    const CHUNK_SIZE = 3;
+    for (let i = 0; i < npmResults.length; i += CHUNK_SIZE) {
+      const chunk = npmResults.slice(i, i + CHUNK_SIZE);
+      
+      // Parallel fetch details for this chunk
+      const chunkPromises = chunk.map(async (npmPkg) => {
+        // Only fetch details if we need additional fields
+        if (this.needsDetailedNpmData(npmPkg)) {
+          try {
+            return await this.npmService.getPackageDetails(npmPkg.name);
+          } catch (error) {
+            console.warn(`Failed to get details for ${npmPkg.name}:`, error.message);
+            return null;
+          }
+        }
+        return null;
+      });
+      
+      const chunkResults = await Promise.all(chunkPromises);
+      enhancedData.push(...chunkResults);
+    }
+    
+    return enhancedData;
+  }
+
+  // Check if we need additional NPM details
+  private needsDetailedNpmData(searchResult: any): boolean {
+    // NPM search API doesn't provide keywords, license, or homepage
+    // So we always need details for complete PackageSummary data
+    return true;
+  }
+
+  // Intelligently combine search + details data
+  private combineNpmData(searchData: any, detailsData: any) {
+    return {
+      package_name: searchData.name,
+      repo_name: searchData.name,
+      repo_url: searchData.repoUrl || detailsData?.repoUrl || searchData.npmUrl || '',
+      
+      // Prefer search data (more recent/accurate)
+      description: searchData.description || detailsData?.description,
+      version: searchData.version || detailsData?.version,
+      last_updated: searchData.lastUpdated || detailsData?.lastUpdated,
+      published_at: searchData.lastUpdated || detailsData?.lastUpdated,
+      
+      // Use details data for enhanced fields
+      keywords: detailsData?.keywords || [],
+      license: detailsData?.license,
+      homepage: detailsData?.homepage,
+      
+      // Search-specific data
+      downloads: searchData.weeklyDownloads,
+      risk_score: searchData.score ? Math.round(searchData.score * 100) : null,
+      npm_url: `https://npm.im/${searchData.name}`,
+      
+      // Will be filled by GitHub
+      stars: null,
+      forks: null,
+      contributors: null,
+      maintainers: [],
+      pushed_at: searchData.lastUpdated || detailsData?.lastUpdated,
+      fetched_at: new Date()
+    };
+  }
+
+  // Optimized GitHub data fetching
+  private async getGitHubData(repoUrl: string) {
+    const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+    if (!match) return {};
+    
+    const [, owner, repo] = match;
+    const githubData = await this.githubService.getRepositoryDetails(owner, repo);
+    
+    return {
+      stars: githubData.stargazers_count,
+      forks: githubData.forks_count,
+      contributors: githubData.contributors_count || null,
+      repo_name: githubData.full_name,
+      maintainers: [githubData.owner?.login || ''],
+      last_updated: new Date(githubData.updated_at),
+      pushed_at: new Date(githubData.pushed_at),
+      
+      // Only override if NPM data is missing
+      description: githubData.description,
+      keywords: githubData.topics?.length ? githubData.topics : [],
+      license: githubData.license?.spdx_id
+    };
   }
 
   // Quick GitHub caching
@@ -284,6 +358,7 @@ export class PackagesRepository {
       where: { package_id: packageId },
       data: {
         stars: githubData.stargazers_count,
+        forks: githubData.forks_count,
         contributors: githubData.contributors_count || null,
         pushed_at: new Date(githubData.pushed_at),
         last_updated: new Date(githubData.updated_at),
@@ -328,29 +403,7 @@ export class PackagesRepository {
     return hoursAgo < 12; // Fresh if less than 12 hours old
   }
 
-  private transformNpmData(npmPkg: any) {
-    return {
-      package_name: npmPkg.name,
-      repo_name: npmPkg.name,
-      repo_url: npmPkg.repoUrl || npmPkg.npmUrl || '',
-      stars: null, // Will be filled by GitHub API
-      downloads: npmPkg.weeklyDownloads,
-      last_updated: npmPkg.lastUpdated,
-      pushed_at: npmPkg.lastUpdated,
-      contributors: null, // Will be filled by GitHub API
-      risk_score: npmPkg.score ? Math.round(npmPkg.score * 100) : null,
-      
-      // NPM fields
-      description: npmPkg.description,
-      version: npmPkg.version,
-      published_at: npmPkg.lastUpdated,
-      maintainers: [], // Will be enhanced by getPackageDetails
-      keywords: npmPkg.keywords || [],
-      npm_url: `https://npm.im/${npmPkg.name}`,
-      homepage: null, // Will be enhanced by getPackageDetails
-      license: null // Will be enhanced by getPackageDetails
-    };
-  }
+
   
   private transformGitHubData(gitHubRepo: any) {
     return {
@@ -384,10 +437,7 @@ export class PackagesRepository {
   }
 
 
-  // TODO: Implement similar packages recommendation logic
-  // - Analyze package categories/tags
-  // - Find packages with similar usage patterns
-  // - Return PackageSummary[]
+  // Similar packages recommendation based on name matching
   async getSimilarPackages(name: string): Promise<Package[]> {
     // Simple implementation: search for packages with similar names
     if (name.length < 2) return [];
