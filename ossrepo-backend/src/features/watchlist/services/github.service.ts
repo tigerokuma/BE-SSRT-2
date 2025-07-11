@@ -54,18 +54,4 @@ export class GitHubService {
       'User-Agent': 'OSS-Repository-Backend'
     };
   }
-
-  private transformGitHubData(gitHubRepo: any) {
-    return {
-      package_name: gitHubRepo.name,
-      repo_name: gitHubRepo.full_name,
-      repo_url: gitHubRepo.html_url,
-      stars: gitHubRepo.stargazers_count,
-      last_updated: new Date(gitHubRepo.updated_at),
-      pushed_at: new Date(gitHubRepo.pushed_at),
-      contributors: gitHubRepo.contributors_count || null,
-      downloads: null, // GitHub doesn't provide download counts
-      risk_score: null // Will be calculated separately
-    };
-  }
 }

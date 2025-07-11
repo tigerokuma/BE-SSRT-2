@@ -8,10 +8,9 @@ The package feature provides a streamlined API with just two focused endpoints:
 
 ```
 GET /packages/search?name=QUERY       // Package discovery - returns array of packages
-GET /packages/:name                   // Single package details with flexible views
+GET /packages/:name                   // Single package details (default: summary view)
 GET /packages/:name?view=details      // Full details view
-GET /packages/:name?view=summary      // Explicit summary view (default)
-GET /packages/:name?fields=name,stars // Custom fields selection
+GET /packages/:name?view=summary      // Explicit summary view
 ```
 
 ### Package Discovery
@@ -89,29 +88,16 @@ Returns complete metadata for analysis (~600 bytes):
 }
 ```
 
-**Custom Fields:**
-```bash
-curl "http://localhost:3000/packages/react?fields=name,stars,downloads"
-```
-Returns only requested fields:
-```json
-{
-  "name": "react",
-  "stars": 206000,
-  "downloads": 18500000
-}
-```
-
 ### View Differences
 
-| Feature | Search | Summary | Details | Custom |
-|---------|--------|---------|---------|---------|
-| **Returns** | Array of packages | Single package | Single package | Single package |
-| **Size** | ~2-5KB | ~200 bytes | ~600 bytes | Variable |
-| **Dates** | String format | String format | Full Date objects | Based on request |
-| **Fields** | 8 card fields | 8 card fields | 17 total fields | User-defined |
-| **Use Case** | Discovery, search | Library cards | Analysis, admin | Optimized queries |
-| **Contains** | Card essentials | Card essentials | Everything | Custom selection |
+| Feature | Search | Summary | Details |
+|---------|--------|---------|---------|
+| **Returns** | Array of packages | Single package | Single package |
+| **Size** | ~2-5KB | ~200 bytes | ~600 bytes |
+| **Dates** | String format | String format | Full Date objects |
+| **Fields** | 8 card fields | 8 card fields | 16 total fields |
+| **Use Case** | Discovery, search | Library cards | Analysis, admin |
+| **Contains** | Card essentials | Card essentials | Everything |
 
 ### Error Handling
 
@@ -128,10 +114,11 @@ Returns only requested fields:
 
 ### Implementation Details
 
-The clean API structure uses intelligent data fetching:
-1. **Search requests**: Database-first with external API fallback
-2. **Summary requests**: Uses lightweight database queries
-3. **Details/Custom requests**: Fetches complete data for field flexibility
-4. **Field mapping**: Internal database fields mapped to clean API response
+The clean API structure uses separate DTOs for clarity:
+1. **PackageCardDto**: 8 essential fields for library cards
+2. **PackageDetailsDto**: Extends PackageCardDto with 8 additional fields  
+3. **Search requests**: Database-first with external API fallback
+4. **Summary requests**: Returns PackageCardDto with lightweight queries
+5. **Details requests**: Returns PackageDetailsDto with complete data
 
-This approach provides maximum flexibility with minimal API surface area, making it easy to understand and use.
+This approach provides maximum clarity with minimal complexity, making it easy to understand and maintain.

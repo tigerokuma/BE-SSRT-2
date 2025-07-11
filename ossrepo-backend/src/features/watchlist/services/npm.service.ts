@@ -79,21 +79,6 @@ export class NPMService {
     }
   }
 
-  async getDownloadStats(packageName: string, period: string = 'last-week') {
-    try {
-      const response = await axios.get(`${this.npmDownloadsUrl}/point/${period}/${encodeURIComponent(packageName)}`);
-      return {
-        downloads: response.data.downloads,
-        start: response.data.start,
-        end: response.data.end,
-        period: period
-      };
-    } catch (error) {
-      console.error(`NPM downloads API error for ${packageName}:`, error);
-      return null;
-    }
-  }
-
   private extractGitHubUrl(repoUrl: string): string | null {
     if (!repoUrl) return null;
     

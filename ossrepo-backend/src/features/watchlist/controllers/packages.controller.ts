@@ -32,8 +32,7 @@ export class PackagesController {
   @Get(':name')
   async getPackage(
     @Param('name') name: string,
-    @Query('view') view?: 'summary' | 'details',
-    @Query('fields') fields?: string
+    @Query('view') view?: 'summary' | 'details'
   ) {
     if (!name || name.trim().length === 0) {
       throw new BadRequestException('Package name is required');
@@ -44,19 +43,10 @@ export class PackagesController {
       throw new BadRequestException('View parameter must be "summary" or "details"');
     }
 
-    // Parse custom fields if provided
-    let customFields: string[] | undefined;
-    if (fields) {
-      customFields = fields.split(',').map(field => field.trim()).filter(field => field.length > 0);
-      if (customFields.length === 0) {
-        throw new BadRequestException('Fields parameter must contain at least one valid field name');
-      }
-    }
+    // Default to summary view if no view specified
+    const selectedView = view || 'summary';
 
-    // Default to summary view if no view or fields specified
-    const selectedView = view || (customFields ? 'custom' : 'summary');
-
-    const result = await this.packagesService.getPackage(name.trim(), selectedView, customFields);
+    const result = await this.packagesService.getPackage(name.trim(), selectedView);
     
     if (!result) {
       throw new NotFoundException(`Package '${name}' not found`);

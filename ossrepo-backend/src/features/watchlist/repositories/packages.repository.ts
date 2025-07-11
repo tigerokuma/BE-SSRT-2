@@ -14,12 +14,6 @@ export class PackagesRepository {
     });
   }
 
-  async findPackagesByName(packageName: string): Promise<Package[]> {
-    return this.prisma.package.findMany({
-      where: { package_name: packageName }
-    });
-  }
-
   async createOrUpdatePackage(packageData: Partial<Package>): Promise<Package> {
     return this.prisma.package.upsert({
       where: { repo_url: packageData.repo_url! },
@@ -125,7 +119,7 @@ export class PackagesRepository {
         { stars: 'desc' },        //  Then by stars
         { fetched_at: 'desc' }    // Fresh data first
       ],
-      take: 20  // Limit results for performance
+      take: 10  // Limit to 10 for user journey (library cards)
     });
   }
   // Optimized external search (only for cache misses)
@@ -435,12 +429,5 @@ export class PackagesRepository {
     // For now, use the same logic as getPackageSummary
     // Later you can add more detailed logic here
     return this.getPackageSummary(name);
-  }
-
-  async cachePackageData(packageName: string, data: any) {
-    // TODO: Implement caching mechanism
-    // - Store package data in cache (Redis, etc.)
-    // - Set appropriate TTL
-    throw new Error('Not implemented');
   }
 } 

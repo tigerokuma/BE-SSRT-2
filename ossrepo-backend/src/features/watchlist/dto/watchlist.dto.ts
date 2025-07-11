@@ -18,34 +18,28 @@ export class WatchlistItem {
   updatedAt?: Date;
 }
 
-// Unified package response for both summary and details
-export class PackageResponse {
-  // Basic package info
-  package_id?: string;          // Only in details
+// Clean DTOs for package responses
+export class PackageCardDto {
   name: string;
-  description?: string;
-  version?: string;
-  
-  // Dates
-  published?: string;           // YYYY-MM-DD format for frontend
-  published_at?: Date;          // Full date object for details
-  last_updated?: string;        // YYYY-MM-DD format for frontend
-  
-  // GitHub stats
-  stars?: number;
-  forks?: number;
-  repo_url?: string;
-  repo_name?: string;           // Only in details
-  contributors?: number;        // Only in details
-  
-  // Package metadata
-  maintainers?: string[];
-  keywords?: string[];
-  license?: string;
-  downloads?: number;           // Weekly downloads
-  risk_score?: number;          // Only in details
-  
-  // Links
-  npm_url?: string;
-  homepage?: string;
+  description: string;
+  keywords: string[];
+  downloads: number;
+  maintainers: string[];
+  last_updated: string;
+  version: string;
+  license: string;
+}
+
+export class PackageDetailsDto extends PackageCardDto {
+  package_id: string;
+  published: string;
+  published_at: Date;
+  stars: number;
+  forks: number;
+  repo_url: string;
+  repo_name: string;
+  contributors: number;
+  risk_score: number;
+  npm_url: string;
+  homepage: string;
 } 
