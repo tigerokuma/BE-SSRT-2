@@ -29,7 +29,7 @@ export class PackagesRepository {
       risk_score: packageData.risk_score,
       fetched_at: new Date(),
       
-      // NEW: Add the NPM summary fields
+      // NEW: Add the NPM summary fieldsgit 
       description: packageData.description,
       version: packageData.version,
       published_at: packageData.published_at,
@@ -70,7 +70,7 @@ export class PackagesRepository {
 }
 
   async searchPackages(name: string): Promise<Package[]> {
-    console.log(`Searching for packages: ${name}`);
+    console.log(`🚀 NEW SEARCH LOGIC: Searching for packages: ${name}`);
     
     // 1. ALWAYS return database results immediately (fast path)
     const dbResults = await this.searchPackagesInDb(name);
@@ -78,31 +78,72 @@ export class PackagesRepository {
     // 2. Deduplicate immediately (safety net)
     const uniqueResults = this.deduplicateByPackageId(dbResults);
     
-    // 3. Check if we have ANY results to return
-    if (uniqueResults.length > 0) {
-      console.log(`Found ${uniqueResults.length} packages in database`);
+    // 3. Check if we have EXACT match with fresh data
+    const exactMatch = uniqueResults.find(pkg => 
+      pkg.package_name.toLowerCase() === name.toLowerCase()
+    );
+    
+    if (exactMatch && this.isDataFresh(exactMatch.fetched_at)) {
+      console.log(`Found fresh exact match for "${name}" + ${uniqueResults.length - 1} related packages`);
       
-      // 4. Check staleness and trigger background refresh if needed
+      // Background refresh for stale partial matches
       const hasStaleData = uniqueResults.some(pkg => 
         !pkg.fetched_at || !this.isDataFresh(pkg.fetched_at)
       );
       
       if (hasStaleData) {
-        console.log('Triggering background refresh for stale data');
-        // Fire-and-forget background refresh (don't await!)
         this.refreshPackagesInBackground(name).catch(err => 
           console.warn('Background refresh failed:', err.message)
         );
       }
       
-      // Return immediately with cached data
       return uniqueResults;
     }
     
-    // 5. No database results - do ONE external search (blocking)
-    console.log('No cached data, searching external APIs');
-    return this.searchExternalAndCache(name);
-  }
+    // 4. No exact match OR stale exact match - search external APIs
+    console.log(exactMatch 
+      ? `Exact match "${name}" is stale - refreshing from external APIs`
+      : `No exact match for "${name}" - searching external APIs (have ${uniqueResults.length} partial matches)`
+    );
+    
+    try {
+      const externalResults = await this.searchExternalAndCache(name);
+      
+      if (externalResults.length === 0) {
+        console.log('No external results found - returning partial matches from DB');
+        return uniqueResults;
+      }
+      
+      // Combine external results + existing partial matches (avoid duplicates)
+      const combined = [...externalResults];
+      for (const dbPkg of uniqueResults) {
+        const exists = combined.some(ext => 
+          ext.package_name.toLowerCase() === dbPkg.package_name.toLowerCase()
+        );
+        if (!exists) {
+          combined.push(dbPkg);
+        }
+      }
+      
+      // Sort: exact match first, then by downloads
+      const sorted = combined.sort((a, b) => {
+        const aExact = a.package_name.toLowerCase() === name.toLowerCase();
+        const bExact = b.package_name.toLowerCase() === name.toLowerCase();
+        
+        if (aExact && !bExact) return -1;
+        if (!aExact && bExact) return 1;
+        
+        return (b.downloads || 0) - (a.downloads || 0);
+      });
+      
+      console.log(`Returning ${sorted.length} results with "${name}" prioritized first`);
+      return this.deduplicateByPackageId(sorted.slice(0, 10));
+      
+    } catch (error) {
+      console.warn('External API search failed:', error.message);
+      return uniqueResults; // Fallback to partial matches
+         }
+   }
 
   private async searchPackagesInDb(name: string): Promise<Package[]> {
     return this.prisma.package.findMany({
