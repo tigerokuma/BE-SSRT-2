@@ -8,15 +8,21 @@ import { NPMService } from '../services/npm.service';
 export class PackagesRepository {
   constructor(private readonly prisma: PrismaService, private readonly githubService: GitHubService, private readonly npmService: NPMService) {}
 
-  async findPackageByUrl(repoUrl: string): Promise<Package | null> {
-    return this.prisma.package.findUnique({
+  async findPackagesByUrl(repoUrl: string): Promise<Package[]> {
+    return this.prisma.package.findMany({
       where: { repo_url: repoUrl }
+    });
+  }
+
+  async findPackageByName(packageName: string): Promise<Package | null> {
+    return this.prisma.package.findUnique({
+      where: { package_name: packageName }
     });
   }
 
   async createOrUpdatePackage(packageData: Partial<Package>): Promise<Package> {
     return this.prisma.package.upsert({
-      where: { repo_url: packageData.repo_url! },
+      where: { package_name: packageData.package_name! },
       update: {
       // Existing fields
       package_name: packageData.package_name,
@@ -406,7 +412,7 @@ export class PackagesRepository {
 
   async getPackageSummary(name: string): Promise<Package | null> {
     // 1. Try to find by exact package name
-    let packageData = await this.findPackageByUrl(name);
+    let packageData = await this.findPackageByName(name);
     
     if (packageData && this.isDataFresh(packageData.fetched_at)) {
       return packageData;
