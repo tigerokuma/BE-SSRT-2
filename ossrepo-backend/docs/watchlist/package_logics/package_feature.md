@@ -43,38 +43,37 @@ Returns array of packages for discovery (~10 results, **exact matches prioritize
     // ... more related packages
   ],
   "count": 4,
-  "responseTime": "2692ms"
+  "responseTime": "1850ms"
 }
 ```
 
 ### Smart Search Flow Logic
 
-The search implements intelligent exact match detection:
+The search implements a "fast response & background enrichment" strategy for optimal perceived performance.
 
-1. **Database Check First**: Query local database for exact and partial matches
-2. **Exact Match Detection**: Check if any result exactly matches the search query (`react` = `react`)
-3. **Freshness Validation**: Verify if exact match data is fresh (< 12 hours old)
-4. **Smart Decision Making**:
-   - ✅ **Fresh exact match found**: Return immediately with related packages
-   - ⚠️ **Stale exact match**: Refresh from external APIs  
-   - ❌ **No exact match**: Search NPM/GitHub APIs to find the main package
+1.  **Database Check**: First, the local database is checked for a fresh, fully cached version of the package. If found, it's returned immediately.
+2.  **Fast NPM Search**: If no fresh data is in the cache, the system queries the NPM API, which is very fast.
+3.  **Immediate Partial Response**: A response is sent to the user **immediately** using only the data from NPM. This provides a fast result for the user.
+4.  **Background GitHub Enrichment**: In the background (without making the user wait), a separate process fetches expensive repository details from GitHub (stars, forks, contributors, etc.).
+5.  **Asynchronous Caching**: The background process combines the NPM and GitHub data and saves the fully enriched package to the database for future requests.
 
-```
-🚀 Search Flow Example:
-User searches "react" 
-→ Database has: react-is, react-router, react-smooth (partial matches)
-→ No exact "react" match found
-→ Call NPM API to get main "react" package
-→ Combine with existing partial matches
-→ Sort with exact match first
-→ Return: [react, @types/react, react-router, react-smooth]
+```\
+🚀 Search Flow Example (Cache Miss):
+User searches "react"
+→ Database has no fresh "react" data
+→ Call NPM API to get basic package info
+→ Return partial data for "react" to user immediately (< 2s)
+→ In background: Call GitHub API for stars, forks etc.
+→ In background: Save full "react" package to DB
+→ Next search for "react" is now a fast cache hit (< 100ms)
 ```
 
 ### Background Optimization
 
-- **Background Refresh**: Stale partial matches are refreshed in background
-- **Smart Caching**: Popular packages are kept fresh automatically
-- **API Rate Limiting**: External calls are optimized and batched
+- **Fast-Lane NPM Response**: The initial search response is powered exclusively by NPM data for maximum speed.
+- **Background GitHub Enrichment**: Slower GitHub API calls (for stars, forks, etc.) are performed in a background job after the initial response has been sent.
+- **Asynchronous Caching**: Fully enriched data is saved to the database asynchronously, without blocking the user.
+- **Stale Data Refresh**: Existing stale data in the database is automatically refreshed in the background.
 
 ### Single Package Details
 
@@ -144,18 +143,17 @@ Returns complete metadata for analysis (~600 bytes):
 
 ### Performance
 
-- **Cache hit (exact match)**: 50-100ms response time
-- **Cache miss (external APIs)**: 2-3 seconds with NPM/GitHub enrichment
-- **Smart data combination**: Reduces API calls by 2-3x compared to previous implementation
-- **Parallel processing**: Chunks of 3 packages processed simultaneously
-- **Exact match prioritization**: Ensures main packages appear first, not just related ones
+- **Initial Response (Cache Miss)**: Under 2 seconds (uses fast NPM data only).
+- **Full Enrichment (Background Task)**: 2-8 seconds. This runs asynchronously and does not block the user response.
+- **Cached Response (Cache Hit)**: 50-100ms (serves complete, enriched data from the database).
+- **True Parallel Processing**: Each package in a search result is enriched and cached in its own parallel process, removing sequential bottlenecks.
 
 ### Implementation Details
 
 The clean API structure uses separate DTOs for clarity:
 1. **PackageCardDto**: 8 essential fields for library cards
-2. **PackageDetailsDto**: Extends PackageCardDto with 8 additional fields  
-3. **Search requests**: **NEW** - Exact match detection with external API fallback
+2. **PackageDetailsDto**: Extends PackageCardDto with 8 additional fields
+3. **Search requests**: **NEW** - Returns an immediate partial response from NPM, then enriches and caches in the background.
 4. **Summary requests**: Returns PackageCardDto with lightweight queries
 5. **Details requests**: Returns PackageDetailsDto with complete data
 
@@ -163,12 +161,14 @@ The clean API structure uses separate DTOs for clarity:
 
 **Previous Flow** (Problem):
 ```
-Search "react" → Return any DB matches → Never find main package
+Search "react" → Wait for NPM API → Wait for GitHub API → Return full data
+(User waits for everything)
 ```
 
 **New Flow** (Fixed):
 ```
-Search "react" → Check for exact match → If missing, call external APIs → Prioritize exact match first
+Search "react" → Get NPM data → **Return partial data now** → Get GitHub data in background
+(User gets a fast initial response)
 ```
 
 This approach provides maximum clarity with minimal complexity, while ensuring **exact matches are always prioritized** over partial matches.
@@ -177,10 +177,10 @@ This approach provides maximum clarity with minimal complexity, while ensuring *
 
 **Search "lodash"**:
 - Database: Empty or partial matches only
-- Result: Calls NPM API → Returns main `lodash` package first
-- Response time: ~2.7 seconds (cache miss)
+- Result: Calls NPM, returns partial data immediately. Enriches in background.
+- Response time: ~1.5 seconds (initial response), ~5 seconds (background enrichment)
 
-**Search "react-router"**:  
+**Search "react-router"**:
 - Database: Fresh exact match exists
 - Result: Returns immediately with related packages
 - Response time: ~50ms (cache hit)
@@ -188,6 +188,6 @@ This approach provides maximum clarity with minimal complexity, while ensuring *
 ### Duplicate Detection
 
 The system includes intelligent duplicate detection:
-- Deduplicates by `package_id` to prevent duplicates in results
+- Deduplicates by `package_name` to prevent duplicates in results
 - Logs warnings when duplicates are detected
 - Ensures clean, unique result sets

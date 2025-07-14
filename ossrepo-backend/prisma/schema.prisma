@@ -18,6 +18,46 @@ model User {
   @@map("users")
 }
 
+// NEW: Fast NPM package data (always available)
+model NpmPackage {
+  package_name   String    @id
+  description    String?
+  version        String?
+  downloads      Int?
+  keywords       String[]
+  license        String?
+  npm_url        String?
+  homepage       String?
+  published_at   DateTime?
+  last_updated   DateTime?
+  maintainers    String[]
+  risk_score     Float?
+  repo_url       String?   // Link to GitHub repo (no foreign key constraint)
+  fetched_at     DateTime  @default(now())
+  
+  @@map("npm_packages")
+}
+
+// NEW: Detailed GitHub repository data (enriched separately)
+model GitHubRepository {
+  repo_url       String    @id
+  repo_name      String?   // e.g., "facebook/react"
+  owner          String?   // e.g., "facebook"
+  stars          Int?
+  forks          Int?
+  contributors   Int?
+  topics         String[]  // GitHub topics/tags
+  pushed_at      DateTime?
+  created_at     DateTime?
+  updated_at     DateTime?
+  default_branch String?
+  language       String?   // Primary language
+  fetched_at     DateTime  @default(now())
+  
+  @@map("github_repositories")
+}
+
+// EXISTING: Keep for backward compatibility during migration
 model Package {
   package_id     String   @id @default(uuid())
   package_name   String   @unique

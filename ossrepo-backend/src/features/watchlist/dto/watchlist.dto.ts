@@ -28,17 +28,19 @@ export class PackageCardDto {
   last_updated: string;
   version: string;
   license: string;
+  
+  // GitHub fields (may be null for fast NPM-only responses)
+  stars?: number | null;
+  forks?: number | null;
+  contributors?: number | null;
 }
 
 export class PackageDetailsDto extends PackageCardDto {
   package_id: string;
   published: string;
   published_at: Date;
-  stars: number;
-  forks: number;
   repo_url: string;
   repo_name: string;
-  contributors: number;
   risk_score: number;
   npm_url: string;
   homepage: string;
