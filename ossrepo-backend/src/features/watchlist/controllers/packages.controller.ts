@@ -29,42 +29,29 @@ export class PackagesController {
     };
   }
 
-  @Get(':name/summary')
-  async getPackageSummary(@Param('name') name: string) {
+  @Get(':name')
+  async getPackage(
+    @Param('name') name: string,
+    @Query('view') view?: 'summary' | 'details'
+  ) {
     if (!name || name.trim().length === 0) {
       throw new BadRequestException('Package name is required');
     }
 
-    const result = await this.packagesService.getPackageSummary(name.trim());
+    // Validate view parameter
+    if (view && !['summary', 'details'].includes(view)) {
+      throw new BadRequestException('View parameter must be "summary" or "details"');
+    }
+
+    // Default to summary view if no view specified
+    const selectedView = view || 'summary';
+
+    const result = await this.packagesService.getPackage(name.trim(), selectedView);
     
     if (!result) {
       throw new NotFoundException(`Package '${name}' not found`);
     }
 
     return result;
-  }
-
-  @Get(':name/details')
-  async getPackageDetails(@Param('name') name: string) {
-    if (!name || name.trim().length === 0) {
-      throw new BadRequestException('Package name is required');
-    }
-
-    const result = await this.packagesService.getPackageDetails(name.trim());
-    
-    if (!result) {
-      throw new NotFoundException(`Package '${name}' not found`);
-    }
-
-    return result;
-  }
-
-  @Get(':name/similar')
-  async getSimilarPackages(@Param('name') name: string) {
-    if (!name || name.trim().length === 0) {
-      throw new BadRequestException('Package name is required');
-    }
-
-    return this.packagesService.getSimilarPackages(name.trim());
   }
 }

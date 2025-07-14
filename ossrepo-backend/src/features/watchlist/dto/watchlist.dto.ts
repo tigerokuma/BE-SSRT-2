@@ -18,24 +18,28 @@ export class WatchlistItem {
   updatedAt?: Date;
 }
 
-export class PackageSummary {
+// Clean DTOs for package responses
+export class PackageCardDto {
   name: string;
-  version: string;
+  description: string;
+  keywords: string[];
   downloads: number;
-  lastUpdated: string;
-  riskScore: number;
-  trustedByOrgs: string;
+  maintainers: string[];
+  last_updated: string;
+  version: string;
+  license: string;
 }
 
-export class PackageDetails {
-  name: string;
-  riskHistory: Array<{
-    date: string;
-    score: number;
-  }>;
-  changelog: string[];
-  maintainerStats: {
-    contributors: number;
-    maintainerActivity: string;
-  };
+export class PackageDetailsDto extends PackageCardDto {
+  package_id: string;
+  published: string;
+  published_at: Date;
+  stars: number;
+  forks: number;
+  repo_url: string;
+  repo_name: string;
+  contributors: number;
+  risk_score: number;
+  npm_url: string;
+  homepage: string;
 } 
