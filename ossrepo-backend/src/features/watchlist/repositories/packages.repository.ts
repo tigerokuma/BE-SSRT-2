@@ -75,81 +75,71 @@ export class PackagesRepository {
   });
 }
 
-  async searchPackages(name: string): Promise<Package[]> {
+  async searchPackages(name: string): Promise<(Package | Partial<Package>)[]> {
     console.log(`🚀 NEW SEARCH LOGIC: Searching for packages: ${name}`);
-    
+
     // 1. ALWAYS return database results immediately (fast path)
     const dbResults = await this.searchPackagesInDb(name);
-    
-    // 2. Deduplicate immediately (safety net)
-    const uniqueResults = this.deduplicateByPackageId(dbResults);
-    
-    // 3. Check if we have EXACT match with fresh data
-    const exactMatch = uniqueResults.find(pkg => 
-      pkg.package_name.toLowerCase() === name.toLowerCase()
-    );
-    
+
+    // 2. Deduplicate by name for consistency
+    const uniqueDbResults = this.deduplicateByName(dbResults);
+
+    // 3. Check if we have an EXACT match with fresh data
+    const exactMatch = uniqueDbResults.find((pkg) => pkg.package_name.toLowerCase() === name.toLowerCase());
+
     if (exactMatch && this.isDataFresh(exactMatch.fetched_at)) {
-      console.log(`Found fresh exact match for "${name}" + ${uniqueResults.length - 1} related packages`);
-      
-      // Background refresh for stale partial matches
-      const hasStaleData = uniqueResults.some(pkg => 
-        !pkg.fetched_at || !this.isDataFresh(pkg.fetched_at)
-      );
-      
+      console.log(`Found fresh exact match for "${name}" + ${uniqueDbResults.length - 1} related packages`);
+
+      const hasStaleData = uniqueDbResults.some((pkg) => !pkg.fetched_at || !this.isDataFresh(pkg.fetched_at));
       if (hasStaleData) {
-        this.refreshPackagesInBackground(name).catch(err => 
-          console.warn('Background refresh failed:', err.message)
-        );
+        this.refreshPackagesInBackground(name).catch((err) => console.warn('Background refresh failed:', err.message));
       }
-      
-      return uniqueResults;
+
+      return uniqueDbResults;
     }
-    
+
     // 4. No exact match OR stale exact match - search external APIs
-    console.log(exactMatch 
-      ? `Exact match "${name}" is stale - refreshing from external APIs`
-      : `No exact match for "${name}" - searching external APIs (have ${uniqueResults.length} partial matches)`
+    console.log(
+      exactMatch
+        ? `Exact match "${name}" is stale - refreshing from external APIs`
+        : `No exact match for "${name}" - searching external APIs (have ${uniqueDbResults.length} partial matches)`
     );
-    
+
     try {
-      const externalResults = await this.searchExternalAndCache(name);
-      
+      const externalResults = await this.searchExternalAndInitiateCache(name);
+
       if (externalResults.length === 0) {
         console.log('No external results found - returning partial matches from DB');
-        return uniqueResults;
+        return uniqueDbResults;
       }
-      
-      // Combine external results + existing partial matches (avoid duplicates)
+
+      // Combine external results + existing partial matches (avoid duplicates by name)
       const combined = [...externalResults];
-      for (const dbPkg of uniqueResults) {
-        const exists = combined.some(ext => 
-          ext.package_name.toLowerCase() === dbPkg.package_name.toLowerCase()
-        );
+      for (const dbPkg of uniqueDbResults) {
+        const exists = combined.some((ext) => ext.package_name?.toLowerCase() === dbPkg.package_name.toLowerCase());
         if (!exists) {
           combined.push(dbPkg);
         }
       }
-      
+
       // Sort: exact match first, then by downloads
       const sorted = combined.sort((a, b) => {
-        const aExact = a.package_name.toLowerCase() === name.toLowerCase();
-        const bExact = b.package_name.toLowerCase() === name.toLowerCase();
-        
+        const aExact = a.package_name?.toLowerCase() === name.toLowerCase();
+        const bExact = b.package_name?.toLowerCase() === name.toLowerCase();
+
         if (aExact && !bExact) return -1;
         if (!aExact && bExact) return 1;
-        
+
         return (b.downloads || 0) - (a.downloads || 0);
       });
-      
+
       console.log(`Returning ${sorted.length} results with "${name}" prioritized first`);
-      return this.deduplicateByPackageId(sorted.slice(0, 10));
-      
+      return this.deduplicateByName(sorted).slice(0, 10);
     } catch (error) {
       console.warn('External API search failed:', error.message);
-      return uniqueResults; // Fallback to partial matches
-         }
-   }
+      return uniqueDbResults; // Fallback to partial matches
+    }
+  }
 
   private async searchPackagesInDb(name: string): Promise<Package[]> {
     return this.prisma.package.findMany({
@@ -169,30 +159,72 @@ export class PackagesRepository {
       take: 10  // Limit to 10 for user journey (library cards)
     });
   }
-  // Optimized external search (only for cache misses)
-  private async searchExternalAndCache(name: string): Promise<Package[]> {
+
+  private async searchExternalAndInitiateCache(name: string): Promise<Partial<Package>[]> {
     try {
-      // Try NPM first (fastest, most relevant)
-      const npmResults = await this.npmService.searchPackages(name, 5); // Limit to 5 for speed
-      
-      if (npmResults.length > 0) {
-        console.log(`Found ${npmResults.length} packages from NPM`);
-        const cachedResults = await this.quickCacheNpmResults(npmResults);
-        return this.deduplicateByPackageId(cachedResults);
-      }
+      const npmResults = await this.npmService.searchPackages(name, 5);
+      if (npmResults.length === 0) return [];
+
+      console.log(`Found ${npmResults.length} from NPM, fetching details for immediate response...`);
+
+      const fastTrackPromises = npmResults.map(async (searchResult) => {
+        try {
+          const detailsData = await this.npmService.getPackageDetails(searchResult.name);
+          return this.combineNpmData(searchResult, detailsData);
+        } catch (error) {
+          console.warn(`Failed to get details for ${searchResult.name}:`, error.message);
+          return this.combineNpmData(searchResult, null);
+        }
+      });
+
+      const partialPackages = await Promise.all(fastTrackPromises);
+
+      this.enrichAndCacheInBackground(partialPackages).catch((err) => {
+        console.error('Background enrichment failed:', err.message);
+      });
+
+      return partialPackages;
     } catch (npmError) {
       console.warn('NPM search failed:', npmError.message);
-    }
-    
-    // Fallback to GitHub (only if NPM completely fails)
-    try {
-      const githubResults = await this.githubService.searchRepositories(name);
-      const cachedResults = await this.quickCacheGitHubResults(githubResults.slice(0, 5)); // Limit for speed
-      return this.deduplicateByPackageId(cachedResults);
-    } catch (githubError) {
-      console.warn('GitHub search failed:', githubError.message);
       return [];
     }
+  }
+
+  private async enrichAndCacheInBackground(packagesToEnrich: Partial<Package>[]): Promise<void> {
+    console.log(`Starting background enrichment for ${packagesToEnrich.length} packages.`);
+
+    const enrichmentPromises = packagesToEnrich.map(async (npmData) => {
+      try {
+        let enrichedData = { ...npmData };
+        if (npmData.repo_url?.includes('github.com')) {
+          try {
+            const githubData = await this.getGitHubData(npmData.repo_url);
+            enrichedData = { ...githubData, ...npmData };
+          } catch (githubError) {
+            console.warn(`Background GitHub fetch failed for ${npmData.package_name}:`, githubError.message);
+          }
+        }
+        await this.createOrUpdatePackage(enrichedData);
+      } catch (error) {
+        console.warn(`Failed to enrich and cache package ${npmData.package_name}: ${error.message}`);
+      }
+    });
+
+    await Promise.all(enrichmentPromises);
+    console.log('Background enrichment and caching complete.');
+  }
+
+  private async enrichPackage(npmData: Partial<Package>): Promise<Package> {
+    let enrichedData = { ...npmData };
+    if (npmData.repo_url?.includes('github.com')) {
+      try {
+        const githubData = await this.getGitHubData(npmData.repo_url);
+        enrichedData = { ...githubData, ...npmData };
+      } catch (githubError) {
+        console.warn(`GitHub fetch failed for ${npmData.package_name}:`, githubError.message);
+      }
+    }
+    return this.createOrUpdatePackage(enrichedData);
   }
 
   // Background refresh (fire-and-forget)
@@ -233,78 +265,6 @@ export class PackagesRepository {
     } catch (error) {
       console.error('Background refresh error:', error.message);
     }
-  }
-
-  // Enhanced NPM caching with smart data combination
-  private async quickCacheNpmResults(npmResults: any[]): Promise<Package[]> {
-    const results: Package[] = [];
-    
-    // Step 1: Get enhanced NPM data efficiently  
-    const enhancedNpmData = await this.getEnhancedNpmData(npmResults);
-    
-    for (let i = 0; i < npmResults.length; i++) {
-      const originalSearch = npmResults[i];
-      const detailsData = enhancedNpmData[i];
-      
-      try {
-        // Step 2: Combine search + details data
-        const combinedData = this.combineNpmData(originalSearch, detailsData);
-        
-        // Step 3: GitHub enrichment (if repo URL exists)
-        if (combinedData.repo_url?.includes('github.com')) {
-          try {
-            const githubData = await this.getGitHubData(combinedData.repo_url);
-            Object.assign(combinedData, githubData);
-          } catch (githubError) {
-            console.warn(`Failed to enrich ${combinedData.package_name} with GitHub data:`, githubError.message);
-          }
-        }
-        
-        const cached = await this.createOrUpdatePackage(combinedData);
-        results.push(cached);
-      } catch (error) {
-        console.warn(`Failed to cache package ${originalSearch.name}:`, error.message);
-      }
-    }
-    
-    return results;
-  }
-
-  // Smart NPM data enhancement - only fetch what we need
-  private async getEnhancedNpmData(npmResults: any[]): Promise<any[]> {
-    const enhancedData: any[] = [];
-    
-    // Batch process in chunks to avoid overwhelming NPM API
-    const CHUNK_SIZE = 3;
-    for (let i = 0; i < npmResults.length; i += CHUNK_SIZE) {
-      const chunk = npmResults.slice(i, i + CHUNK_SIZE);
-      
-      // Parallel fetch details for this chunk
-      const chunkPromises = chunk.map(async (npmPkg) => {
-        // Only fetch details if we need additional fields
-        if (this.needsDetailedNpmData(npmPkg)) {
-          try {
-            return await this.npmService.getPackageDetails(npmPkg.name);
-          } catch (error) {
-            console.warn(`Failed to get details for ${npmPkg.name}:`, error.message);
-            return null;
-          }
-        }
-        return null;
-      });
-      
-      const chunkResults = await Promise.all(chunkPromises);
-      enhancedData.push(...chunkResults);
-    }
-    
-    return enhancedData;
-  }
-
-  // Check if we need additional NPM details
-  private needsDetailedNpmData(searchResult: any): boolean {
-    // NPM search API doesn't provide keywords, license, or homepage
-    // So we always need details for complete PackageSummary data
-    return true;
   }
 
   // Intelligently combine search + details data
@@ -364,32 +324,13 @@ export class PackagesRepository {
     };
   }
 
-  // Quick GitHub caching
-  private async quickCacheGitHubResults(githubResults: any[]): Promise<Package[]> {
-    const results: Package[] = [];
-    
-    for (const repo of githubResults) {
-      try {
-        const packageData = this.transformGitHubData(repo);
-        const cached = await this.createOrUpdatePackage(packageData);
-        results.push(cached);
-      } catch (error) {
-        console.warn(`Failed to cache GitHub repo ${repo.name}:`, error.message);
-      }
-    }
-    
-    return results;
-  }
-
-  // Simple deduplication utility
-  private deduplicateByPackageId(packages: Package[]): Package[] {
+  private deduplicateByName<T extends Partial<Package>>(packages: T[]): T[] {
     const seen = new Set<string>();
-    return packages.filter(pkg => {
-      if (seen.has(pkg.package_id)) {
-        console.warn(`Duplicate package_id detected: ${pkg.package_id} (${pkg.package_name})`);
+    return packages.filter((pkg) => {
+      if (!pkg.package_name || seen.has(pkg.package_name)) {
         return false;
       }
-      seen.add(pkg.package_id);
+      seen.add(pkg.package_name);
       return true;
     });
   }
@@ -428,11 +369,23 @@ export class PackagesRepository {
         const transformedData = this.transformGitHubData(gitHubData);
         return await this.createOrUpdatePackage(transformedData);
       }
-      
+
       // If no owner specified, fall back to search
       const searchResults = await this.searchPackages(name);
-      return searchResults[0] || null;
-      
+      const firstResult = searchResults[0];
+
+      if (!firstResult) {
+        return null;
+      }
+
+      // If the result from search is already a full package (from DB), return it.
+      // We can check for a property that only full packages have, like `package_id`.
+      if ('package_id' in firstResult) {
+        return firstResult as Package;
+      }
+
+      // Otherwise, it's a partial package that needs to be fully enriched.
+      return this.enrichPackage(firstResult);
     } catch (error) {
       console.error('Failed to fetch from GitHub:', error);
       return packageData; // Return stale data if available
