@@ -20,8 +20,8 @@ model User {
 
 model Package {
   package_id     String   @id @default(uuid())
-  package_name   String                            
-  repo_url       String   @unique                   
+  package_name   String   @unique
+  repo_url       String
   repo_name      String
   
   // Existing fields
