@@ -69,7 +69,17 @@ model UserWatchlist {
   // Relations
   watchlist    Watchlist @relation(fields: [watchlist_id], references: [watchlist_id])
   user         User      @relation(fields: [user_id], references: [user_id])
+  slack        Slack?
 
   @@index([user_id])
   @@index([watchlist_id])
+}
+
+model Slack {
+  id              String @id @default(uuid())
+  slack_token     String
+  slack_channel   String?
+
+  //Relations
+  userWatchlist   UserWatchlist      @relation(fields: [id], references: [id])
 }

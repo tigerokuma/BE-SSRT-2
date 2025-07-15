@@ -8,9 +8,12 @@ import { AlertCentreService } from './services/alert-centre.service';
 import { EmailService } from './services/email.service';
 import { SlackService } from './services/slack.service';
 import { JiraService } from './services/jira.service';
+import { ConfigModule } from '@nestjs/config';
+import { SlackRepository } from './repositories/slack.repository';
 
 
 @Module({
+  imports: [ConfigModule],
   controllers: [
     AlertCentreController,
     EmailController,
@@ -22,6 +25,7 @@ import { JiraService } from './services/jira.service';
     EmailService,
     SlackService,
     JiraService,
+    SlackRepository
   ],
 })
 export class AlertModule {}
