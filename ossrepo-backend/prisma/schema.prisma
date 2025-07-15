@@ -148,16 +148,17 @@ model BuildTask {
 }
 
 model BuildSubtask {
-  subtask_id  String    @id @default(uuid())
-  buildTask   BuildTask @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
-  task_id     String
-  language    String // e.g., 'python', 'java', etc.
-  step        String // e.g., 'parse', 'graph', 'save'
-  status      String // e.g., 'pending', 'in_progress', 'completed', 'failed'
-  message     String? // details, errors, etc.
-  created_at  DateTime  @default(now())
-  started_at  DateTime?
-  finished_at DateTime?
+  subtask_id    String          @id @default(uuid())
+  buildTask     BuildTask       @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
+  task_id       String
+  language      String // e.g., 'python', 'java', etc.
+  step          String // e.g., 'parse', 'graph', 'save'
+  status        String // e.g., 'pending', 'in_progress', 'completed', 'failed'
+  message       String? // details, errors, etc.
+  created_at    DateTime        @default(now())
+  started_at    DateTime?
+  finished_at   DateTime?
+  GraphSnapshot GraphSnapshot[]
 }
 
 model GraphExport {
