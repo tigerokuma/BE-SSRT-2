@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUrl, ValidateNested, IsNumber, IsBoolean, Min, Max } from 'class-validator';
+import { IsNotEmpty, IsString, IsUrl, ValidateNested, IsNumber, IsBoolean, Min, Max, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -7,15 +7,23 @@ export class LinesAddedDeletedAlertDto {
   @IsBoolean()
   enabled: boolean;
 
-  @ApiProperty({ example: 2.5, description: 'Standard deviations from contributor normal' })
+  @ApiProperty({ example: 2.5, description: 'Standard deviations from contributor normal', required: false })
   @IsNumber()
   @Min(0)
-  contributor_variance: number;
+  @IsOptional()
+  contributor_variance?: number;
 
-  @ApiProperty({ example: 3.0, description: 'Standard deviations from repository normal' })
+  @ApiProperty({ example: 3.0, description: 'Standard deviations from repository normal', required: false })
   @IsNumber()
   @Min(0)
-  repository_variance: number;
+  @IsOptional()
+  repository_variance?: number;
+
+  @ApiProperty({ example: 1000, description: 'Hardcoded threshold for lines added/deleted', required: false })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  hardcoded_threshold?: number;
 }
 
 export class FilesChangedAlertDto {
@@ -23,15 +31,23 @@ export class FilesChangedAlertDto {
   @IsBoolean()
   enabled: boolean;
 
-  @ApiProperty({ example: 2.0, description: 'Standard deviations from contributor normal' })
+  @ApiProperty({ example: 2.0, description: 'Standard deviations from contributor normal', required: false })
   @IsNumber()
   @Min(0)
-  contributor_variance: number;
+  @IsOptional()
+  contributor_variance?: number;
 
-  @ApiProperty({ example: 2.5, description: 'Standard deviations from repository normal' })
+  @ApiProperty({ example: 2.5, description: 'Standard deviations from repository normal', required: false })
   @IsNumber()
   @Min(0)
-  repository_variance: number;
+  @IsOptional()
+  repository_variance?: number;
+
+  @ApiProperty({ example: 20, description: 'Hardcoded threshold for number of files changed', required: false })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  hardcoded_threshold?: number;
 }
 
 export class HighChurnAlertDto {
@@ -39,10 +55,17 @@ export class HighChurnAlertDto {
   @IsBoolean()
   enabled: boolean;
 
-  @ApiProperty({ example: 2.5, description: 'Multiplier from typical daily norm' })
+  @ApiProperty({ example: 2.5, description: 'Multiplier from typical daily norm', required: false })
   @IsNumber()
   @Min(0)
-  multiplier: number;
+  @IsOptional()
+  multiplier?: number;
+
+  @ApiProperty({ example: 10, description: 'Hardcoded threshold for number of commits in time period', required: false })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  hardcoded_threshold?: number;
 }
 
 export class AncestryBreaksAlertDto {
@@ -100,6 +123,11 @@ export class AddToWatchlistDto {
   @IsString()
   @IsNotEmpty()
   added_by: string;
+
+  @ApiProperty({ example: 'Important repository to monitor', required: false })
+  @IsString()
+  @IsOptional()
+  notes?: string;
 
   @ApiProperty({ type: AlertSettingsDto })
   @ValidateNested()

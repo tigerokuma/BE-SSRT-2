@@ -10,8 +10,9 @@ This document outlines the comprehensive alert system for monitoring repository 
 **Thresholds**:
 - `contributor_variance`: Decimal value (e.g., 2.0, 3.6) representing standard deviations from contributor's normal
 - `repository_variance`: Decimal value representing standard deviations from repository's normal
+- `hardcoded_threshold`: Integer value (e.g., 1000) representing absolute number of lines that triggers an alert
 
-**Example**: If a contributor typically adds 50-100 lines per commit but suddenly adds 500 lines, this would trigger an alert.
+**Example**: If a contributor typically adds 50-100 lines per commit but suddenly adds 500 lines, this would trigger an alert. Or if any commit adds/deletes more than 1000 lines.
 
 ### 2. Files Changed
 **Description**: Detects commits touching an unusually high number of files, or different file types than usual for that contributor.
@@ -19,16 +20,18 @@ This document outlines the comprehensive alert system for monitoring repository 
 **Thresholds**:
 - `contributor_variance`: Decimal value representing standard deviations from contributor's normal file change patterns
 - `repository_variance`: Decimal value representing standard deviations from repository's normal file change patterns
+- `hardcoded_threshold`: Integer value (e.g., 20) representing absolute number of files that triggers an alert
 
-**Example**: A contributor who usually changes 1-3 files suddenly changes 20+ files in a single commit.
+**Example**: A contributor who usually changes 1-3 files suddenly changes 20+ files in a single commit. Or if any commit touches more than 20 files.
 
 ### 3. High Churn
 **Description**: Detects rapid sequences of changes to the same files in short periods, which can indicate instability or rushed development.
 
 **Thresholds**:
 - `multiplier`: Decimal value representing multiplier from typical daily norm (e.g., 2.5x normal churn rate)
+- `hardcoded_threshold`: Integer value (e.g., 10) representing absolute number of commits in a time period that triggers an alert
 
-**Example**: If a file is typically changed once per day but gets modified 5 times in 2 hours.
+**Example**: If a file is typically changed once per day but gets modified 5 times in 2 hours. Or if there are more than 10 commits in a 24-hour period.
 
 ### 4. Ancestry Breaks (History Rewrites)
 **Description**: Detection of force pushes or history rewrites that overwrite previously known commits (e.g., squash merges, rebases).
@@ -64,16 +67,19 @@ This document outlines the comprehensive alert system for monitoring repository 
   "lines_added_deleted": {
     "enabled": true,
     "contributor_variance": 2.5,
-    "repository_variance": 3.0
+    "repository_variance": 3.0,
+    "hardcoded_threshold": 1000
   },
   "files_changed": {
     "enabled": true,
     "contributor_variance": 2.0,
-    "repository_variance": 2.5
+    "repository_variance": 2.5,
+    "hardcoded_threshold": 20
   },
   "high_churn": {
-    "enabled": false,
-    "multiplier": 2.5
+    "enabled": true,
+    "multiplier": 2.5,
+    "hardcoded_threshold": 10
   },
   "ancestry_breaks": {
     "enabled": true
