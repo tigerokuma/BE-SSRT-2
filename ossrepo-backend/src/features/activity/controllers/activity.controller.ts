@@ -6,10 +6,24 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 @Controller('activity')
 export class ActivityController {
   @Post('user-watchlist-added')
-  @ApiOperation({ summary: 'Add a repository to the user watchlist (test endpoint)' })
-  @ApiResponse({ status: 201, description: 'Repository added to watchlist (test)' })
+  @ApiOperation({ summary: 'Add a repository to the user watchlist with activity monitoring settings' })
+  @ApiResponse({ status: 201, description: 'Repository added to watchlist with alert configuration' })
   addToWatchlist(@Body() dto: AddToWatchlistDto) {
-    console.log('Repo added to watchlist:', dto);
-    return { message: 'Repo added to watchlist (test)', data: dto };
+    console.log('=== Repository Added to Watchlist ===');
+    console.log('Repository URL:', dto.repo_url);
+    console.log('Added by:', dto.added_by);
+    console.log('Alert Settings:');
+    console.log('  - Lines Added/Deleted:', dto.alerts.lines_added_deleted.enabled ? 'ENABLED' : 'DISABLED', dto.alerts.lines_added_deleted);
+    console.log('  - Files Changed:', dto.alerts.files_changed.enabled ? 'ENABLED' : 'DISABLED', dto.alerts.files_changed);
+    console.log('  - High Churn:', dto.alerts.high_churn.enabled ? 'ENABLED' : 'DISABLED', dto.alerts.high_churn);
+    console.log('  - Ancestry Breaks:', dto.alerts.ancestry_breaks.enabled ? 'ENABLED' : 'DISABLED', dto.alerts.ancestry_breaks);
+    console.log('  - Unusual Author Activity:', dto.alerts.unusual_author_activity.enabled ? 'ENABLED' : 'DISABLED', dto.alerts.unusual_author_activity);
+    console.log('=====================================');
+    
+    return { 
+      message: 'Repository added to watchlist with activity monitoring', 
+      data: dto,
+      timestamp: new Date().toISOString()
+    };
   }
 } 

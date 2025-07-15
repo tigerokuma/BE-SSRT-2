@@ -1,39 +1,93 @@
-import { IsNotEmpty, IsString, IsUrl, ValidateNested, IsIn } from 'class-validator';
+import { IsNotEmpty, IsString, IsUrl, ValidateNested, IsNumber, IsBoolean, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
+export class LinesAddedDeletedAlertDto {
+  @ApiProperty({ example: true, description: 'Enable/disable lines added/deleted alerts' })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({ example: 2.5, description: 'Standard deviations from contributor normal' })
+  @IsNumber()
+  @Min(0)
+  contributor_variance: number;
+
+  @ApiProperty({ example: 3.0, description: 'Standard deviations from repository normal' })
+  @IsNumber()
+  @Min(0)
+  repository_variance: number;
+}
+
+export class FilesChangedAlertDto {
+  @ApiProperty({ example: true, description: 'Enable/disable files changed alerts' })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({ example: 2.0, description: 'Standard deviations from contributor normal' })
+  @IsNumber()
+  @Min(0)
+  contributor_variance: number;
+
+  @ApiProperty({ example: 2.5, description: 'Standard deviations from repository normal' })
+  @IsNumber()
+  @Min(0)
+  repository_variance: number;
+}
+
+export class HighChurnAlertDto {
+  @ApiProperty({ example: true, description: 'Enable/disable high churn alerts' })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({ example: 2.5, description: 'Multiplier from typical daily norm' })
+  @IsNumber()
+  @Min(0)
+  multiplier: number;
+}
+
+export class AncestryBreaksAlertDto {
+  @ApiProperty({ example: true, description: 'Whether to alert on history rewrites' })
+  @IsBoolean()
+  enabled: boolean;
+}
+
+export class UnusualAuthorActivityAlertDto {
+  @ApiProperty({ example: true, description: 'Enable/disable unusual author activity alerts' })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({ example: 80, description: 'Percentage outside typical time range' })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  percentage_outside_range: number;
+}
+
 export class AlertSettingsDto {
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  large_deletions: string;
+  @ApiProperty({ type: LinesAddedDeletedAlertDto })
+  @ValidateNested()
+  @Type(() => LinesAddedDeletedAlertDto)
+  lines_added_deleted: LinesAddedDeletedAlertDto;
 
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  massive_diffs: string;
+  @ApiProperty({ type: FilesChangedAlertDto })
+  @ValidateNested()
+  @Type(() => FilesChangedAlertDto)
+  files_changed: FilesChangedAlertDto;
 
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  unusual_author_activity: string;
+  @ApiProperty({ type: HighChurnAlertDto })
+  @ValidateNested()
+  @Type(() => HighChurnAlertDto)
+  high_churn: HighChurnAlertDto;
 
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  high_churn: string;
+  @ApiProperty({ type: AncestryBreaksAlertDto })
+  @ValidateNested()
+  @Type(() => AncestryBreaksAlertDto)
+  ancestry_breaks: AncestryBreaksAlertDto;
 
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  ancestry_breaks: string;
-
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  sensitive_file_changes: string;
-
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  hotfixes: string;
-
-  @ApiProperty({ enum: ['none', 'mild', 'critical'] })
-  @IsIn(['none', 'mild', 'critical'])
-  suspicious_commit_messages: string;
+  @ApiProperty({ type: UnusualAuthorActivityAlertDto })
+  @ValidateNested()
+  @Type(() => UnusualAuthorActivityAlertDto)
+  unusual_author_activity: UnusualAuthorActivityAlertDto;
 }
 
 export class AddToWatchlistDto {
