@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Query, Param, BadRequestException, NotFoundException, Delete } from '@nestjs/common';
 import { PackagesService } from '../services/packages.service';
 
 @Controller('packages')
@@ -53,5 +53,16 @@ export class PackagesController {
     }
 
     return result;
+  }
+
+  @Delete('cache/refresh')
+  async forceRefreshCache(@Query('repo_url') repoUrl?: string) {
+    const result = await this.packagesService.forceRefreshCache(repoUrl);
+    return {
+      message: repoUrl 
+        ? `Cache refreshed for repository: ${repoUrl}`
+        : `Cleared ${result.clearedCount} stale cache entries`,
+      ...result
+    };
   }
 }

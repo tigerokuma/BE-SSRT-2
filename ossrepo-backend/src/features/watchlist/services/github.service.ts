@@ -27,23 +27,60 @@ export class GitHubService {
 
   async getRepositoryDetails(owner: string, repo: string) {
     try {
-      const [repoResponse, contributorsResponse] = await Promise.all([
+      const [repoResponse, contributors] = await Promise.all([
         axios.get(`${this.baseUrl}/repos/${owner}/${repo}`, {
           headers: this.getHeaders()
         }),
-        axios.get(`${this.baseUrl}/repos/${owner}/${repo}/contributors`, {
-          params: { per_page: 1 },  // Just get count
-          headers: this.getHeaders()
-        })
+        this.getAllContributors(owner, repo)
       ]);
 
       return {
         ...repoResponse.data,
-        contributors_count: contributorsResponse.data.length
+        contributors_count: contributors.length,
+        contributors: contributors
       };
     } catch (error) {
       console.error('GitHub API details error:', error);
       throw new HttpException('Failed to get repository details', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  async getAllContributors(owner: string, repo: string) {
+    try {
+      const contributors: any[] = [];
+      let page = 1;
+      const perPage = 100; // Maximum allowed per page
+
+      while (true) {
+        const response = await axios.get(`${this.baseUrl}/repos/${owner}/${repo}/contributors`, {
+          params: {
+            per_page: perPage,
+            page: page,
+            anon: 1 // Include anonymous contributors
+          },
+          headers: this.getHeaders()
+        });
+
+        const pageContributors = response.data;
+        
+        if (pageContributors.length === 0) {
+          break; // No more contributors
+        }
+
+        contributors.push(...pageContributors);
+
+        // If we got less than perPage results, we've reached the end
+        if (pageContributors.length < perPage) {
+          break;
+        }
+
+        page++;
+      }
+
+      return contributors;
+    } catch (error) {
+      console.error('GitHub API contributors error:', error);
+      throw new HttpException('Failed to get contributors', HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 
