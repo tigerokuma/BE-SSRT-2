@@ -19,6 +19,7 @@ export class WatchlistItem {
 }
 
 // Clean DTOs for package responses
+// PackageCardDto: NPM data only - used for search results and summary view
 export class PackageCardDto {
   name: string;
   description: string;
@@ -30,16 +31,19 @@ export class PackageCardDto {
   license: string;
 }
 
+// PackageDetailsDto: NPM + GitHub data - used for details view
 export class PackageDetailsDto extends PackageCardDto {
   package_id: string;
   published: string;
   published_at: Date;
-  stars: number;
-  forks: number;
-  repo_url: string;
-  repo_name: string;
-  contributors: number;
+  repo_url?: string;
+  repo_name?: string;
   risk_score: number;
   npm_url: string;
-  homepage: string;
+  homepage?: string;
+  
+  // GitHub fields (optional - may not be available if GitHub API fails)
+  stars?: number;
+  forks?: number;
+  contributors?: number;
 } 
