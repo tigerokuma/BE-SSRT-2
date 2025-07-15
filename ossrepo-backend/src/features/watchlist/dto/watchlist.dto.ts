@@ -18,24 +18,32 @@ export class WatchlistItem {
   updatedAt?: Date;
 }
 
-export class PackageSummary {
+// Clean DTOs for package responses
+// PackageCardDto: NPM data only - used for search results and summary view
+export class PackageCardDto {
   name: string;
-  version: string;
+  description: string;
+  keywords: string[];
   downloads: number;
-  lastUpdated: string;
-  riskScore: number;
-  trustedByOrgs: string;
+  maintainers: string[];
+  last_updated: string;
+  version: string;
+  license: string;
 }
 
-export class PackageDetails {
-  name: string;
-  riskHistory: Array<{
-    date: string;
-    score: number;
-  }>;
-  changelog: string[];
-  maintainerStats: {
-    contributors: number;
-    maintainerActivity: string;
-  };
+// PackageDetailsDto: NPM + GitHub data - used for details view
+export class PackageDetailsDto extends PackageCardDto {
+  package_id: string;
+  published: string;
+  published_at: Date;
+  repo_url?: string;
+  repo_name?: string;
+  risk_score: number;
+  npm_url: string;
+  homepage?: string;
+  
+  // GitHub fields (optional - may not be available if GitHub API fails)
+  stars?: number;
+  forks?: number;
+  contributors?: number;
 } 

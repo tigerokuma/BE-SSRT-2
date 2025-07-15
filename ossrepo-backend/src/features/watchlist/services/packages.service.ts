@@ -1,42 +1,67 @@
 import { Injectable } from '@nestjs/common';
-import { PackagesRepository } from '../repositories/packages.repository';
+import { PackageSearchService } from './package-search.service';
+import { PackageCardDto, PackageDetailsDto } from '../dto/watchlist.dto';
 
 @Injectable()
 export class PackagesService {
-  constructor(private readonly packagesRepository: PackagesRepository) {}
+  constructor(private readonly packageSearchService: PackageSearchService) {}
 
-  async searchPackages(name: string) {
-    // TODO: Implement package search logic
-    // - Query external APIs (NPM, GitHub, etc.)
-    // - Cache results for performance
-    // - Return PackageSummary[]
-    return this.packagesRepository.searchPackages(name);
+  async searchPackages(name: string): Promise<PackageCardDto[]> {
+    const packages = await this.packageSearchService.searchPackages(name);
+    return packages.map(pkg => this.transformToCard(pkg));
   }
 
-  async getPackageSummary(name: string) {
-    // TODO: Implement package summary logic
-    // - Fetch basic package info
-    // - Calculate risk score
-    // - Get trusted by orgs info
-    // - Return PackageSummary
-    return this.packagesRepository.getPackageSummary(name);
+  async getPackage(name: string, view: 'summary' | 'details'): Promise<PackageCardDto | PackageDetailsDto | null> {
+    const packageData = await this.packageSearchService.getPackageDetails(name);
+    
+    if (!packageData) return null;
+    
+    return view === 'details' 
+      ? this.transformToDetails(packageData)
+      : this.transformToCard(packageData);
   }
 
-  async getPackageDetails(name: string) {
-    // TODO: Implement detailed package metadata logic
-    // - Fetch comprehensive package data
-    // - Get risk history
-    // - Compile changelog
-    // - Gather maintainer stats
-    // - Return PackageDetails
-    return this.packagesRepository.getPackageDetails(name);
+  // Transform to card format (NPM data only - no GitHub fields)
+  private transformToCard(pkg: any): PackageCardDto {
+    return {
+      name: pkg.package_name,
+      description: pkg.description || '',
+      keywords: pkg.keywords || [],
+      downloads: pkg.downloads || 0,
+      maintainers: pkg.maintainers || [],
+      last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
+      version: pkg.version || '',
+      license: pkg.license || ''
+    };
   }
 
-  async getSimilarPackages(name: string) {
-    // TODO: Implement similar packages recommendation logic
-    // - Analyze package categories/tags
-    // - Find packages with similar usage patterns
-    // - Return PackageSummary[]
-    return this.packagesRepository.getSimilarPackages(name);
+  // Transform to details format (NPM + GitHub data)
+  private transformToDetails(pkg: any): PackageDetailsDto {
+    return {
+      // All card fields (NPM data)
+      name: pkg.package_name,
+      description: pkg.description || '',
+      keywords: pkg.keywords || [],
+      downloads: pkg.downloads || 0,
+      maintainers: pkg.maintainers || [],
+      last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
+      version: pkg.version || '',
+      license: pkg.license || '',
+      
+      // Additional detail fields
+      package_id: pkg.package_id || '',
+      published: pkg.published_at ? new Date(pkg.published_at).toISOString().split('T')[0] : '',
+      published_at: pkg.published_at,
+      risk_score: pkg.risk_score || 0,
+      npm_url: pkg.npm_url || '',
+      
+      // Optional GitHub fields (only included if available)
+      ...(pkg.repo_url && { repo_url: pkg.repo_url }),
+      ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),
+      ...(pkg.homepage && { homepage: pkg.homepage }),
+      ...(pkg.githubRepo?.stars && { stars: pkg.githubRepo.stars }),
+      ...(pkg.githubRepo?.forks && { forks: pkg.githubRepo.forks }),
+      ...(pkg.githubRepo?.contributors && { contributors: pkg.githubRepo.contributors })
+    };
   }
 } 
