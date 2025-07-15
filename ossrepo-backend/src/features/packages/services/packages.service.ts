@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PackageSearchService } from './package-search.service';
-import { PackageCardDto, PackageDetailsDto } from '../dto/watchlist.dto';
+import { PackageCardDto, PackageDetailsDto } from '../dto/packages.dto';
 
 @Injectable()
 export class PackagesService {
