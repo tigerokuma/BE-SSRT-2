@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, Get, Param } from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { ActivityService } from '../services/activity.service';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -28,5 +28,12 @@ export class ActivityController {
     const result = await this.activityService.addToWatchlist(dto);
     
     return result;
+  }
+
+  @Get('watchlist/:watchlistId/status')
+  @ApiOperation({ summary: 'Get the processing status of a watchlist entry' })
+  @ApiResponse({ status: 200, description: 'Watchlist status retrieved successfully' })
+  async getWatchlistStatus(@Param('watchlistId') watchlistId: string) {
+    return await this.activityService.getWatchlistStatus(watchlistId);
   }
 } 

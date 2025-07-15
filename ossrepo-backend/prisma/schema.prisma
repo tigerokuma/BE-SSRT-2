@@ -96,6 +96,11 @@ model Watchlist {
   latest_commit_sha                String?
   commits_since_last_health_update Int?
   package_id                       String
+  // New fields for background processing
+  status                           String          @default("processing") // processing, ready, failed
+  processing_started_at            DateTime?
+  processing_completed_at          DateTime?
+  last_error                       String?
   userWatchlistEntries             UserWatchlist[]
   package                          Package         @relation(fields: [package_id], references: [package_id])
 }

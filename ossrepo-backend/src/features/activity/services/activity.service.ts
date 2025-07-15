@@ -1,10 +1,15 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 
 @Injectable()
 export class ActivityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue('repository-setup') private readonly repositorySetupQueue: Queue,
+  ) {}
 
   async addToWatchlist(dto: AddToWatchlistDto) {
     try {
@@ -39,7 +44,7 @@ export class ActivityService {
         },
       });
 
-      // Create watchlist entry
+      // Create watchlist entry with processing status
       const watchlistEntry = await this.prisma.watchlist.create({
         data: {
           watchlist_id: watchlistId,
@@ -49,6 +54,8 @@ export class ActivityService {
           latest_commit_sha: undefined, // Leave blank for now
           commits_since_last_health_update: 0,
           package_id: packageEntry.package_id,
+          status: 'processing',
+          processing_started_at: new Date(),
         },
       });
 
@@ -65,8 +72,11 @@ export class ActivityService {
         },
       });
 
+      // Queue background job for repository setup
+      await this.queueRepositorySetupJob(watchlistId, owner, repo, repoInfo.default_branch);
+
       return {
-        message: 'Repository successfully added to watchlist',
+        message: 'Repository added to watchlist. Background processing will begin shortly.',
         user: user,
         package: packageEntry,
         watchlist: watchlistEntry,
@@ -76,6 +86,7 @@ export class ActivityService {
           repo,
           default_branch: repoInfo.default_branch,
         },
+        status: 'processing',
       };
     } catch (error) {
       console.error('Error adding to watchlist:', error);
@@ -180,6 +191,70 @@ export class ActivityService {
       }
       throw new HttpException(
         `Failed to fetch repository info: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  private async queueRepositorySetupJob(watchlistId: string, owner: string, repo: string, branch: string): Promise<void> {
+    try {
+      await this.repositorySetupQueue.add('clone-and-analyze', {
+        watchlistId,
+        owner,
+        repo,
+        branch,
+      }, {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: 100,
+        removeOnFail: 50,
+      });
+      
+      console.log(`Queued repository setup job for ${owner}/${repo} (watchlist: ${watchlistId})`);
+    } catch (error) {
+      console.error(`Failed to queue repository setup job for ${owner}/${repo}:`, error);
+      // Don't throw error here as the watchlist entry was already created
+      // The job can be retried manually if needed
+    }
+  }
+
+  async getWatchlistStatus(watchlistId: string) {
+    try {
+      const watchlist = await this.prisma.watchlist.findUnique({
+        where: { watchlist_id: watchlistId },
+        include: {
+          package: true,
+          userWatchlistEntries: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
+
+      if (!watchlist) {
+        throw new HttpException('Watchlist not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        watchlist_id: watchlist.watchlist_id,
+        status: watchlist.status,
+        processing_started_at: watchlist.processing_started_at,
+        processing_completed_at: watchlist.processing_completed_at,
+        last_error: watchlist.last_error,
+        package: watchlist.package,
+        user_watchlists: watchlist.userWatchlistEntries,
+        updated_at: watchlist.updated_at,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get watchlist status: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
