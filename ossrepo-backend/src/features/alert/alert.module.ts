@@ -10,6 +10,7 @@ import { SlackService } from './services/slack.service';
 import { JiraService } from './services/jira.service';
 import { ConfigModule } from '@nestjs/config';
 import { SlackRepository } from './repositories/slack.repository';
+import { JiraRepository } from './repositories/jira.repository';
 
 
 @Module({
@@ -25,7 +26,8 @@ import { SlackRepository } from './repositories/slack.repository';
     EmailService,
     SlackService,
     JiraService,
-    SlackRepository
+    SlackRepository,
+    JiraRepository
   ],
 })
 export class AlertModule {}
