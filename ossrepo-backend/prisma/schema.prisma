@@ -9,12 +9,12 @@ datasource db {
 }
 
 model User {
-  user_id        String          @id @default(uuid())
-  email          String          @unique
-  name           String?
-  created_at     DateTime        @default(now())
-  userWatchlists UserWatchlist[]
-  emailConfirmed Boolean         @default(false)
+  user_id           String          @id @default(uuid())
+  email             String          @unique
+  name              String?
+  created_at        DateTime        @default(now())
+  userWatchlists    UserWatchlist[]
+  email_confirmed   Boolean         @default(false)
   EmailConfirmation EmailConfirmation?
 
   @@map("users")
@@ -182,7 +182,7 @@ model Alert {
   id               String
   risk             Risk
   status           Status
-  created_at       DateTime  @default(now())
+  created_at       DateTime      @default(now())
   title            String
   description      String
   userWatchlist    UserWatchlist @relation(fields: [id], references: [id])
@@ -207,13 +207,13 @@ model EmailTime {
 }
 
 model EmailConfirmation {
-  token     String   @id @default(uuid())
-  user_id   String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [user_id], references: [user_id])
+  token     String    @id @default(uuid())
+  user_id   String    @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user      User      @relation(fields: [user_id], references: [user_id])
 
-  @@index([expiresAt])
+  @@index([expires_at])
 }
 
 model Slack {
