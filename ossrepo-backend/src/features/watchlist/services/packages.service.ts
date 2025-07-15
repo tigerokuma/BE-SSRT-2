@@ -21,7 +21,7 @@ export class PackagesService {
       : this.transformToCard(packageData);
   }
 
-  // Transform to card format (minimal fields for cards)
+  // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {
       name: pkg.package_name,
@@ -31,19 +31,14 @@ export class PackagesService {
       maintainers: pkg.maintainers || [],
       last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
       version: pkg.version || '',
-      license: pkg.license || '',
-      
-      // GitHub fields (may be null for NPM-only responses)
-      stars: pkg.githubRepo?.stars || null,
-      forks: pkg.githubRepo?.forks || null,
-      contributors: pkg.githubRepo?.contributors || null
+      license: pkg.license || ''
     };
   }
 
-  // Transform to details format (all fields)
+  // Transform to details format (NPM + GitHub data)
   private transformToDetails(pkg: any): PackageDetailsDto {
     return {
-      // All card fields
+      // All card fields (NPM data)
       name: pkg.package_name,
       description: pkg.description || '',
       keywords: pkg.keywords || [],
@@ -57,14 +52,16 @@ export class PackagesService {
       package_id: pkg.package_id || '',
       published: pkg.published_at ? new Date(pkg.published_at).toISOString().split('T')[0] : '',
       published_at: pkg.published_at,
-      stars: pkg.githubRepo?.stars || 0,
-      forks: pkg.githubRepo?.forks || 0,
-      repo_url: pkg.repo_url || '',
-      repo_name: pkg.githubRepo?.repo_name || pkg.repo_name || '',
-      contributors: pkg.githubRepo?.contributors || 0,
       risk_score: pkg.risk_score || 0,
       npm_url: pkg.npm_url || '',
-      homepage: pkg.homepage || ''
+      
+      // Optional GitHub fields (only included if available)
+      ...(pkg.repo_url && { repo_url: pkg.repo_url }),
+      ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),
+      ...(pkg.homepage && { homepage: pkg.homepage }),
+      ...(pkg.githubRepo?.stars && { stars: pkg.githubRepo.stars }),
+      ...(pkg.githubRepo?.forks && { forks: pkg.githubRepo.forks }),
+      ...(pkg.githubRepo?.contributors && { contributors: pkg.githubRepo.contributors })
     };
   }
 } 
