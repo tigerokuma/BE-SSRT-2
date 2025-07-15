@@ -15,31 +15,33 @@ datasource db {
 }
 
 model User {
-  user_id        String          @id @default(uuid())
-  email          String          @unique
-  name           String?
-  created_at     DateTime        @default(now())
-  userWatchlists UserWatchlist[]
+  user_id           String          @id @default(uuid())
+  email             String          @unique
+  name              String?
+  created_at        DateTime        @default(now())
+  userWatchlists    UserWatchlist[]
+  email_confirmed   Boolean         @default(false)
+  EmailConfirmation EmailConfirmation?
 
   @@map("users")
 }
 
 // NEW: Fast NPM package data (always available)
 model NpmPackage {
-  package_name   String    @id
-  description    String?
-  version        String?
-  downloads      Int?
-  keywords       String[]
-  license        String?
-  npm_url        String?
-  homepage       String?
-  published_at   DateTime?
-  last_updated   DateTime?
-  maintainers    String[]
-  risk_score     Float?
-  repo_url       String?   // Link to GitHub repo (no foreign key constraint)
-  fetched_at     DateTime  @default(now())
+  package_name String    @id
+  description  String?
+  version      String?
+  downloads    Int?
+  keywords     String[]
+  license      String?
+  npm_url      String?
+  homepage     String?
+  published_at DateTime?
+  last_updated DateTime?
+  maintainers  String[]
+  risk_score   Float?
+  repo_url     String? // Link to GitHub repo (no foreign key constraint)
+  fetched_at   DateTime  @default(now())
 
   @@map("npm_packages")
 }
@@ -47,17 +49,17 @@ model NpmPackage {
 // NEW: Detailed GitHub repository data (enriched separately)
 model GitHubRepository {
   repo_url       String    @id
-  repo_name      String?   // e.g., "facebook/react"
-  owner          String?   // e.g., "facebook"
+  repo_name      String? // e.g., "facebook/react"
+  owner          String? // e.g., "facebook"
   stars          Int?
   forks          Int?
   contributors   Int?
-  topics         String[]  // GitHub topics/tags
+  topics         String[] // GitHub topics/tags
   pushed_at      DateTime?
   created_at     DateTime?
   updated_at     DateTime?
   default_branch String?
-  language       String?   // Primary language
+  language       String? // Primary language
   fetched_at     DateTime  @default(now())
 
   @@map("github_repositories")
@@ -65,33 +67,33 @@ model GitHubRepository {
 
 // EXISTING: Keep for backward compatibility during migration
 model Package {
-  package_id     String   @id @default(uuid())
-  package_name   String   @unique
-  repo_url       String
-  repo_name      String
+  package_id   String @id @default(uuid())
+  package_name String @unique
+  repo_url     String
+  repo_name    String
 
   // Existing fields
-  downloads      Int?
-  last_updated   DateTime?
-  stars          Int?
-  forks          Int?                              // ADD ONLY THIS LINE
-  contributors   Int?
-  pushed_at      DateTime?
-  risk_score     Float?
-  fetched_at     DateTime?
+  downloads    Int?
+  last_updated DateTime?
+  stars        Int?
+  forks        Int? // ADD ONLY THIS LINE
+  contributors Int?
+  pushed_at    DateTime?
+  risk_score   Float?
+  fetched_at   DateTime?
 
   // NPM-style summary fields
-  description    String?
-  version        String?
-  published_at   DateTime?
-  maintainers    String[]
-  keywords       String[]
-  npm_url        String?
-  homepage       String?
-  license        String?
+  description  String?
+  version      String?
+  published_at DateTime?
+  maintainers  String[]
+  keywords     String[]
+  npm_url      String?
+  homepage     String?
+  license      String?
 
   // Relations
-  watchlists     Watchlist[]
+  watchlists Watchlist[]
 }
 
 model Watchlist {
@@ -112,15 +114,19 @@ model Watchlist {
 }
 
 model UserWatchlist {
-  id           String    @id @default(uuid())
+  id           String     @id @default(uuid())
   user_id      String
   watchlist_id String
-  added_at     DateTime  @default(now())
+  added_at     DateTime   @default(now())
   alerts       String?
   notes        String?
-  created_at   DateTime  @default(now())
-  user         User      @relation(fields: [user_id], references: [user_id])
-  watchlist    Watchlist @relation(fields: [watchlist_id], references: [watchlist_id])
+  created_at   DateTime   @default(now())
+  user         User       @relation(fields: [user_id], references: [user_id])
+  watchlist    Watchlist  @relation(fields: [watchlist_id], references: [watchlist_id])
+  slack        Slack?
+  jira         Jira?
+  emailTime    EmailTime?
+  Alert        Alert[]
 
   @@index([user_id])
   @@index([watchlist_id])
@@ -163,4 +169,70 @@ model GraphExport {
   status     String
   actor      String?
   created_at DateTime  @default(now())
+}
+
+enum Risk {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum Status {
+  OPEN
+  REVIEWED
+  CLOSED
+}
+
+model Alert {
+  alert_id         String
+  id               String
+  risk             Risk
+  status           Status
+  created_at       DateTime      @default(now())
+  title            String
+  description      String
+  userWatchlist    UserWatchlist @relation(fields: [id], references: [id])
+
+  @@id([id, alert_id])
+}
+
+enum WaitValue {
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
+model EmailTime {
+  id              String        @id @default(uuid())
+  last_email_time DateTime
+  job_id          String
+  wait_value      WaitValue
+  wait_unit       Int
+  userWatchlist   UserWatchlist @relation(fields: [id], references: [id])
+}
+
+model EmailConfirmation {
+  token     String    @id @default(uuid())
+  user_id   String    @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user      User      @relation(fields: [user_id], references: [user_id])
+
+  @@index([expires_at])
+}
+
+model Slack {
+  id            String        @id @default(uuid())
+  slack_token   String
+  slack_channel String?
+  userWatchlist UserWatchlist @relation(fields: [id], references: [id])
+}
+
+model Jira {
+  id             String        @id @default(uuid())
+  webtrigger_url String
+  project_key    String?
+  userWatchlist  UserWatchlist @relation(fields: [id], references: [id])
 }
