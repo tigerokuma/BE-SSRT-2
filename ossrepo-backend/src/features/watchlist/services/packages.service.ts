@@ -21,6 +21,10 @@ export class PackagesService {
       : this.transformToCard(packageData);
   }
 
+  async forceRefreshCache(repoUrl?: string): Promise<{ clearedCount?: number; refreshed?: boolean }> {
+    return await this.packageSearchService.forceRefreshCache(repoUrl);
+  }
+
   // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {

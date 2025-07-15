@@ -147,6 +147,18 @@ export class PackageSearchService {
     };
   }
 
+  async forceRefreshCache(repoUrl?: string): Promise<{ clearedCount?: number; refreshed?: boolean }> {
+    if (repoUrl) {
+      // Force refresh specific repository
+      await this.githubRepo.forceRefresh(repoUrl);
+      return { refreshed: true };
+    } else {
+      // Clear all stale cache entries
+      const clearedCount = await this.githubRepo.clearStaleCache();
+      return { clearedCount };
+    }
+  }
+
   private transformNpmData(searchData: any, detailsData: any) {
     return {
       package_name: searchData.name,
