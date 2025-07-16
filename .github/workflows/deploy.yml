@@ -7,6 +7,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ossrepo-backend
     
     steps:
     - name: Checkout code
@@ -16,15 +19,13 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: '18'
-    
-    - name: Install pnpm
-      run: npm install -g pnpm
+        cache: 'npm'
     
     - name: Install dependencies
-      run: pnpm install
+      run: npm ci
     
     - name: Build application
-      run: pnpm run build
+      run: npm run build
     
     - name: Deploy to GCP
       uses: appleboy/ssh-action@v1.0.3
