@@ -5,6 +5,7 @@ import {BuildResponseDto} from '../dto/build-response.dto';
 import {BuildStatusDto} from '../dto/build-status.dto';
 import {ExportGraphDto} from '../dto/export-graph.dto';
 import {GraphBuilderService} from './graph-builder.service';
+import * as path from 'path';
 
 @Injectable()
 export class GraphService {
@@ -24,10 +25,14 @@ export class GraphService {
         // Optional: append log entry
         await this.repo.appendLog(buildTask.task_id, "Build started and Python builder triggered.");
 
+        const baseDir = process.cwd();
+        const safeRepoId = repoId.replace(/[\/\\]/g, '_');
+        const repoPath = path.join(baseDir, 'tmp-cloned-repo', safeRepoId);
+
         // Now trigger the Python builder
-        await this.graphBuilder.triggerBuild({
+        this.graphBuilder.triggerBuild({
             repoId,
-            repoPath: '/tmp/cloned-repo',
+            repoPath,
             taskId: buildTask.task_id,
             commitId: dto.commitId,
         });
@@ -53,6 +58,14 @@ export class GraphService {
             lastUpdated: task.created_at, // or another timestamp if you prefer
         };
     }
+
+    async updateBuildTaskStatus(taskId: string, status: string, message?: string) {
+    const updatedTask = await this.repo.updateBuildTaskStatus(taskId, status);
+    if (message) {
+        await this.repo.appendLog(taskId, message);
+    }
+    return updatedTask;
+}
 
     async getExport(repoId: string, format: string = 'graphml'): Promise<ExportGraphDto | null> {
         const exportRow = await this.repo.getLatestExportByRepoId(repoId, format);
