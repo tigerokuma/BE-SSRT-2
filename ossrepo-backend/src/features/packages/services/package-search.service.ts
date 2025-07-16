@@ -15,7 +15,7 @@ export class PackageSearchService {
   ) {}
 
   async searchPackages(name: string) {
-    console.log(`🚀 PARALLEL SEARCH: Searching for packages: ${name}`);
+    console.log(`================== PARALLEL SEARCH: Searching for packages: ${name} ==================`);
     
     // 1. Check NPM cache first (fast path)
     const cachedPackages = await this.npmRepo.searchByName(name);
@@ -145,6 +145,18 @@ export class PackageSearchService {
       ...npmPackage,
       githubRepo: githubData
     };
+  }
+
+  async forceRefreshCache(repoUrl?: string): Promise<{ clearedCount?: number; refreshed?: boolean }> {
+    if (repoUrl) {
+      // Force refresh specific repository
+      await this.githubRepo.forceRefresh(repoUrl);
+      return { refreshed: true };
+    } else {
+      // Clear all stale cache entries
+      const clearedCount = await this.githubRepo.clearStaleCache();
+      return { clearedCount };
+    }
   }
 
   private transformNpmData(searchData: any, detailsData: any) {

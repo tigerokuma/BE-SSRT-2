@@ -1,3 +1,4 @@
+
 import { Injectable } from '@nestjs/common';
 import { GitHubRepository } from 'generated/prisma';
 import { PrismaService } from 'src/common/prisma/prisma.service';
@@ -51,6 +52,26 @@ export class GitHubRepositoriesRepository {
     if (!fetchedAt) return false;
     const hoursAgo = (Date.now() - fetchedAt.getTime()) / (1000 * 60 * 60);
     return hoursAgo < 6; // GitHub data is fresher for 6 hours (more dynamic)
+  }
+
+  // Force refresh specific repository (for testing/debugging)
+  async forceRefresh(repoUrl: string): Promise<void> {
+    await this.prisma.gitHubRepository.update({
+      where: { repo_url: repoUrl },
+      data: { fetched_at: new Date(0) } // Set to epoch time to force refresh
+    });
+  }
+
+  // Clear all stale cache entries
+  async clearStaleCache(): Promise<number> {
+    const result = await this.prisma.gitHubRepository.deleteMany({
+      where: {
+        fetched_at: {
+          lt: new Date(Date.now() - 6 * 60 * 60 * 1000) // Older than 6 hours
+        }
+      }
+    });
+    return result.count;
   }
 
   async getStaleRepositories(limit: number = 10): Promise<GitHubRepository[]> {
