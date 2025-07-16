@@ -27,7 +27,7 @@ jobs:
       run: npm run build
     
     - name: Deploy to GCP
-      uses: appleboy/ssh-action@v1.0.3
+      uses: appleboy/ssh-action@v0.1.8
       with:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
