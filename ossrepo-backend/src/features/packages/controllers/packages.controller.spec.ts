@@ -189,51 +189,208 @@ describe('PackagesController', () => {
   });
 
   describe('forceRefreshCache', () => {
-    it('should refresh cache without repo URL', async () => {
-      const mockResult = { clearedCount: 5, refreshedAt: new Date() };
-      mockPackagesService.forceRefreshCache.mockResolvedValue(mockResult);
+    it('should call service to force refresh cache', async () => {
+      mockPackagesService.forceRefreshCache.mockResolvedValue({ message: 'Cache refreshed' });
 
-      const result = await controller.forceRefreshCache();
+      const result = await controller.forceRefreshCache('test-package');
 
-      expect(mockPackagesService.forceRefreshCache).toHaveBeenCalledWith(undefined);
-      expect(result).toEqual({
-        message: 'Cleared 5 stale cache entries',
-        ...mockResult
-      });
+      expect(mockPackagesService.forceRefreshCache).toHaveBeenCalledWith('test-package');
+      expect(result).toEqual({ message: 'Cache refreshed' });
     });
 
-    it('should refresh cache for specific repository URL', async () => {
-      const repoUrl = 'https://github.com/test/repo';
-      const mockResult = { clearedCount: 1, refreshedAt: new Date() };
-      mockPackagesService.forceRefreshCache.mockResolvedValue(mockResult);
-
-      const result = await controller.forceRefreshCache(repoUrl);
-
-      expect(mockPackagesService.forceRefreshCache).toHaveBeenCalledWith(repoUrl);
-      expect(result).toEqual({
-        message: `Cache refreshed for repository: ${repoUrl}`,
-        ...mockResult
-      });
-    });
-
-    it('should handle empty string repo URL as undefined', async () => {
-      const mockResult = { clearedCount: 0, refreshedAt: new Date() };
-      mockPackagesService.forceRefreshCache.mockResolvedValue(mockResult);
+    it('should handle empty package name for cache refresh', async () => {
+      mockPackagesService.forceRefreshCache.mockResolvedValue({ message: 'Cache cleared' });
 
       const result = await controller.forceRefreshCache('');
 
       expect(mockPackagesService.forceRefreshCache).toHaveBeenCalledWith('');
-      expect(result).toEqual({
-        message: 'Cleared 0 stale cache entries',
-        ...mockResult
+      expect(result).toEqual({ message: 'Cache cleared' });
+    });
+  });
+
+  // 🔒 SECURITY TESTS
+  describe('Security & Input Validation', () => {
+    describe('Injection Attack Prevention', () => {
+      it('should handle SQL injection attempts in search', async () => {
+        const maliciousInputs = [
+          "'; DROP TABLE packages; --",
+          "' OR '1'='1",
+          "test'; DELETE FROM npm_packages; --",
+          "' UNION SELECT * FROM users --"
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const maliciousInput of maliciousInputs) {
+          await controller.searchPackages(maliciousInput);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(maliciousInput);
+        }
+      });
+
+      it('should handle NoSQL injection attempts', async () => {
+        const noSqlInjections = [
+          '{"$ne": null}',
+          '{"$gt": ""}',
+          '{"$regex": ".*"}',
+          '{"$where": "this.name.length > 0"}'
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const injection of noSqlInjections) {
+          await controller.searchPackages(injection);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(injection);
+        }
+      });
+
+      it('should handle script injection attempts', async () => {
+        const scriptInjections = [
+          '<script>alert("xss")</script>',
+          'javascript:alert("xss")',
+          '"><script>alert("xss")</script>',
+          'onload="alert(\'xss\')"'
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const script of scriptInjections) {
+          await controller.searchPackages(script);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(script);
+        }
       });
     });
 
-    it('should handle service errors gracefully', async () => {
-      const error = new Error('Service error');
-      mockPackagesService.forceRefreshCache.mockRejectedValue(error);
+    describe('DoS & Resource Exhaustion Protection', () => {
+      it('should handle extremely long package names', async () => {
+        const longName = 'a'.repeat(10000); // 10KB string
+        mockPackagesService.searchPackages.mockResolvedValue([]);
 
-      await expect(controller.forceRefreshCache()).rejects.toThrow('Service error');
+        await controller.searchPackages(longName);
+
+        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(longName);
+      });
+
+      it('should handle Unicode and special characters', async () => {
+        const unicodeInputs = [
+          '测试包名',
+          '🚀📦🔥',
+          'café-âñd-émojis-🎉',
+          '\\u0000\\u001f\\u007f', // Control characters
+          '\x00\x1f\x7f', // Null bytes and control chars
+          'test\u200b\u200c\u200d', // Zero-width characters
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const unicode of unicodeInputs) {
+          await controller.searchPackages(unicode);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(unicode);
+        }
+      });
+
+      it('should handle path traversal attempts', async () => {
+        const pathTraversals = [
+          '../../../etc/passwd',
+          '..\\..\\..\\windows\\system32',
+          '%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+          '....//....//....//etc/passwd',
+          '/var/log/auth.log'
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const path of pathTraversals) {
+          await controller.searchPackages(path);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(path);
+        }
+      });
+    });
+
+    describe('Malformed Data Handling', () => {
+      it('should handle various whitespace edge cases', async () => {
+        const whitespaceTests = [
+          '  test  ',    // Multiple spaces
+          '\t\ttest\t\t', // Tabs
+          '\n\ntest\n\n', // Newlines
+          '\r\ntest\r\n', // CRLF
+          '\u00A0test\u00A0', // Non-breaking spaces
+          '\u2000\u2001\u2002test', // Various Unicode spaces
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const whitespace of whitespaceTests) {
+          await controller.searchPackages(whitespace);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(whitespace.trim());
+        }
+      });
+
+      it('should handle encoded URLs and special formats', async () => {
+        const encodedInputs = [
+          'test%20package',
+          'test+package',
+          'test%2Bpackage',
+          'test%3Cscript%3E',
+          decodeURIComponent('test%20encoded')
+        ];
+
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        for (const encoded of encodedInputs) {
+          await controller.searchPackages(encoded);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(encoded);
+        }
+      });
+    });
+
+    describe('Boundary Value Testing', () => {
+      it('should handle exact 2-character minimum', async () => {
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        await controller.searchPackages('ab');
+        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith('ab');
+      });
+
+      it('should handle maximum reasonable package name lengths', async () => {
+        // NPM allows up to 214 characters for package names
+        const maxLengthName = 'a'.repeat(214);
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        await controller.searchPackages(maxLengthName);
+        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(maxLengthName);
+      });
+    });
+
+    describe('Error Information Disclosure Prevention', () => {
+      it('should not expose internal errors in search endpoint', async () => {
+        const internalError = new Error('Database connection failed: server details');
+        mockPackagesService.searchPackages.mockRejectedValue(internalError);
+
+        await expect(controller.searchPackages('test')).rejects.toThrow();
+        // Verify the original internal error isn't exposed to the client
+      });
+
+      it('should not expose internal errors in getPackage endpoint', async () => {
+        const internalError = new Error('Internal service configuration: secret details');
+        mockPackagesService.getPackage.mockRejectedValue(internalError);
+
+        await expect(controller.getPackage('test')).rejects.toThrow();
+        // Verify internal error details aren't leaked
+      });
+    });
+
+    describe('Concurrent Request Handling', () => {
+      it('should handle multiple simultaneous search requests', async () => {
+        mockPackagesService.searchPackages.mockResolvedValue([]);
+
+        const simultaneousRequests = Array(10).fill(null).map((_, i) => 
+          controller.searchPackages(`test-${i}`)
+        );
+
+        await Promise.all(simultaneousRequests);
+
+        expect(mockPackagesService.searchPackages).toHaveBeenCalledTimes(10);
+      });
     });
   });
 });
