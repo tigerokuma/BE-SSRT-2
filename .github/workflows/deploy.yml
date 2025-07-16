@@ -35,7 +35,7 @@ jobs:
         script: |
           cd ~/BE-SSRT-2/ossrepo-backend
           git pull origin main
-          pnpm install
-          pnpm run build
+          npm install
+          npm run build
           pm2 restart nestjs-api
           echo "✅ Deployment completed successfully!"
