@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete } from '@nestjs/common';
 import { AlertCentreService } from  '../services/alert-centre.service';
+import { UpdateAlertDto } from '../dto/create-alert.dto';
 
 @Controller('alert_centre/alert')
 export class AlertCentreController {
@@ -11,8 +12,8 @@ export class AlertCentreController {
   }
 
   @Patch()
-  updateAlert(body: any) {
-    return this.service.updateAlert(body);
+  updateAlert(alert_id: string, updateAlertDto: UpdateAlertDto) {
+    return this.service.updateAlert(alert_id, updateAlertDto);
   }
 
   @Delete()
@@ -21,7 +22,7 @@ export class AlertCentreController {
   }
 
   @Post()
-  createAlert(body: any) {
-    return this.service.createAlert(body);
+  createAlert(userWatchlistId: string, body: any) {
+    return this.service.createAlert(userWatchlistId, body);
   }
 }
