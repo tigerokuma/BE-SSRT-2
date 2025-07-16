@@ -1,4 +1,3 @@
-// src/features/watchlist/watchlist.module.ts
 import { Module } from '@nestjs/common';
 import { AlertCentreController } from './controllers/alert-centre.controller';
 import { EmailController } from './controllers/email.controller';
@@ -11,6 +10,7 @@ import { JiraService } from './services/jira.service';
 import { ConfigModule } from '@nestjs/config';
 import { SlackRepository } from './repositories/slack.repository';
 import { JiraRepository } from './repositories/jira.repository';
+import { EmailRepository } from './repositories/email.repository';
 
 
 @Module({
@@ -27,7 +27,8 @@ import { JiraRepository } from './repositories/jira.repository';
     SlackService,
     JiraService,
     SlackRepository,
-    JiraRepository
+    JiraRepository,
+    EmailRepository
   ],
 })
 export class AlertModule {}
