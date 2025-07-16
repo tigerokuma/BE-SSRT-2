@@ -15,7 +15,7 @@ export class PackageSearchService {
   ) {}
 
   async searchPackages(name: string) {
-    console.log(`🚀 PARALLEL SEARCH: Searching for packages: ${name}`);
+    console.log(`================== PARALLEL SEARCH: Searching for packages: ${name} ==================`);
     
     // 1. Check NPM cache first (fast path)
     const cachedPackages = await this.npmRepo.searchByName(name);
