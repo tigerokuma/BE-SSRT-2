@@ -26,36 +26,47 @@ export class RepositorySetupProcessor {
   async handleCloneAndAnalyze(job: Job<RepositorySetupJobData>) {
     const { watchlistId, owner, repo, branch = 'main' } = job.data;
     
-    this.logger.log(`Starting repository setup for ${owner}/${repo} (watchlist: ${watchlistId})`);
+    this.logger.log(`\n🚀 Starting setup for ${owner}/${repo}\n`);
     
     try {
       // Update status to processing
       await this.updateWatchlistStatus(watchlistId, 'processing', new Date());
       
       // Step 1: Clone repository
-      this.logger.log(`Cloning repository ${owner}/${repo}`);
       const repoPath = await this.gitManagerService.cloneRepository(owner, repo, branch);
       
-      // Step 2: Backfill commit history
-      this.logger.log(`Backfilling commit history for ${owner}/${repo}`);
-      await this.gitManagerService.backfillCommitsForRepo(owner, repo, branch, watchlistId);
+      // Step 2: Backfill commit history and get commits
+      const { commitCount, commits } = await this.gitManagerService.backfillCommitsForRepo(owner, repo, branch, watchlistId);
       
-      // Step 3: Run initial health analysis
-      this.logger.log(`Running initial health analysis for ${owner}/${repo}`);
-      await this.healthAnalysisService.analyzeRepository(
-        parseInt(watchlistId), 
+      // Step 3: Run historical health analysis
+      const healthResults = await this.healthAnalysisService.runHistoricalHealthAnalysis(
+        watchlistId, 
         owner, 
         repo, 
+        commits, 
         branch
       );
       
-      // Step 4: Update status to ready
+      // Step 4: Clean up the repository after all processing is complete
+      await this.gitManagerService.cleanupRepository(owner, repo);
+      
+      // Step 5: Update status to ready
       await this.updateWatchlistStatus(watchlistId, 'ready', undefined, new Date());
       
-      this.logger.log(`✅ Repository setup completed for ${owner}/${repo}`);
+      this.logger.log(`✅ Setup completed for ${owner}/${repo}`);
+      this.logger.log(`   📚 ${commitCount} commits processed`);
+      this.logger.log(`   📊 Current health score: ${healthResults.current}/100`);
+      this.logger.log(`   📈 Historical health checks: ${healthResults.historical.length}\n`);
       
     } catch (error) {
-      this.logger.error(`❌ Repository setup failed for ${owner}/${repo}:`, error);
+      this.logger.error(`❌ Setup failed for ${owner}/${repo}: ${error.message}\n`);
+      
+      // Clean up repository on failure
+      try {
+        await this.gitManagerService.cleanupRepository(owner, repo);
+      } catch (cleanupError) {
+        this.logger.warn(`⚠️ Failed to cleanup repository ${owner}/${repo} after error`);
+      }
       
       // Update status to failed
       await this.updateWatchlistStatus(

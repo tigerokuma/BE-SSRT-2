@@ -3,9 +3,28 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { SwaggerModule } from '@nestjs/swagger';
 import { swaggerConfig } from './common/config/swagger.config';
+import { createBullBoard } from '@bull-board/api';
+import { BullAdapter } from '@bull-board/api/bullAdapter';
+import { ExpressAdapter } from '@bull-board/express';
+import { getQueueToken } from '@nestjs/bull';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  
+  // Setup Bull Board for queue monitoring
+  const serverAdapter = new ExpressAdapter();
+  serverAdapter.setBasePath('/admin/queues');
+  
+  const { addQueue, removeQueue, setQueues, replaceQueues } = createBullBoard({
+    queues: [
+      new BullAdapter(app.get(getQueueToken('repository-setup'))),
+      new BullAdapter(app.get(getQueueToken('health-analysis'))),
+      new BullAdapter(app.get(getQueueToken('commit-backfill'))),
+    ],
+    serverAdapter,
+  });
+  
+  app.use('/admin/queues', serverAdapter.getRouter());
   
   // Enable CORS for local development and production
   app.enableCors({

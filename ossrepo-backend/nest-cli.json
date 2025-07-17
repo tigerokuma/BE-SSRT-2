@@ -4,5 +4,11 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true
+  },
+  "watchOptions": {
+    "watchFile": "useFsEvents",
+    "watchDirectory": "useFsEvents",
+    "excludeDirectories": ["temp-repos", "generated", "dist", "node_modules"],
+    "excludeFiles": ["*.log", "*.pid", "*.lock"]
   }
 }

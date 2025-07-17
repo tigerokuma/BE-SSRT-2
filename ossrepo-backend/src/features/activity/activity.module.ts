@@ -6,9 +6,14 @@ import { HealthAnalysisService } from './services/health-analysis.service';
 import { RepositorySetupProcessor } from './processors/repository-setup.processor';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
-  imports: [PrismaModule, QueueModule],
+  imports: [
+    ConfigModule,
+    PrismaModule,
+    QueueModule,
+  ],
   controllers: [ActivityController],
   providers: [
     ActivityService,
