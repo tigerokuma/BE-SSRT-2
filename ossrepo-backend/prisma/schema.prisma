@@ -111,6 +111,7 @@ model Watchlist {
   last_error                       String?
   userWatchlistEntries             UserWatchlist[]
   package                          Package         @relation(fields: [package_id], references: [package_id])
+  logs                             Log[]
 }
 
 model UserWatchlist {
@@ -293,4 +294,19 @@ model GraphEdge {
 
   @@index([relation])
   @@map("graph_edges")
+}
+
+model Log {
+  event_id        String   @id @default(uuid())
+  watchlist_id    String?  // Updated to reference watchlist_id (String)
+  event_type      String
+  actor           String
+  timestamp       DateTime
+  payload         Json?
+  event_hash      String
+  prev_event_hash String?
+
+  repository      Watchlist? @relation(fields: [watchlist_id], references: [watchlist_id])
+
+  @@map("logs")
 }
