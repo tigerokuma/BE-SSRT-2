@@ -2,12 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as os from 'os';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { createHash } from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 @Injectable()
 export class GitManagerService {
@@ -150,8 +153,16 @@ export class GitManagerService {
       let currentDepth = 1;
       let commitCount = 0;
       const maxDepth = 2000; // Increased from 1000 to allow deeper history
+      const maxTimeMinutes = 10; // Maximum time to spend deepening
+      const startTime = Date.now();
       
       while (currentDepth <= maxDepth) {
+        // Check if we've exceeded time limit
+        if (Date.now() - startTime > maxTimeMinutes * 60 * 1000) {
+          this.logger.warn(`⏰ Time limit reached while deepening ${owner}/${repo}. Using current depth: ${currentDepth}`);
+          break;
+        }
+        
         // Fetch more commits to increase depth
         await execAsync(`git fetch --depth=${currentDepth} origin ${branch}`, { cwd: repoPath });
         
@@ -206,30 +217,184 @@ export class GitManagerService {
   }
 
   /**
-   * Get commits for a repository (up to 2000 from the last 2 years)
+   * Get commits for a repository (up to 2000 latest commits)
    */
   private async getCommitsForRepo(owner: string, repo: string): Promise<any[]> {
     const repoPath = this.getRepoPath(owner, repo);
-    
     try {
-      const isWindows = os.platform() === 'win32';
-      const sinceArg = isWindows ? `"2 years ago"` : `'2 years ago'`;
-      const prettyArg = isWindows
-        ? `"%H|%an|%ae|%ad|%s"`
-        : "'%H|%an|%ae|%ad|%s'";
+      // Use execFile to avoid Windows shell variable expansion
+      const { stdout } = await execFileAsync(
+        'git',
+        ['log', '--pretty=format:%H|%an|%ae|%ad|%s', '-n', '2000'],
+        { cwd: repoPath, timeout: 300000 } // 5 minute timeout
+      );
       
-      const gitLogCmd = `git log --since=${sinceArg} --pretty=format:${prettyArg} -n 2000`;
-      const { stdout } = await execAsync(gitLogCmd, { cwd: repoPath });
-      
-      return stdout.split('\n').filter(Boolean).map(line => {
+      const commits = stdout.split('\n').filter(Boolean).map(line => {
         const [sha, author, email, date, ...msgParts] = line.split('|');
         return { sha, author, email, date, message: msgParts.join('|') };
       });
+
+      // Get detailed file statistics for each commit
+      const commitsWithStats: any[] = [];
+      const maxCommitsToProcess = 2000; // Process up to 2000 commits
+      const commitsToProcess = commits.slice(0, maxCommitsToProcess);
       
+      if (commits.length > maxCommitsToProcess) {
+        this.logger.warn(`📊 Large repository detected: ${owner}/${repo} has ${commits.length} commits. Processing first ${maxCommitsToProcess} commits.`);
+      }
+      
+      for (const commit of commitsToProcess) {
+        try {
+          // Use execFile for git show as well
+          const { stdout: showOut } = await execFileAsync(
+            'git',
+            ['show', '--numstat', '--pretty=format:""', commit.sha],
+            { cwd: repoPath, timeout: 60000 } // 1 minute timeout per commit
+          );
+          
+          const fileStats = showOut
+            .split('\n')
+            .filter(line => line.trim() && /\d+\s+\d+\s+.+/.test(line))
+            .map(line => {
+              const [added, deleted, filename] = line.split(/\s+/);
+              return {
+                filename,
+                lines_added: parseInt(added, 10),
+                lines_deleted: parseInt(deleted, 10),
+              };
+            });
+
+          const files_changed = fileStats.map(f => f.filename);
+          const lines_added = fileStats.reduce((sum, f) => sum + (f.lines_added || 0), 0);
+          const lines_deleted = fileStats.reduce((sum, f) => sum + (f.lines_deleted || 0), 0);
+          
+          commitsWithStats.push({
+            ...commit,
+            files_changed,
+            lines_added,
+            lines_deleted,
+          });
+        } catch (error) {
+          this.logger.warn(`Failed to get stats for commit ${commit.sha}: ${error.message}`);
+          // Add commit without stats if git show fails
+          commitsWithStats.push({
+            ...commit,
+            files_changed: [],
+            lines_added: 0,
+            lines_deleted: 0,
+          });
+        }
+      }
+      
+      return commitsWithStats;
     } catch (error) {
       this.logger.error(`❌ Failed to get commits for ${owner}/${repo}: ${error.message}`);
       return [];
     }
+  }
+
+  /**
+   * Log commits to the Log table with hash chaining (optimized batch processing)
+   */
+  private async logCommitsToDatabase(watchlistId: string, commits: any[]): Promise<void> {
+    this.logger.log(`Logging ${commits.length} new commits for watchlist ID: ${watchlistId}`);
+    if (!watchlistId) {
+      this.logger.error(`Invalid watchlist ID: ${watchlistId}`);
+      throw new Error(`Invalid watchlist ID: ${watchlistId}`);
+    }
+    try {
+      // Get the last log entry for this repository to start the hash chain.
+      const lastLog = await this.prisma.log.findFirst({
+        where: { watchlist_id: watchlistId },
+        orderBy: { timestamp: 'desc' },
+      });
+      
+      let currentPrevHash = lastLog ? lastLog.event_hash : null;
+      let processedCount = 0;
+      let skippedCount = 0;
+      const batchSize = 1000; // Process in batches of 1000
+      
+      for (let i = 0; i < commits.length; i += batchSize) {
+        const batch = commits.slice(i, i + batchSize);
+        
+        // Check for existing commits first to avoid unnecessary operations
+        const eventIds = batch.map(commit => `commit_${commit.sha}`);
+        const existingLogs = await this.prisma.log.findMany({
+          where: { 
+            event_id: { in: eventIds },
+            watchlist_id: watchlistId 
+          },
+          select: { event_id: true }
+        });
+        
+        const existingEventIds = new Set(existingLogs.map(log => log.event_id));
+        
+        // Process only new commits
+        const newCommits = batch.filter(commit => !existingEventIds.has(`commit_${commit.sha}`));
+        
+        if (newCommits.length === 0) {
+          skippedCount += batch.length;
+          continue;
+        }
+        
+        // Process new commits in parallel
+        const commitPromises = newCommits.map(async (commit) => {
+          const payload = {
+            sha: commit.sha,
+            message: commit.message,
+            email: commit.email,
+            files_changed: commit.files_changed || [],
+            lines_added: commit.lines_added || 0,
+            lines_deleted: commit.lines_deleted || 0,
+          };
+          
+          const logData = {
+            watchlist_id: watchlistId,
+            event_type: 'COMMIT',
+            actor: commit.author,
+            timestamp: new Date(commit.date),
+            payload,
+            prev_event_hash: currentPrevHash,
+          };
+          
+          const eventHash = this.createEventHash(logData);
+          
+          await this.prisma.log.create({
+            data: {
+              event_id: `commit_${commit.sha}`,
+              event_type: 'COMMIT',
+              actor: commit.author,
+              timestamp: new Date(commit.date),
+              payload,
+              event_hash: eventHash,
+              prev_event_hash: currentPrevHash,
+              watchlist_id: watchlistId,
+            },
+          });
+          
+          currentPrevHash = eventHash;
+          processedCount++;
+        });
+        
+        // Wait for batch to complete
+        await Promise.all(commitPromises);
+        skippedCount += (batch.length - newCommits.length);
+      }
+      
+      this.logger.log(`✅ Commit logging completed: ${processedCount} processed, ${skippedCount} skipped`);
+    } catch (error) {
+      this.logger.error(`Error logging new commits for watchlist ID ${watchlistId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a hash for a log event (hash chain)
+   */
+  private createEventHash(logData: any): string {
+    const hash = createHash('sha256');
+    hash.update(JSON.stringify(logData));
+    return hash.digest('hex');
   }
 
   /**
@@ -245,15 +410,17 @@ export class GitManagerService {
       }
       
       // Deepen the repository to get more commits
-      const commitCount = await this.deepenRepository(owner, repo, branch, 2000);
+      await this.deepenRepository(owner, repo, branch, 2000);
       
       // Get the actual commits for processing
       const commits = await this.getCommitsForRepo(owner, repo);
       
-      // For now, we'll just log the commits found
-      // TODO: Implement proper logging to database when we have the log table schema
+      // Log commits to database if watchlistId is provided
+      if (watchlistId) {
+        await this.logCommitsToDatabase(watchlistId, commits);
+      }
       
-      return { commitCount, commits };
+      return { commitCount: commits.length, commits };
       
     } catch (error) {
       this.logger.error(`❌ Backfill failed for ${owner}/${repo}: ${error.message}`);
