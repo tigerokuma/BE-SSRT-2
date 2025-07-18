@@ -102,16 +102,23 @@ model Watchlist {
   updated_at                       DateTime?
   default_branch                   String?
   latest_commit_sha                String?
-  commits_since_last_health_update Int?
+  commits_since_last_health_update Int              @default(0) // Fixed: should be 0 by default
   package_id                       String
   // New fields for background processing
   status                           String          @default("processing") // processing, ready, failed
   processing_started_at            DateTime?
   processing_completed_at          DateTime?
   last_error                       String?
+  
+  // Relations
   userWatchlistEntries             UserWatchlist[]
   package                          Package         @relation(fields: [package_id], references: [package_id])
   logs                             Log[]
+  healthData                       HealthData[]
+  busFactorData                    BusFactorData[]
+  activityData                     ActivityData[]
+  aiSummaryData                    AISummaryData[]
+  weeklySummaryData                WeeklySummaryData[]
 }
 
 model UserWatchlist {
@@ -131,6 +138,106 @@ model UserWatchlist {
 
   @@index([user_id])
   @@index([watchlist_id])
+}
+
+// NEW: Health analysis data storage
+model HealthData {
+  id                   String   @id @default(uuid())
+  watchlist_id         String
+  commit_sha           String?
+  commit_date          DateTime?
+  scorecard_metrics    Json?
+  overall_health_score Decimal? @db.Decimal(5, 2)
+  analysis_date        DateTime @default(now())
+  source               String   @default("scorecard") // scorecard, local-analysis
+  created_at           DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@map("health_data")
+}
+
+// NEW: Bus factor analysis data storage
+model BusFactorData {
+  id              String   @id @default(uuid())
+  watchlist_id    String
+  bus_factor      Int
+  total_contributors Int
+  top_contributors Json    // Array of contributor objects
+  risk_level      String   // LOW, MEDIUM, HIGH, CRITICAL
+  risk_reason     String?
+  analysis_date   DateTime @default(now())
+  created_at      DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("bus_factor_data")
+}
+
+// NEW: Activity analysis data storage
+model ActivityData {
+  id                    String   @id @default(uuid())
+  watchlist_id          String
+  activity_score        Int      // 0-100
+  activity_level        String   // LOW, MODERATE, HIGH, VERY_HIGH
+  total_commits         Int
+  total_files_analyzed  Int
+  file_churn_data       Json?    // Array of file churn objects
+  activity_heatmap      Json?    // Activity heatmap data
+  peak_activity         Json?    // Peak activity information
+  analysis_date         DateTime @default(now())
+  created_at            DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("activity_data")
+}
+
+// NEW: AI summary data storage
+model AISummaryData {
+  id           String   @id @default(uuid())
+  watchlist_id String
+  summary      String   @db.Text
+  confidence   Float    @default(1.0)
+  model_used   String   @default("gemma2:2b")
+  prompt_length Int?
+  output_length Int?
+  generation_time_ms Int?
+  created_at   DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("ai_summary_data")
+}
+
+// NEW: Weekly AI summary data storage
+model WeeklySummaryData {
+  id           String   @id @default(uuid())
+  watchlist_id String
+  week_start   DateTime
+  week_end     DateTime
+  summary      String   @db.Text
+  confidence   Float    @default(1.0)
+  model_used   String   @default("gemma2:2b")
+  metrics_summary Json? // Summary of weekly metrics
+  created_at   DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id, week_start])
+  @@index([watchlist_id])
+  @@index([week_start])
+  @@map("weekly_summary_data")
 }
 
 model BuildTask {
@@ -296,6 +403,7 @@ model GraphEdge {
   @@map("graph_edges")
 }
 
+// ENHANCED: Log model with diff data support
 model Log {
   event_id        String   @id @default(uuid())
   watchlist_id    String?  // Updated to reference watchlist_id (String)
@@ -305,8 +413,17 @@ model Log {
   payload         Json?
   event_hash      String
   prev_event_hash String?
+  
+  // NEW: Enhanced diff data fields for commits
+  files_changed   Int?     @default(0)
+  lines_added     Int?     @default(0)
+  lines_deleted   Int?     @default(0)
+  diff_data       Json?    // Detailed file-by-file diff information
 
   repository      Watchlist? @relation(fields: [watchlist_id], references: [watchlist_id])
 
+  @@index([watchlist_id])
+  @@index([event_type])
+  @@index([timestamp])
   @@map("logs")
 }
