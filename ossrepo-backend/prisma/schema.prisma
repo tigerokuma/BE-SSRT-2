@@ -74,7 +74,7 @@ model Package {
   risk_score     Float?
   fetched_at     DateTime?
   
-  // NPM-style summary fields
+    // NPM-style summary fields
   description    String?
   version        String?                           
   published_at   DateTime?                         
@@ -82,7 +82,7 @@ model Package {
   keywords       String[]                          
   npm_url        String?                           
   homepage       String?                           
-  license        String?                           
+  license        String?
 
   // Relations
   watchlists     Watchlist[]

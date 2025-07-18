@@ -8,6 +8,8 @@ import { HealthAnalysisService } from '../services/health-analysis.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
 import { BusFactorService } from '../services/bus-factor.service';
+import { ActivityAnalysisService, CommitData } from '../services/activity-analysis.service';
+import { RepositorySummaryService } from '../services/repository-summary.service';
 
 interface RepositorySetupJobData {
   watchlistId: string;
@@ -33,6 +35,8 @@ export class RepositorySetupProcessor {
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApi: GitHubApiService,
     private readonly busFactorService: BusFactorService,
+    private readonly activityAnalysisService: ActivityAnalysisService,
+    private readonly repositorySummaryService: RepositorySummaryService,
   ) {}
 
   @Process('clone-and-analyze')
@@ -68,11 +72,12 @@ export class RepositorySetupProcessor {
       twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
       const now = new Date();
       
-      // Step 1: Fetch commits AND Scorecard data in parallel for maximum speed
+      // Step 1: Fetch commits, Scorecard data, and repository info in parallel for maximum speed
       let commitsResult: any[] | null = null;
       let historicalScorecardData: any[] = [];
+      let repositoryInfo: any = null;
       
-      // Start both operations in parallel
+      // Start all operations in parallel
       const parallelOperations: Promise<{ type: string; data?: any; error?: any }>[] = [];
       
       // Start commit fetching
@@ -95,6 +100,14 @@ export class RepositorySetupProcessor {
         );
       }
       
+      // Start repository info fetch in parallel
+      this.logger.log(`📊 Fetching repository info for ${owner}/${repo}`);
+      parallelOperations.push(
+        this.githubApi.getRepositoryInfo(owner, repo)
+          .then(data => ({ type: 'repository', data }))
+          .catch(error => ({ type: 'repository', error }))
+      );
+      
       // Wait for parallel operations to complete
       const results = await Promise.all(parallelOperations);
       
@@ -112,6 +125,14 @@ export class RepositorySetupProcessor {
         historicalScorecardData = scorecardResult.data;
       } else if (scorecardResult?.error) {
         this.logger.warn(`⚠️ Scorecard API failed: ${scorecardResult.error.message}`);
+      }
+      
+      // Process repository info results
+      const repoInfoResult = results.find(r => r.type === 'repository');
+      if (repoInfoResult && !repoInfoResult.error) {
+        repositoryInfo = repoInfoResult.data;
+      } else if (repoInfoResult?.error) {
+        this.logger.warn(`⚠️ Repository info API failed: ${repoInfoResult.error.message}`);
       }
       
       // Handle commit results
@@ -194,6 +215,94 @@ export class RepositorySetupProcessor {
         this.logger.log(`📊 Skipping bus factor calculation (no commits available)`);
       }
 
+      // Step 4: Run activity analysis
+      let activityAnalysisResult: any = null;
+      if (commitCount > 0) {
+        try {
+          this.logger.log(`📈 Running activity analysis for ${owner}/${repo}`);
+          
+          // Transform commits to the format expected by activity analysis
+          const commitsForAnalysis = this.transformCommitsForActivityAnalysis(commitsForHealthAnalysis);
+          
+          // Calculate activity score
+          const activityScore = this.activityAnalysisService.calculateActivityScore(commitsForAnalysis);
+          
+          // Analyze file churn
+          const fileChurnData = this.activityAnalysisService.analyzeFileChurn(commitsForAnalysis);
+          
+          // Generate activity heatmap
+          const activityHeatmap = this.activityAnalysisService.generateActivityHeatmap(commitsForAnalysis);
+          
+          // Create the activity analysis result first
+          activityAnalysisResult = {
+            activityScore,
+            fileChurnData: this.activityAnalysisService.getTopActiveFiles(fileChurnData, 10),
+            activityHeatmap,
+            totalFilesAnalyzed: fileChurnData.length,
+          };
+          
+          // Get activity summary for logging
+          const activitySummary = this.activityAnalysisService.getActivitySummary(
+            activityScore,
+            fileChurnData,
+            activityHeatmap,
+            commitCount
+          );
+          
+          this.logger.log(`📊 Activity Analysis: ${activitySummary}`);
+          
+          // Log top active files if available
+          if (activityAnalysisResult?.fileChurnData?.length > 0) {
+            const topFiles = activityAnalysisResult.fileChurnData.slice(0, 5);
+            this.logger.log(`📁 Top Active Files: ${topFiles.map(f => f.filePath).join(', ')}`);
+          } else {
+            this.logger.log(`📁 No file change data available (using GitHub API)`);
+          }
+        } catch (error) {
+          this.logger.error(`❌ Activity analysis failed: ${error.message}`);
+        }
+      } else {
+        this.logger.log(`📈 Skipping activity analysis (no commits available)`);
+      }
+
+      // Step 5: Generate AI summary using existing data
+      let aiSummaryResult: any = null;
+      try {
+        this.logger.log(`🤖 Generating AI summary for ${owner}/${repo}`);
+        
+        // Use the data we already collected instead of making new API calls
+        const repoData = {
+          name: `${owner}/${repo}`,
+          description: repositoryInfo?.description || commitsResult?.[0]?.commit?.message || 'No description available',
+          stars: repositoryInfo?.stargazers_count || 0,
+          forks: repositoryInfo?.forks_count || 0,
+          contributors: busFactorResult?.totalContributors || 0,
+          language: repositoryInfo?.language || 'Unknown',
+          topics: [],
+          lastCommitDate: commitsResult?.[0] ? new Date(commitsResult[0].commit.author.date) : undefined,
+          commitCount: commitCount,
+          busFactor: busFactorResult?.busFactor || 0,
+          riskScore: undefined,
+          readmeContent: undefined,
+          recentCommits: commitsResult?.slice(0, 5).map(commit => ({
+            message: commit.commit.message,
+            author: commit.commit.author.name,
+            date: new Date(commit.commit.author.date),
+            filesChanged: 0,
+          })) || [],
+        };
+        
+        aiSummaryResult = await this.repositorySummaryService.generateSummaryWithData(repoData);
+        
+        if (aiSummaryResult) {
+          this.logger.log(`✅ AI summary generated: "${aiSummaryResult.summary.substring(0, 50)}..." (confidence: ${aiSummaryResult.confidence})`);
+        } else {
+          this.logger.warn(`⚠️ AI summary generation failed, using fallback`);
+        }
+      } catch (error) {
+        this.logger.error(`❌ AI summary generation failed: ${error.message}`);
+      }
+
       await this.prisma.watchlist.update({
         where: { watchlist_id: watchlistId },
         data: {
@@ -216,8 +325,14 @@ export class RepositorySetupProcessor {
         riskLevel: busFactorResult.riskLevel,
         totalContributors: busFactorResult.totalContributors,
       } : null;
+      const activityInfo = activityAnalysisResult ? {
+        activityScore: activityAnalysisResult.activityScore.score,
+        activityLevel: activityAnalysisResult.activityScore.level,
+        topFilesCount: activityAnalysisResult.fileChurnData.length,
+        peakActivity: activityAnalysisResult.activityHeatmap.peakActivity,
+      } : null;
       
-      this.logger.log(`✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}`);
+      this.logger.log(`✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}${activityInfo ? `, activity: ${activityInfo.activityScore}/100 (${activityInfo.activityLevel})` : ''}`);
 
       const result = { 
         success: true, 
@@ -225,6 +340,12 @@ export class RepositorySetupProcessor {
         healthMetricsCount,
         hasScorecardData: healthMetricsCount > 0,
         busFactor: busFactorInfo,
+        activityAnalysis: activityAnalysisResult,
+        aiSummary: aiSummaryResult ? {
+          summary: aiSummaryResult.summary,
+          confidence: aiSummaryResult.confidence,
+          model: aiSummaryResult.modelUsed,
+        } : null,
         strategy: strategy.reason,
         usedApiForCommits: shouldUseApiForCommits,
         usedLocalCloning: !!repoPath,
@@ -286,8 +407,8 @@ export class RepositorySetupProcessor {
           continue;
         }
         
-        // Process new commits sequentially to avoid database connection issues
-        for (const commit of newCommits) {
+        // Process new commits in batches for better performance
+        const batchData = newCommits.map(commit => {
           const payload = {
             sha: commit.sha,
             message: commit.commit.message,
@@ -310,22 +431,29 @@ export class RepositorySetupProcessor {
           
           const eventHash = this.createEventHash(logData);
           
-          await this.prisma.log.create({
-            data: {
-              event_id: `commit_${commit.sha}`,
-              event_type: 'COMMIT',
-              actor: commit.commit.author.name,
-              timestamp: new Date(commit.commit.author.date),
-              payload,
-              event_hash: eventHash,
-              prev_event_hash: currentPrevHash,
-              watchlist_id: watchlistId,
-            },
-          });
-          
+          // Update prev hash for next iteration
+          const prevHash = currentPrevHash;
           currentPrevHash = eventHash;
-          processedCount++;
-        }
+          
+          return {
+            event_id: `commit_${commit.sha}`,
+            event_type: 'COMMIT',
+            actor: commit.commit.author.name,
+            timestamp: new Date(commit.commit.author.date),
+            payload,
+            event_hash: eventHash,
+            prev_event_hash: prevHash,
+            watchlist_id: watchlistId,
+          };
+        });
+        
+        // Batch insert all commits at once
+        await this.prisma.log.createMany({
+          data: batchData,
+          skipDuplicates: true, // Skip if any duplicates exist
+        });
+        
+        processedCount += newCommits.length;
         skippedCount += (batch.length - newCommits.length);
         
         this.logger.log(`📊 Batch ${Math.floor(i / batchSize) + 1}: Processed ${newCommits.length} new commits, skipped ${batch.length - newCommits.length} existing`);
@@ -368,6 +496,40 @@ export class RepositorySetupProcessor {
         committer: commit.author, // Local git doesn't separate committer
         committer_email: commit.email,
         parents: [], // Local git doesn't provide parents in this format
+      };
+    });
+  }
+
+  /**
+   * Transform commits to the format expected by activity analysis
+   * Handles both GitHub API format and local git format
+   */
+  private transformCommitsForActivityAnalysis(commits: any[]): CommitData[] {
+    return commits.map(commit => {
+      // Handle GitHub API format (nested commit structure)
+      if (commit.commit && commit.commit.author) {
+        return {
+          sha: commit.sha,
+          author: commit.commit.author.name,
+          email: commit.commit.author.email,
+          date: new Date(commit.commit.author.date),
+          message: commit.commit.message,
+          filesChanged: [], // We don't have file change data from API in this format
+          linesAdded: 0, // We don't have line change data from API in this format
+          linesDeleted: 0,
+        };
+      }
+      
+      // Handle local git format (flat structure)
+      return {
+        sha: commit.sha,
+        author: commit.author,
+        email: commit.email,
+        date: new Date(commit.date),
+        message: commit.message,
+        filesChanged: commit.filesChanged || [],
+        linesAdded: commit.linesAdded || 0,
+        linesDeleted: commit.linesDeleted || 0,
       };
     });
   }

@@ -1,6 +1,7 @@
 import { Body, Controller, Post, Get, Param, Logger, Query, HttpException, HttpStatus } from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { ActivityService } from '../services/activity.service';
+import { RepositorySummaryService } from '../services/repository-summary.service';
 import { ScorecardService } from '../services/scorecard.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
@@ -14,6 +15,7 @@ export class ActivityController {
   
   constructor(
     private readonly activityService: ActivityService,
+    private readonly repositorySummaryService: RepositorySummaryService,
     private readonly scorecardService: ScorecardService,
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApiService: GitHubApiService,
@@ -168,6 +170,41 @@ export class ActivityController {
         is_large_repo: repoInfo.is_large_repo,
       },
     };
+  }
+
+  @Get('ai-summary/test')
+  @ApiOperation({ summary: 'Test AI summary generation for a repository' })
+  @ApiResponse({ status: 200, description: 'AI summary generated successfully' })
+  async testAISummary(
+    @Query('owner') owner: string,
+    @Query('repo') repo: string
+  ) {
+    this.logger.log(`🤖 Testing AI summary generation for ${owner}/${repo}`);
+    
+    try {
+      const result = await this.repositorySummaryService.testSummaryGeneration(owner, repo);
+      
+      return {
+        success: result.success,
+        summary: result.summary ? {
+          text: result.summary.summary,
+          confidence: result.summary.confidence,
+          model: result.summary.modelUsed,
+          generatedAt: result.summary.generatedAt,
+        } : null,
+        error: result.error,
+        message: result.success 
+          ? `✅ AI summary generated successfully for ${owner}/${repo}`
+          : `❌ Failed to generate AI summary for ${owner}/${repo}: ${result.error}`
+      };
+    } catch (error) {
+      this.logger.error(`Error testing AI summary for ${owner}/${repo}:`, error);
+      return {
+        success: false,
+        error: error.message,
+        message: `❌ Error testing AI summary for ${owner}/${repo}`
+      };
+    }
   }
 
   // Helper methods (copied from ActivityService for testing)

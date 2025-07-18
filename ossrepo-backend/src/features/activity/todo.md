@@ -1,3 +1,11 @@
+🚀 REPOSITORY SETUP
+[x] Initial Repository Analysis - COMPLETED
+  - Clone/fetch repository
+  - Fetch commits via GitHub API or local git
+  - Run Scorecard health analysis
+  - Calculate bus factor and risk assessment
+  - Log commits and health metrics
+
 🚀 POLLING & EVENT DETECTION
 [ ] Implement Polling Queue
  Create polling_schedule table:
@@ -89,6 +97,39 @@ Scorecard metrics for each run
 Timestamps for trend tracking
 
 🚀 ADDITIONAL REPOSITORY ANALYTICS
+✨ Activity Score & File Churn
+[ ] Compute Activity Score
+Calculate overall repository activity level (0-100) based on:
+- Commit frequency over time
+- Number of active contributors
+- Lines of code changed
+- File modification patterns
+
+[ ] File Churn Analysis
+Track file modification patterns:
+- Files with most commits (hotspot files)
+- Lines added/deleted per file
+- Churn rate over time
+- Top N most active files
+
+✨ Activity Heatmaps
+[ ] Generate Time-Based Activity Heatmaps
+Create heatmaps showing:
+- Commit activity by day of week and hour
+- File modification patterns over time
+- Contributor work patterns
+- Peak activity periods
+
+✨ AI-Powered Repository Summary
+[x] Implement AI Summary Generation - COMPLETED
+Generate 2-3 sentence repository overview using:
+- Recent commit activity
+- Health scores and bus factor
+- Repository description and metadata
+- File churn and activity patterns
+- Contributor statistics
+Uses local Mistral 7B model via Ollama for cost-free, private processing
+
 ✨ Language & Code Size Metrics
 [ ] Integrate cloc
 Tool:
@@ -255,4 +296,4 @@ AI-generated summaries
 Heatmap of activity
 
 ✨ Other Nice-To-Haves
-Track “truck factor” (bus factor)
+[x] Track “truck factor” (bus factor) - COMPLETED
