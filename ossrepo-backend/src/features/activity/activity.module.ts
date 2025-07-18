@@ -7,6 +7,7 @@ import { ScorecardService } from './services/scorecard.service';
 import { RepositorySetupProcessor } from './processors/repository-setup.processor';
 import { RateLimitManagerService } from './services/rate-limit-manager.service';
 import { GitHubApiService } from './services/github-api.service';
+import { BusFactorService } from './services/bus-factor.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { ConfigModule } from '@nestjs/config';
@@ -29,6 +30,7 @@ import { ConfigModule } from '@nestjs/config';
     RepositorySetupProcessor,
     RateLimitManagerService,
     GitHubApiService,
+    BusFactorService,
   ],
   exports: [ActivityService],
 })

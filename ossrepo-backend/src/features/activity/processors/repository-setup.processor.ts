@@ -7,6 +7,7 @@ import { ScorecardService } from '../services/scorecard.service';
 import { HealthAnalysisService } from '../services/health-analysis.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
+import { BusFactorService } from '../services/bus-factor.service';
 
 interface RepositorySetupJobData {
   watchlistId: string;
@@ -31,6 +32,7 @@ export class RepositorySetupProcessor {
     private readonly healthAnalysisService: HealthAnalysisService,
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApi: GitHubApiService,
+    private readonly busFactorService: BusFactorService,
   ) {}
 
   @Process('clone-and-analyze')
@@ -178,6 +180,20 @@ export class RepositorySetupProcessor {
         this.logger.log(`✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`);
       }
 
+      // Step 3: Calculate bus factor
+      let busFactorResult: any = null;
+      if (commitCount > 0) {
+        try {
+          this.logger.log(`📊 Calculating bus factor for ${owner}/${repo}`);
+          busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
+          await this.busFactorService.storeBusFactorResults(watchlistId, busFactorResult);
+        } catch (error) {
+          this.logger.error(`❌ Bus factor calculation failed: ${error.message}`);
+        }
+      } else {
+        this.logger.log(`📊 Skipping bus factor calculation (no commits available)`);
+      }
+
       await this.prisma.watchlist.update({
         where: { watchlist_id: watchlistId },
         data: {
@@ -195,13 +211,20 @@ export class RepositorySetupProcessor {
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       const healthMetricsCount = historicalScorecardData.length;
-      this.logger.log(`✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved`);
+      const busFactorInfo = busFactorResult ? {
+        busFactor: busFactorResult.busFactor,
+        riskLevel: busFactorResult.riskLevel,
+        totalContributors: busFactorResult.totalContributors,
+      } : null;
+      
+      this.logger.log(`✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}`);
 
       const result = { 
         success: true, 
         commitCount, 
         healthMetricsCount,
         hasScorecardData: healthMetricsCount > 0,
+        busFactor: busFactorInfo,
         strategy: strategy.reason,
         usedApiForCommits: shouldUseApiForCommits,
         usedLocalCloning: !!repoPath,
@@ -263,8 +286,8 @@ export class RepositorySetupProcessor {
           continue;
         }
         
-        // Process new commits in parallel
-        const commitPromises = newCommits.map(async (commit) => {
+        // Process new commits sequentially to avoid database connection issues
+        for (const commit of newCommits) {
           const payload = {
             sha: commit.sha,
             message: commit.commit.message,
@@ -302,10 +325,7 @@ export class RepositorySetupProcessor {
           
           currentPrevHash = eventHash;
           processedCount++;
-        });
-        
-        // Wait for batch to complete
-        await Promise.all(commitPromises);
+        }
         skippedCount += (batch.length - newCommits.length);
         
         this.logger.log(`📊 Batch ${Math.floor(i / batchSize) + 1}: Processed ${newCommits.length} new commits, skipped ${batch.length - newCommits.length} existing`);
