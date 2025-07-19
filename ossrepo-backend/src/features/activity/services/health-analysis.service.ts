@@ -81,7 +81,7 @@ export class HealthAnalysisService {
     commits: any[], 
     branch: string = 'main',
     skipScorecardQuery: boolean = false
-  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }> }> {
+  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string | null; scorecardMetrics?: any }> }> {
     
     if (commits.length === 0) {
       return { current: 0, historical: [] };
@@ -121,21 +121,14 @@ export class HealthAnalysisService {
 
     this.logger.log(`✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`);
 
-    // Map Scorecard data to commit timeline
-    const historicalResults: Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }> = [];
-    
-    // For each commit, find the closest Scorecard data point
-    for (const commit of sortedCommits) {
-      const closestScorecard = this.findClosestScorecardData(commit.date, historicalScorecardData);
-      if (closestScorecard) {
-        historicalResults.push({
-          date: commit.date,
-          score: closestScorecard.score,
-          commitSha: commit.sha,
-          scorecardMetrics: closestScorecard.checks || null
-        });
-      }
-    }
+    // Use Scorecard data directly instead of mapping to commits
+    const historicalResults: Array<{ date: Date; score: number; commitSha: string | null; scorecardMetrics?: any }> = 
+      historicalScorecardData.map(scorecardRecord => ({
+        date: scorecardRecord.date,
+        score: scorecardRecord.score,
+        commitSha: null, // Scorecard data doesn't have commit SHAs
+        scorecardMetrics: scorecardRecord.checks || null // This should contain the checks array
+      }));
 
     // Get current health score (try Scorecard first, fallback to local)
     let currentScore: number;
@@ -162,7 +155,7 @@ export class HealthAnalysisService {
     repo: string, 
     commits: any[], 
     branch: string = 'main'
-  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }> }> {
+  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string | null; scorecardMetrics?: any }> }> {
     
     // Sort commits by date (oldest first)
     const sortedCommits = commits
@@ -204,7 +197,7 @@ export class HealthAnalysisService {
     });
 
     // Wait for all health checks to complete
-    const historicalResults = (await Promise.all(healthCheckPromises)) as Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }>;
+    const historicalResults = (await Promise.all(healthCheckPromises)) as Array<{ date: Date; score: number; commitSha: string | null; scorecardMetrics?: any }>;
 
     // The current score is the latest historical result (newest commit is always included)
     const currentScore = historicalResults.length > 0 ? historicalResults[historicalResults.length - 1].score : 0;
@@ -422,10 +415,8 @@ export class HealthAnalysisService {
     const totalScore = validChecks.reduce((sum, check) => sum + check.score, 0);
     const averageScore = totalScore / validChecks.length;
     
-    // Scorecard scores are typically 0-10, convert to 0-100
-    const finalScore = Math.round(averageScore * 10);
-    
-    return finalScore;
+    // Keep scores on 0-10 scale for consistency with Scorecard
+    return averageScore; // Return the average directly (0-10 scale)
   }
 
   private async storeHealthResults(result: HealthAnalysisResult): Promise<void> {

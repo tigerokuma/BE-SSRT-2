@@ -74,21 +74,31 @@ export class ScorecardService {
       const [job] = await this.bigquery.createQueryJob(options);
       const [rows] = await job.getQueryResults();
 
+      // Log the number of records found
+      if (rows.length > 0) {
+        this.logger.log(`📊 Found ${rows.length} Scorecard records from BigQuery`);
+      }
+      
       const historicalData: HistoricalScorecardData[] = rows.map(row => {
-        // Debug: Log the raw date value from BigQuery
-        this.logger.log(`🔍 Debug: BigQuery row.date = "${row.date}" (type: ${typeof row.date})`);
-        
+        // BigQuery returns dates as objects with a 'value' property
         let parsedDate: Date;
         try {
-          parsedDate = new Date(row.date);
-          if (isNaN(parsedDate.getTime())) {
-            this.logger.warn(`⚠️ Invalid date from BigQuery: "${row.date}", using current date`);
-            parsedDate = new Date();
+          if (row.date && typeof row.date === 'object' && row.date.value) {
+            // BigQuery Date object has a 'value' property with the date string
+            parsedDate = new Date(row.date.value);
+          } else if (typeof row.date === 'string') {
+            parsedDate = new Date(row.date);
           } else {
-            this.logger.log(`✅ Successfully parsed BigQuery date: ${parsedDate.toISOString()}`);
+            this.logger.warn(`⚠️ Unexpected date format from BigQuery:`, row.date);
+            parsedDate = new Date();
+          }
+          
+          if (isNaN(parsedDate.getTime())) {
+            this.logger.warn(`⚠️ Invalid date from BigQuery:`, row.date);
+            parsedDate = new Date();
           }
         } catch (error) {
-          this.logger.warn(`⚠️ Error parsing BigQuery date: "${row.date}", using current date`);
+          this.logger.warn(`⚠️ Error parsing BigQuery date:`, row.date, error);
           parsedDate = new Date();
         }
         

@@ -227,6 +227,45 @@ export class ActivityController {
     }
   }
 
+  @Get('health-data/test')
+  @ApiOperation({ summary: 'Test health data storage and retrieval' })
+  @ApiResponse({ status: 200, description: 'Health data test results' })
+  async testHealthData() {
+    try {
+      const healthData = await this.prisma.healthData.findMany({
+        take: 5,
+        orderBy: { created_at: 'desc' },
+        include: {
+          watchlist: {
+            select: {
+              watchlist_id: true,
+              package: {
+                select: {
+                  package_name: true
+                }
+              }
+            }
+          }
+        }
+      });
+      
+      return {
+        count: healthData.length,
+        data: healthData.map(h => ({
+          id: h.id,
+          watchlist_id: h.watchlist_id,
+          package_name: h.watchlist.package.package_name,
+          score: h.overall_health_score,
+          metrics: h.scorecard_metrics,
+          source: h.source,
+          created_at: h.created_at
+        }))
+      };
+    } catch (error) {
+      return { error: error.message };
+    }
+  }
+
   // Helper methods (copied from ActivityService for testing)
   private parseGitHubUrl(url: string): { owner: string; repo: string } {
     try {

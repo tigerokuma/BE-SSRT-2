@@ -203,21 +203,17 @@ export class RepositorySetupProcessor {
         this.logger.log(`✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`);
       }
       
-      // Store health data in new table (for both BigQuery and local analysis results)
+            // Store health data in new table (for both BigQuery and local analysis results)
       if (historicalScorecardData.length > 0) {
         this.logger.log(`📊 Storing ${historicalScorecardData.length} health data records in database`);
         
         for (const healthRecord of historicalScorecardData) {
-          // Debug: Log the actual date value we're receiving
-          this.logger.log(`🔍 Debug: healthRecord.date = "${healthRecord.date}" (type: ${typeof healthRecord.date})`);
-          
-          // Parse the date string properly - Scorecard returns dates like "2025-07-14"
+          // Parse the date - Scorecard data is already a Date object from our service
           let commitDate: Date;
           try {
             if (typeof healthRecord.date === 'string') {
               // If it's a date string like "2025-07-14", append time to make it valid
               const dateStr = healthRecord.date.includes('T') ? healthRecord.date : `${healthRecord.date}T00:00:00Z`;
-              this.logger.log(`🔍 Debug: Parsing date string: "${dateStr}"`);
               commitDate = new Date(dateStr);
             } else {
               commitDate = new Date(healthRecord.date);
@@ -227,8 +223,6 @@ export class RepositorySetupProcessor {
             if (isNaN(commitDate.getTime())) {
               this.logger.warn(`⚠️ Invalid date from Scorecard: "${healthRecord.date}", using current date`);
               commitDate = new Date();
-            } else {
-              this.logger.log(`✅ Successfully parsed date: ${commitDate.toISOString()}`);
             }
           } catch (error) {
             this.logger.warn(`⚠️ Error parsing date from Scorecard: "${healthRecord.date}", using current date`);
@@ -238,9 +232,9 @@ export class RepositorySetupProcessor {
           await this.prisma.healthData.create({
             data: {
               watchlist_id: watchlistId,
-              commit_sha: healthRecord.commitSha,
+              commit_sha: healthRecord.commitSha || null, // Can be null for Scorecard data
               commit_date: commitDate,
-              scorecard_metrics: healthRecord.scorecardMetrics || null,
+              scorecard_metrics: healthRecord.checks || healthRecord.scorecardMetrics || null, // Handle both Scorecard and local analysis
               overall_health_score: healthRecord.score,
               source: healthRecord.source || 'scorecard',
               analysis_date: new Date(),
