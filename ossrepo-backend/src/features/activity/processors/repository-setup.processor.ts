@@ -199,6 +199,23 @@ export class RepositorySetupProcessor {
         }
       } else {
         this.logger.log(`✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`);
+        
+        // Store health data in new table
+        if (historicalScorecardData.length > 0) {
+          const latestHealth = historicalScorecardData[historicalScorecardData.length - 1];
+          await this.prisma.healthData.create({
+            data: {
+              watchlist_id: watchlistId,
+              commit_sha: latestHealth.commitSha,
+              commit_date: new Date(latestHealth.date),
+              scorecard_metrics: latestHealth.scorecardMetrics,
+              overall_health_score: latestHealth.score,
+              source: latestHealth.source || 'scorecard',
+              analysis_date: new Date(),
+            },
+          });
+          this.logger.log(`✅ Health data stored in database`);
+        }
       }
 
       // Step 3: Calculate bus factor
@@ -208,6 +225,20 @@ export class RepositorySetupProcessor {
           this.logger.log(`📊 Calculating bus factor for ${owner}/${repo}`);
           busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
           await this.busFactorService.storeBusFactorResults(watchlistId, busFactorResult);
+          
+          // Store bus factor data in new table
+          await this.prisma.busFactorData.create({
+            data: {
+              watchlist_id: watchlistId,
+              bus_factor: busFactorResult.busFactor,
+              total_contributors: busFactorResult.totalContributors,
+              top_contributors: busFactorResult.topContributors,
+              risk_level: busFactorResult.riskLevel,
+              risk_reason: busFactorResult.riskReason,
+              analysis_date: new Date(),
+            },
+          });
+          this.logger.log(`✅ Bus factor data stored in database`);
         } catch (error) {
           this.logger.error(`❌ Bus factor calculation failed: ${error.message}`);
         }
@@ -240,6 +271,26 @@ export class RepositorySetupProcessor {
             activityHeatmap,
             totalFilesAnalyzed: fileChurnData.length,
           };
+          
+          // Store activity data in new table
+          await this.prisma.activityData.create({
+            data: {
+              watchlist_id: watchlistId,
+              activity_score: activityScore.score,
+              activity_level: activityScore.level,
+              total_commits: commitCount,
+              total_files_analyzed: fileChurnData.length,
+              file_churn_data: JSON.parse(JSON.stringify(this.activityAnalysisService.getTopActiveFiles(fileChurnData, 10))),
+              activity_heatmap: JSON.parse(JSON.stringify(activityHeatmap)),
+              peak_activity: {
+                day: activityHeatmap.peakActivity.day,
+                hour: activityHeatmap.peakActivity.hour,
+                count: activityHeatmap.peakActivity.count,
+              },
+              analysis_date: new Date(),
+            },
+          });
+          this.logger.log(`✅ Activity data stored in database`);
           
           // Get activity summary for logging
           const activitySummary = this.activityAnalysisService.getActivitySummary(
@@ -296,6 +347,20 @@ export class RepositorySetupProcessor {
         
         if (aiSummaryResult) {
           this.logger.log(`✅ AI summary generated: "${aiSummaryResult.summary.substring(0, 50)}..." (confidence: ${aiSummaryResult.confidence})`);
+          
+          // Store AI summary data in new table
+          await this.prisma.aISummaryData.create({
+            data: {
+              watchlist_id: watchlistId,
+              summary: aiSummaryResult.summary,
+              confidence: aiSummaryResult.confidence,
+              model_used: aiSummaryResult.modelUsed || 'gemma2:2b',
+              prompt_length: aiSummaryResult.promptLength,
+              output_length: aiSummaryResult.outputLength,
+              generation_time_ms: aiSummaryResult.generationTimeMs,
+            },
+          });
+          this.logger.log(`✅ AI summary data stored in database`);
         } else {
           this.logger.warn(`⚠️ AI summary generation failed, using fallback`);
         }
@@ -308,8 +373,9 @@ export class RepositorySetupProcessor {
         data: {
           status: 'ready',
           processing_completed_at: new Date(),
-          commits_since_last_health_update: commitCount,
+          commits_since_last_health_update: 0, // Fixed: should be 0, not commitCount
           last_error: null,
+          latest_commit_sha: commitsResult?.[0]?.sha || null, // Store latest commit SHA
         },
       });
 
@@ -444,6 +510,12 @@ export class RepositorySetupProcessor {
             event_hash: eventHash,
             prev_event_hash: prevHash,
             watchlist_id: watchlistId,
+            // Note: GitHub API doesn't provide diff data in basic commit endpoint
+            // We'll need to make additional API calls to get file changes
+            files_changed: 0, // Will be updated if we fetch diff data
+            lines_added: 0,   // Will be updated if we fetch diff data
+            lines_deleted: 0, // Will be updated if we fetch diff data
+            diff_data: undefined,  // Will be updated if we fetch diff data
           };
         });
         

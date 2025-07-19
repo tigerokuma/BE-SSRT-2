@@ -31,6 +31,9 @@ export interface AISummaryResult {
   confidence: number;
   generatedAt: Date;
   modelUsed: string;
+  promptLength?: number;
+  outputLength?: number;
+  generationTimeMs?: number;
 }
 
 @Injectable()
@@ -84,13 +87,18 @@ export class AISummaryService {
   async generateRepositorySummary(repoData: RepositoryData): Promise<AISummaryResult> {
     try {
       const prompt = this.buildSummaryPrompt(repoData);
+      const startTime = Date.now();
       const summary = await this.generateWithMistral(prompt);
+      const generationTimeMs = Date.now() - startTime;
       
       return {
         summary: this.truncateSummary(summary),
         confidence: this.calculateConfidence(repoData),
         generatedAt: new Date(),
         modelUsed: this.modelName,
+        promptLength: prompt.length,
+        outputLength: summary.length,
+        generationTimeMs,
       };
     } catch (error) {
       this.logger.error('Failed to generate AI summary, using fallback:', error);

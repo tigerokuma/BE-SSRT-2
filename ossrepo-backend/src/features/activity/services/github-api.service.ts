@@ -45,6 +45,22 @@ export interface GitHubRepoInfo {
   pushed_at: string;
 }
 
+export interface GitHubContributorStats {
+  author: {
+    login: string;
+    id: number;
+    avatar_url: string;
+    type: string;
+  };
+  total: number; // Total commits
+  weeks: Array<{
+    w: number; // Week timestamp
+    a: number; // Additions
+    d: number; // Deletions
+    c: number; // Commits
+  }>;
+}
+
 @Injectable()
 export class GitHubApiService {
   private readonly logger = new Logger(GitHubApiService.name);
