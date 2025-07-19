@@ -110,6 +110,11 @@ model Watchlist {
   processing_completed_at          DateTime?
   last_error                       String?
   
+  // Repository size tracking for cloning strategy
+  repo_size_kb                     Int?             // Repository size in KB from GitHub API
+  clone_time_ms                    Int?             // Time taken to clone repository in milliseconds
+  analysis_strategy                String?         @default("api-only") // api-only, full-clone, hybrid
+  
   // Relations
   userWatchlistEntries             UserWatchlist[]
   package                          Package         @relation(fields: [package_id], references: [package_id])
