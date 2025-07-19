@@ -267,13 +267,9 @@ export class ActivityAnalysisService {
     heatmap: ActivityHeatmap,
     weeklyCommitRate: number
   ): string {
-    const topFiles = this.getTopActiveFiles(fileChurnData, 3);
-    const topFilesStr = topFiles.map(f => `${f.filePath} (${f.commitCount} commits)`).join(', ');
-
     return `Activity Score: ${activityScore.score}/100 (${activityScore.level}) | ` +
            `Weekly Commit Rate: ${weeklyCommitRate.toFixed(2)} commits/week | ` +
-           `Peak Activity: ${heatmap.peakActivity.day} ${heatmap.peakActivity.hour}:00 (${heatmap.peakActivity.count} commits) | ` +
-           `Top Files: ${topFilesStr}`;
+           `Peak Activity: ${heatmap.peakActivity.day} ${heatmap.peakActivity.hour}:00 (${heatmap.peakActivity.count} commits)`;
   }
 
 

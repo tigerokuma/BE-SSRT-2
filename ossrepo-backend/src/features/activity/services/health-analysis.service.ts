@@ -177,7 +177,7 @@ export class HealthAnalysisService {
     const healthCheckPromises = samplingPoints.map(async (point, index) => {
       try {
         const result = await this.performAnalysis(watchlistId, owner, repo, branch, point.sha);
-        this.logger.log(`   📈 ${point.date.toISOString().split('T')[0]}: ${result.overallHealthScore}/100`);
+        this.logger.log(`   📈 ${point.date.toISOString().split('T')[0]}: ${(result.overallHealthScore / 10).toFixed(1)}/10`);
         return {
           date: point.date,
           score: result.overallHealthScore,

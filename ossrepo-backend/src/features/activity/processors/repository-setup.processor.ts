@@ -181,7 +181,7 @@ export class RepositorySetupProcessor {
         if (commitsForHealthAnalysis.length === 0) {
           this.logger.log(`📊 No commits found, running health analysis on repository head`);
           const currentHealth = await this.healthAnalysisService.analyzeRepository(watchlistId, owner, repo, branch, undefined, true); // Skip Scorecard query
-          this.logger.log(`   📈 ${new Date().toISOString().split('T')[0]}: ${currentHealth}/100`);
+          this.logger.log(`   📈 ${new Date().toISOString().split('T')[0]}: ${(currentHealth / 10).toFixed(1)}/10`);
           historicalScorecardData = [{
             date: new Date().toISOString(),
             score: currentHealth,
@@ -332,14 +332,6 @@ export class RepositorySetupProcessor {
           );
           
           this.logger.log(`📊 Activity Analysis: ${activitySummary}`);
-          
-          // Log top active files if available
-          if (activityAnalysisResult?.fileChurnData?.length > 0) {
-            const topFiles = activityAnalysisResult.fileChurnData.slice(0, 5);
-            this.logger.log(`📁 Top Active Files: ${topFiles.map(f => f.filePath).join(', ')}`);
-          } else {
-            this.logger.log(`📁 No file change data available (using GitHub API)`);
-          }
         } catch (error) {
           this.logger.error(`❌ Activity analysis failed: ${error.message}`);
         }
