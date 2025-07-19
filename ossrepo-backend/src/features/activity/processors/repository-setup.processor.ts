@@ -208,11 +208,32 @@ export class RepositorySetupProcessor {
         this.logger.log(`📊 Storing ${historicalScorecardData.length} health data records in database`);
         
         for (const healthRecord of historicalScorecardData) {
+          // Parse the date string properly - Scorecard returns dates like "2025-07-14"
+          let commitDate: Date;
+          try {
+            if (typeof healthRecord.date === 'string') {
+              // If it's a date string like "2025-07-14", append time to make it valid
+              const dateStr = healthRecord.date.includes('T') ? healthRecord.date : `${healthRecord.date}T00:00:00Z`;
+              commitDate = new Date(dateStr);
+            } else {
+              commitDate = new Date(healthRecord.date);
+            }
+            
+            // Validate the date
+            if (isNaN(commitDate.getTime())) {
+              this.logger.warn(`⚠️ Invalid date from Scorecard: ${healthRecord.date}, using current date`);
+              commitDate = new Date();
+            }
+          } catch (error) {
+            this.logger.warn(`⚠️ Error parsing date from Scorecard: ${healthRecord.date}, using current date`);
+            commitDate = new Date();
+          }
+          
           await this.prisma.healthData.create({
             data: {
               watchlist_id: watchlistId,
               commit_sha: healthRecord.commitSha,
-              commit_date: new Date(healthRecord.date),
+              commit_date: commitDate,
               scorecard_metrics: healthRecord.scorecardMetrics || null,
               overall_health_score: healthRecord.score,
               source: healthRecord.source || 'scorecard',
