@@ -276,19 +276,5 @@ export class ActivityAnalysisService {
            `Top Files: ${topFilesStr}`;
   }
 
-  /**
-   * Convert stored weekly commit rate from database format back to decimal
-   * The database stores weekly commit rate * 100 to preserve decimals
-   */
-  getWeeklyCommitRateFromStorage(storedValue: number): number {
-    return storedValue / 100;
-  }
 
-  /**
-   * Convert weekly commit rate to storage format for database
-   * Multiply by 100 to preserve decimals in integer field
-   */
-  getWeeklyCommitRateForStorage(weeklyRate: number): number {
-    return Math.round(weeklyRate * 100);
-  }
 } 

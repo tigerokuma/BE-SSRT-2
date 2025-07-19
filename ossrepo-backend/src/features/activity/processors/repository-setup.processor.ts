@@ -283,13 +283,12 @@ export class RepositorySetupProcessor {
           };
           
           // Store activity data in new table
-          // Note: total_commits field now stores weekly commit rate * 100 to preserve decimals
           await this.prisma.activityData.create({
             data: {
               watchlist_id: watchlistId,
               activity_score: activityScore.score,
               activity_level: activityScore.level,
-              total_commits: this.activityAnalysisService.getWeeklyCommitRateForStorage(weeklyCommitRate),
+              weekly_commit_rate: weeklyCommitRate,
               total_files_analyzed: fileChurnData.length,
               file_churn_data: JSON.parse(JSON.stringify(this.activityAnalysisService.getTopActiveFiles(fileChurnData, 10))),
               activity_heatmap: JSON.parse(JSON.stringify(activityHeatmap)),

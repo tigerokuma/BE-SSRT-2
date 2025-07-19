@@ -163,7 +163,7 @@ model ActivityData {
   watchlist_id         String
   activity_score       Int
   activity_level       String
-  total_commits        Int
+  weekly_commit_rate   Decimal   @db.Decimal(5, 2) // Average commits per week (e.g., 2.50)
   total_files_analyzed Int
   file_churn_data      Json?
   activity_heatmap     Json?
