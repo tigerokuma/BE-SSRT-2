@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { AlertRepository } from '../repositories/alert.repository';
+import { AlertCentreRepository } from '../repositories/alert.repository';
 import { CreateAlertDto, UpdateAlertDto } from '../dto/create-alert.dto';
 
 @Injectable()
 export class AlertCentreService {
-  constructor(private readonly alertRepository: AlertRepository) {}
+  constructor(private readonly alertRepository: AlertCentreRepository) {}
 
   getAlert(body: { alert_id: string }) {
     return this.alertRepository.getAlert(body.alert_id);

@@ -3,7 +3,7 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { CreateAlertDto, UpdateAlertDto } from '../dto/create-alert.dto';
 
 @Injectable()
-export class AlertRepository {
+export class AlertCentreRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async getAlert(ID: string) {
@@ -18,7 +18,7 @@ export class AlertRepository {
         orderBy: { alert_id: 'desc' },
         select: { alert_id: true },
       });
-      
+
     const newAlertId = latestAlert ? latestAlert.alert_id + 1 : 1;
 
     return this.prisma.alert.create({ data: {

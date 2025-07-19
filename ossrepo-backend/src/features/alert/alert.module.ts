@@ -11,6 +11,7 @@ import { ConfigModule } from '@nestjs/config';
 import { SlackRepository } from './repositories/slack.repository';
 import { JiraRepository } from './repositories/jira.repository';
 import { EmailRepository } from './repositories/email.repository';
+import { AlertCentreRepository } from './repositories/alert.repository'
 
 
 @Module({
@@ -26,6 +27,7 @@ import { EmailRepository } from './repositories/email.repository';
     EmailService,
     SlackService,
     JiraService,
+    AlertCentreRepository,
     SlackRepository,
     JiraRepository,
     EmailRepository
