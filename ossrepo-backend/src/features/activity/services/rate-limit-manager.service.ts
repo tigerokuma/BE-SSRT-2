@@ -124,26 +124,26 @@ export class RateLimitManagerService {
     let reason = '';
 
     if (remaining >= 4000) {
-      // 4000+ tokens: Clone repos < 100MB, use API for larger repos (fast API for large repos)
-      maxRepoSizeForCloning = 100000; // 100MB
-      reason = `Token-Heavy mode: ${remaining} tokens remaining. Cloning repos < 100MB, using API for larger repos.`;
+      // 4000+ tokens: Use API heavily - clone only very small repos < 50MB
+      maxRepoSizeForCloning = 50000; // 50MB
+      reason = `Token-Heavy mode: ${remaining} tokens remaining. Using API heavily, cloning only repos < 50MB.`;
     } else if (remaining >= 3000) {
-      // 3000+ tokens: Clone repos < 250MB, use API for larger repos
-      maxRepoSizeForCloning = 250000; // 250MB
-      reason = `High-Token mode: ${remaining} tokens remaining. Cloning repos < 250MB, using API for larger repos.`;
+      // 3000+ tokens: Use API moderately - clone repos < 100MB
+      maxRepoSizeForCloning = 100000; // 100MB
+      reason = `High-Token mode: ${remaining} tokens remaining. Using API moderately, cloning repos < 100MB.`;
     } else if (remaining >= 2000) {
-      // 2000+ tokens: Clone repos < 500MB, use API for larger repos
-      maxRepoSizeForCloning = 500000; // 500MB
-      reason = `Medium-Token mode: ${remaining} tokens remaining. Cloning repos < 500MB, using API for larger repos.`;
+      // 2000+ tokens: Use API sparingly - clone repos < 250MB
+      maxRepoSizeForCloning = 250000; // 250MB
+      reason = `Medium-Token mode: ${remaining} tokens remaining. Using API sparingly, cloning repos < 250MB.`;
     } else if (remaining >= 1000) {
-      // 1000+ tokens: Clone repos < 1GB, use API for larger repos
-      maxRepoSizeForCloning = 1000000; // 1GB
-      reason = `Low-Token mode: ${remaining} tokens remaining. Cloning repos < 1GB, using API for larger repos.`;
+      // 1000+ tokens: Use API minimally - clone repos < 500MB
+      maxRepoSizeForCloning = 500000; // 500MB
+      reason = `Low-Token mode: ${remaining} tokens remaining. Using API minimally, cloning repos < 500MB.`;
     } else {
-      // <1000 tokens: Conservative mode - clone only very small repos, preserve tokens
-      maxRepoSizeForCloning = baseCloningThreshold; // 50MB
+      // <1000 tokens: Conservative mode - clone repos < 1GB, preserve tokens
+      maxRepoSizeForCloning = 1000000; // 1GB
       useApiForCommits = false; // Don't use API for commits when tokens are very low
-      reason = `Conservative mode: ${remaining} tokens remaining. Cloning repos < 50MB, minimal API usage.`;
+      reason = `Conservative mode: ${remaining} tokens remaining. Cloning repos < 1GB, minimal API usage.`;
     }
 
     return {
@@ -204,19 +204,16 @@ export class RateLimitManagerService {
    * With more tokens, we use API for larger repos (fast), with fewer tokens we clone more repos (slow but saves API calls)
    */
   private getCloningThresholdForTokens(remainingTokens: number): number {
-    // Always clone repositories under 50MB regardless of tokens
-    const baseCloningThreshold = 50000; // 50MB in KB
-
     if (remainingTokens >= 4000) {
-      return 100000; // 100MB - clone repos < 100MB (use API for larger repos)
+      return 50000; // 50MB - use API heavily, clone only very small repos
     } else if (remainingTokens >= 3000) {
-      return 250000; // 250MB - clone repos < 250MB
+      return 100000; // 100MB - use API moderately
     } else if (remainingTokens >= 2000) {
-      return 500000; // 500MB - clone repos < 500MB
+      return 250000; // 250MB - use API sparingly
     } else if (remainingTokens >= 1000) {
-      return 1000000; // 1GB - clone repos < 1GB
+      return 500000; // 500MB - use API minimally
     } else {
-      return baseCloningThreshold; // 50MB - clone repos < 50MB (only very small repos)
+      return 1000000; // 1GB - conservative mode, clone most repos
     }
   }
 
