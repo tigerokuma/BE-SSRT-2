@@ -74,11 +74,30 @@ export class ScorecardService {
       const [job] = await this.bigquery.createQueryJob(options);
       const [rows] = await job.getQueryResults();
 
-      const historicalData: HistoricalScorecardData[] = rows.map(row => ({
-        date: new Date(row.date),
-        score: row.score,
-        checks: row.checks || []
-      }));
+      const historicalData: HistoricalScorecardData[] = rows.map(row => {
+        // Debug: Log the raw date value from BigQuery
+        this.logger.log(`🔍 Debug: BigQuery row.date = "${row.date}" (type: ${typeof row.date})`);
+        
+        let parsedDate: Date;
+        try {
+          parsedDate = new Date(row.date);
+          if (isNaN(parsedDate.getTime())) {
+            this.logger.warn(`⚠️ Invalid date from BigQuery: "${row.date}", using current date`);
+            parsedDate = new Date();
+          } else {
+            this.logger.log(`✅ Successfully parsed BigQuery date: ${parsedDate.toISOString()}`);
+          }
+        } catch (error) {
+          this.logger.warn(`⚠️ Error parsing BigQuery date: "${row.date}", using current date`);
+          parsedDate = new Date();
+        }
+        
+        return {
+          date: parsedDate,
+          score: row.score,
+          checks: row.checks || []
+        };
+      });
 
       // No logging to reduce noise
       return historicalData;
