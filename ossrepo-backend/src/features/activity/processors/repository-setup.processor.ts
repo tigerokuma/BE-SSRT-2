@@ -352,12 +352,39 @@ export class RepositorySetupProcessor {
           forks: repositoryInfo?.forks_count || 0,
           contributors: busFactorResult?.totalContributors || 0,
           language: repositoryInfo?.language || 'Unknown',
-          topics: [],
+          topics: repositoryInfo?.topics || [],
           lastCommitDate: commitsResult?.[0] ? new Date(commitsResult[0].commit.author.date) : undefined,
           commitCount: commitCount,
+          
+          // Enhanced bus factor data
           busFactor: busFactorResult?.busFactor || 0,
-          riskScore: undefined,
-          readmeContent: undefined,
+          busFactorRiskLevel: busFactorResult?.riskLevel || 'UNKNOWN',
+          busFactorRiskReason: busFactorResult?.riskReason || '',
+          topContributors: busFactorResult?.topContributors || [],
+          
+          // Health analysis data
+          healthAnalysis: {
+            metricsCount: historicalScorecardData.length,
+            latestHealthScore: historicalScorecardData.length > 0 ? historicalScorecardData[historicalScorecardData.length - 1].score : 0,
+            healthTrend: historicalScorecardData.length > 1 ? this.calculateHealthTrend(historicalScorecardData) : 'stable',
+            healthSource: historicalScorecardData.length > 0 ? historicalScorecardData[0].source : 'unknown',
+            recentHealthScores: historicalScorecardData.slice(-5).map(record => ({
+              date: record.date,
+              score: record.score,
+              source: record.source
+            }))
+          },
+          
+          // Activity analysis data
+          activityAnalysis: activityAnalysisResult ? {
+            activityScore: activityAnalysisResult.activityScore.score,
+            activityLevel: activityAnalysisResult.activityScore.level,
+            weeklyCommitRate: weeklyCommitRate,
+            peakActivity: activityAnalysisResult.activityHeatmap.peakActivity,
+            activityFactors: activityAnalysisResult.activityScore.factors,
+            totalFilesAnalyzed: activityAnalysisResult.totalFilesAnalyzed
+          } : null,
+          
           recentCommits: commitsResult?.slice(0, 5).map(commit => ({
             message: commit.commit.message,
             author: commit.commit.author.name,
@@ -631,6 +658,26 @@ export class RepositorySetupProcessor {
         linesDeleted: commit.linesDeleted || 0,
       };
     });
+  }
+
+  /**
+   * Calculate health trend based on recent health scores
+   */
+  private calculateHealthTrend(healthData: any[]): string {
+    if (healthData.length < 2) return 'stable';
+    
+    // Get the last 5 health scores for trend analysis
+    const recentScores = healthData.slice(-5).map(record => record.score);
+    const firstScore = recentScores[0];
+    const lastScore = recentScores[recentScores.length - 1];
+    const scoreChange = lastScore - firstScore;
+    
+    // Calculate average change per record
+    const avgChange = scoreChange / (recentScores.length - 1);
+    
+    if (avgChange > 0.5) return 'improving';
+    if (avgChange < -0.5) return 'declining';
+    return 'stable';
   }
 
   /**
