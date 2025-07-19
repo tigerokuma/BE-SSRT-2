@@ -106,6 +106,11 @@ export class BusFactorService {
       const payload = commit.payload as any;
       const timestamp = new Date(commit.timestamp);
 
+      // Skip automated bots and CI/CD systems
+      if (this.isBotContributor(author)) {
+        continue;
+      }
+
       if (!contributorMap.has(author)) {
         contributorMap.set(author, {
           author,
@@ -151,6 +156,32 @@ export class BusFactorService {
     }
 
     return Array.from(contributorMap.values());
+  }
+
+  /**
+   * Check if a contributor is an automated bot or CI/CD system
+   */
+  private isBotContributor(author: string): boolean {
+    const botPatterns = [
+      /github-actions/i,
+      /\[bot\]/i,
+      /dependabot/i,
+      /renovate/i,
+      /greenkeeper/i,
+      /snyk/i,
+      /travis/i,
+      /circleci/i,
+      /jenkins/i,
+      /gitlab-ci/i,
+      /azure-pipelines/i,
+      /github-actions\[bot\]/i,
+      /actions-user/i,
+      /automation/i,
+      /ci/i,
+      /cd/i,
+    ];
+
+    return botPatterns.some(pattern => pattern.test(author));
   }
 
   /**

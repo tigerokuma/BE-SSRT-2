@@ -84,6 +84,26 @@ export class ActivityController {
     };
   }
 
+  @Get('rate-limit/token-strategy')
+  @ApiOperation({ summary: 'Get detailed token strategy and cloning thresholds' })
+  @ApiResponse({ status: 200, description: 'Token strategy summary retrieved successfully' })
+  async getTokenStrategySummary() {
+    this.logger.log(`📊 Getting token strategy summary`);
+    
+    const summary = await this.rateLimitManager.getTokenStrategySummary();
+    
+    return {
+      ...summary,
+      message: `Current token strategy: ${summary.strategy} - Cloning repos > ${summary.cloningThresholdMB}MB`,
+      explanation: {
+        strategy: summary.strategy,
+        cloningThreshold: `${summary.cloningThresholdMB}MB (${summary.cloningThresholdKB}KB)`,
+        apiUsage: summary.shouldUseApiForCommits ? 'Will use API for commits' : 'Will use local cloning for commits',
+        tokenStatus: `${summary.remainingTokens}/${summary.totalTokens} tokens remaining (${summary.percentageUsed}% used)`,
+      },
+    };
+  }
+
   @Post('test-setup')
   @ApiOperation({ summary: 'Test repository setup with different configurations' })
   @ApiResponse({ status: 201, description: 'Test repository setup job queued successfully' })

@@ -48,6 +48,28 @@ export class ActivityAnalysisService {
   private readonly logger = new Logger(ActivityAnalysisService.name);
 
   /**
+   * Calculate weekly commit rate based on recent activity
+   */
+  calculateWeeklyCommitRate(commits: CommitData[]): number {
+    if (commits.length === 0) return 0;
+
+    // Focus on last 3 months for weekly rate calculation
+    const now = new Date();
+    const threeMonthsAgo = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
+    const recentCommits = commits.filter(c => c.date >= threeMonthsAgo);
+    
+    if (recentCommits.length === 0) return 0;
+
+    // Calculate weeks in the 3-month period
+    const weeksInPeriod = 12; // 3 months = ~12 weeks
+    
+    // Calculate average weekly commits
+    const weeklyCommitRate = recentCommits.length / weeksInPeriod;
+    
+    return Math.round(weeklyCommitRate * 100) / 100; // Round to 2 decimal places
+  }
+
+  /**
    * Calculate overall repository activity score (0-100)
    */
   calculateActivityScore(commits: CommitData[]): ActivityScore {
@@ -65,13 +87,16 @@ export class ActivityAnalysisService {
     }
 
     // Calculate time span
+    const now = new Date();
     const dates = commits.map(c => c.date).sort((a, b) => a.getTime() - b.getTime());
     const timeSpan = (dates[dates.length - 1].getTime() - dates[0].getTime()) / (1000 * 60 * 60 * 24); // days
     const monthsSpan = timeSpan / 30;
 
-    // Factor 1: Commit Frequency (0-25 points)
-    const commitsPerMonth = commits.length / Math.max(monthsSpan, 1);
-    const commitFrequency = Math.min(commitsPerMonth / 10, 1) * 25; // 10 commits/month = max score
+    // Factor 1: Recent Commit Frequency (0-25 points) - Focus on last 3 months
+    const threeMonthsAgo = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
+    const recentCommits = commits.filter(c => c.date >= threeMonthsAgo);
+    const recentCommitsPerMonth = recentCommits.length / 3; // 3 months
+    const commitFrequency = Math.min(recentCommitsPerMonth / 15, 1) * 25; // 15 commits/month in last 3 months = max score
 
     // Factor 2: Contributor Diversity (0-25 points)
     const uniqueContributors = new Set(commits.map(c => c.author)).size;
@@ -83,7 +108,6 @@ export class ActivityAnalysisService {
     const codeChurn = Math.min(avgLinesPerCommit / 50, 1) * 25; // 50+ lines/commit = max score
 
     // Factor 4: Recency (0-25 points)
-    const now = new Date();
     const latestCommit = dates[dates.length - 1];
     const daysSinceLastCommit = (now.getTime() - latestCommit.getTime()) / (1000 * 60 * 60 * 24);
     const recency = Math.max(0, (30 - daysSinceLastCommit) / 30) * 25; // 0 days = max, 30+ days = 0
@@ -241,14 +265,30 @@ export class ActivityAnalysisService {
     activityScore: ActivityScore,
     fileChurnData: FileChurnData[],
     heatmap: ActivityHeatmap,
-    totalCommits: number
+    weeklyCommitRate: number
   ): string {
     const topFiles = this.getTopActiveFiles(fileChurnData, 3);
     const topFilesStr = topFiles.map(f => `${f.filePath} (${f.commitCount} commits)`).join(', ');
 
     return `Activity Score: ${activityScore.score}/100 (${activityScore.level}) | ` +
-           `Total Commits: ${totalCommits} | ` +
+           `Weekly Commit Rate: ${weeklyCommitRate.toFixed(2)} commits/week | ` +
            `Peak Activity: ${heatmap.peakActivity.day} ${heatmap.peakActivity.hour}:00 (${heatmap.peakActivity.count} commits) | ` +
            `Top Files: ${topFilesStr}`;
+  }
+
+  /**
+   * Convert stored weekly commit rate from database format back to decimal
+   * The database stores weekly commit rate * 100 to preserve decimals
+   */
+  getWeeklyCommitRateFromStorage(storedValue: number): number {
+    return storedValue / 100;
+  }
+
+  /**
+   * Convert weekly commit rate to storage format for database
+   * Multiply by 100 to preserve decimals in integer field
+   */
+  getWeeklyCommitRateForStorage(weeklyRate: number): number {
+    return Math.round(weeklyRate * 100);
   }
 } 

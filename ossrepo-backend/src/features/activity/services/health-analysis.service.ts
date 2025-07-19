@@ -81,7 +81,7 @@ export class HealthAnalysisService {
     commits: any[], 
     branch: string = 'main',
     skipScorecardQuery: boolean = false
-  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string }> }> {
+  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }> }> {
     
     if (commits.length === 0) {
       return { current: 0, historical: [] };
@@ -122,7 +122,7 @@ export class HealthAnalysisService {
     this.logger.log(`✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`);
 
     // Map Scorecard data to commit timeline
-    const historicalResults: Array<{ date: Date; score: number; commitSha: string }> = [];
+    const historicalResults: Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }> = [];
     
     // For each commit, find the closest Scorecard data point
     for (const commit of sortedCommits) {
@@ -131,7 +131,8 @@ export class HealthAnalysisService {
         historicalResults.push({
           date: commit.date,
           score: closestScorecard.score,
-          commitSha: commit.sha
+          commitSha: commit.sha,
+          scorecardMetrics: closestScorecard.checks || null
         });
       }
     }
@@ -161,7 +162,7 @@ export class HealthAnalysisService {
     repo: string, 
     commits: any[], 
     branch: string = 'main'
-  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string }> }> {
+  ): Promise<{ current: number; historical: Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }> }> {
     
     // Sort commits by date (oldest first)
     const sortedCommits = commits
@@ -182,12 +183,13 @@ export class HealthAnalysisService {
     // Run health analysis at each sampling point in parallel
     const healthCheckPromises = samplingPoints.map(async (point, index) => {
       try {
-        const score = await this.performAnalysis(watchlistId, owner, repo, branch, point.sha);
-        this.logger.log(`   📈 ${point.date.toISOString().split('T')[0]}: ${score.overallHealthScore}/100`);
+        const result = await this.performAnalysis(watchlistId, owner, repo, branch, point.sha);
+        this.logger.log(`   📈 ${point.date.toISOString().split('T')[0]}: ${result.overallHealthScore}/100`);
         return {
           date: point.date,
-          score: score.overallHealthScore,
-          commitSha: point.sha
+          score: result.overallHealthScore,
+          commitSha: point.sha,
+          scorecardMetrics: result.scorecardMetrics
         };
       } catch (error) {
         this.logger.warn(`⚠️ Failed to analyze health at ${point.date.toISOString().split('T')[0]}: ${error.message}`);
@@ -195,13 +197,14 @@ export class HealthAnalysisService {
         return {
           date: point.date,
           score: 50, // Default score when analysis fails
-          commitSha: point.sha
+          commitSha: point.sha,
+          scorecardMetrics: null
         };
       }
     });
 
     // Wait for all health checks to complete
-    const historicalResults = (await Promise.all(healthCheckPromises)) as Array<{ date: Date; score: number; commitSha: string }>;
+    const historicalResults = (await Promise.all(healthCheckPromises)) as Array<{ date: Date; score: number; commitSha: string; scorecardMetrics?: any }>;
 
     // The current score is the latest historical result (newest commit is always included)
     const currentScore = historicalResults.length > 0 ? historicalResults[historicalResults.length - 1].score : 0;

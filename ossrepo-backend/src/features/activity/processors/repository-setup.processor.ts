@@ -166,6 +166,7 @@ export class RepositorySetupProcessor {
             date: result.date.toISOString(),
             score: result.score,
             commitSha: result.commitSha,
+            scorecardMetrics: result.scorecardMetrics,
             source: 'local-analysis'
           }));
         } catch (error) {
@@ -194,28 +195,33 @@ export class RepositorySetupProcessor {
             date: result.date.toISOString(),
             score: result.score,
             commitSha: result.commitSha,
+            scorecardMetrics: result.scorecardMetrics,
             source: 'local-analysis'
           }));
         }
       } else {
         this.logger.log(`✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`);
+      }
+      
+      // Store health data in new table (for both BigQuery and local analysis results)
+      if (historicalScorecardData.length > 0) {
+        this.logger.log(`📊 Storing ${historicalScorecardData.length} health data records in database`);
         
-        // Store health data in new table
-        if (historicalScorecardData.length > 0) {
-          const latestHealth = historicalScorecardData[historicalScorecardData.length - 1];
+        for (const healthRecord of historicalScorecardData) {
           await this.prisma.healthData.create({
             data: {
               watchlist_id: watchlistId,
-              commit_sha: latestHealth.commitSha,
-              commit_date: new Date(latestHealth.date),
-              scorecard_metrics: latestHealth.scorecardMetrics,
-              overall_health_score: latestHealth.score,
-              source: latestHealth.source || 'scorecard',
+              commit_sha: healthRecord.commitSha,
+              commit_date: new Date(healthRecord.date),
+              scorecard_metrics: healthRecord.scorecardMetrics || null,
+              overall_health_score: healthRecord.score,
+              source: healthRecord.source || 'scorecard',
               analysis_date: new Date(),
             },
           });
-          this.logger.log(`✅ Health data stored in database`);
         }
+        
+        this.logger.log(`✅ ${historicalScorecardData.length} health data records stored in database`);
       }
 
       // Step 3: Calculate bus factor
@@ -248,6 +254,7 @@ export class RepositorySetupProcessor {
 
       // Step 4: Run activity analysis
       let activityAnalysisResult: any = null;
+      let weeklyCommitRate: number = 0;
       if (commitCount > 0) {
         try {
           this.logger.log(`📈 Running activity analysis for ${owner}/${repo}`);
@@ -264,6 +271,9 @@ export class RepositorySetupProcessor {
           // Generate activity heatmap
           const activityHeatmap = this.activityAnalysisService.generateActivityHeatmap(commitsForAnalysis);
           
+          // Calculate weekly commit rate
+          weeklyCommitRate = this.activityAnalysisService.calculateWeeklyCommitRate(commitsForAnalysis);
+          
           // Create the activity analysis result first
           activityAnalysisResult = {
             activityScore,
@@ -273,12 +283,13 @@ export class RepositorySetupProcessor {
           };
           
           // Store activity data in new table
+          // Note: total_commits field now stores weekly commit rate * 100 to preserve decimals
           await this.prisma.activityData.create({
             data: {
               watchlist_id: watchlistId,
               activity_score: activityScore.score,
               activity_level: activityScore.level,
-              total_commits: commitCount,
+              total_commits: this.activityAnalysisService.getWeeklyCommitRateForStorage(weeklyCommitRate),
               total_files_analyzed: fileChurnData.length,
               file_churn_data: JSON.parse(JSON.stringify(this.activityAnalysisService.getTopActiveFiles(fileChurnData, 10))),
               activity_heatmap: JSON.parse(JSON.stringify(activityHeatmap)),
@@ -297,7 +308,7 @@ export class RepositorySetupProcessor {
             activityScore,
             fileChurnData,
             activityHeatmap,
-            commitCount
+            weeklyCommitRate
           );
           
           this.logger.log(`📊 Activity Analysis: ${activitySummary}`);
@@ -396,9 +407,10 @@ export class RepositorySetupProcessor {
         activityLevel: activityAnalysisResult.activityScore.level,
         topFilesCount: activityAnalysisResult.fileChurnData.length,
         peakActivity: activityAnalysisResult.activityHeatmap.peakActivity,
+        weeklyCommitRate: weeklyCommitRate,
       } : null;
       
-      this.logger.log(`✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}${activityInfo ? `, activity: ${activityInfo.activityScore}/100 (${activityInfo.activityLevel})` : ''}`);
+      this.logger.log(`✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}${activityInfo ? `, activity: ${activityInfo.activityScore}/100 (${activityInfo.activityLevel}), weekly rate: ${activityInfo.weeklyCommitRate.toFixed(2)} commits/week` : ''}`);
 
       const result = { 
         success: true, 
@@ -406,7 +418,10 @@ export class RepositorySetupProcessor {
         healthMetricsCount,
         hasScorecardData: healthMetricsCount > 0,
         busFactor: busFactorInfo,
-        activityAnalysis: activityAnalysisResult,
+        activityAnalysis: activityAnalysisResult ? {
+          ...activityAnalysisResult,
+          weeklyCommitRate,
+        } : null,
         aiSummary: aiSummaryResult ? {
           summary: aiSummaryResult.summary,
           confidence: aiSummaryResult.confidence,
