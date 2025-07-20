@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
+import { CommitSummaryDto, CommitSummaryResponseDto } from '../dto/commit-summary.dto';
 import { ActivityService } from '../services/activity.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
 import { ScorecardService } from '../services/scorecard.service';
@@ -18,6 +19,7 @@ import { GitHubApiService } from '../services/github-api.service';
 import { PollingProcessor } from '../processors/polling.processor';
 import { AlertingService } from '../services/alerting.service';
 import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.service';
+import { AISummaryService } from '../services/ai-summary.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -36,6 +38,7 @@ export class ActivityController {
     private readonly pollingProcessor: PollingProcessor,
     private readonly alertingService: AlertingService,
     private readonly aiAnomalyDetection: AIAnomalyDetectionService,
+    private readonly aiSummaryService: AISummaryService,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {}
@@ -379,6 +382,113 @@ export class ActivityController {
         error: error.message,
         message: `❌ Error testing AI anomaly detection for ${owner}/${repo}`,
       };
+    }
+  }
+
+  @Post('watchlist/:watchlistId/commit-summary')
+  @ApiOperation({
+    summary: 'Generate AI summary of recent commits for a watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Commit summary generated successfully',
+    type: CommitSummaryResponseDto,
+  })
+  async generateCommitSummary(
+    @Param('watchlistId') watchlistId: string,
+    @Body() dto: CommitSummaryDto,
+  ) {
+    this.logger.log(`🤖 Generating commit summary for watchlist ${watchlistId} (${dto.commitCount || 10} commits)`);
+
+    try {
+      // Verify the watchlist exists and get repository info
+      const watchlist = await this.prisma.watchlist.findUnique({
+        where: { watchlist_id: watchlistId },
+        include: {
+          package: true,
+        },
+      });
+
+      if (!watchlist) {
+        throw new HttpException(
+          `Watchlist ${watchlistId} not found`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Get recent commits from the database
+      const commits = await this.prisma.log.findMany({
+        where: {
+          watchlist_id: watchlistId,
+          event_type: 'COMMIT',
+        },
+        orderBy: { timestamp: 'desc' },
+        take: dto.commitCount || 10,
+      });
+
+      if (commits.length === 0) {
+        return {
+          summary: 'No recent commits found to summarize.',
+          commitCount: 0,
+          dateRange: 'N/A',
+          totalLinesAdded: 0,
+          totalLinesDeleted: 0,
+          totalFilesChanged: 0,
+          authors: [],
+          generatedAt: new Date(),
+        };
+      }
+
+      // Transform commit data for AI summary
+      const commitData = commits.map((commit) => ({
+        sha: (commit.payload as any)?.sha || 'unknown',
+        message: (commit.payload as any)?.message || commit.actor,
+        author: commit.actor,
+        email: (commit.payload as any)?.email || 'unknown@example.com',
+        timestamp: commit.timestamp,
+        filesChanged: commit.files_changed || 0,
+        linesAdded: commit.lines_added || 0,
+        linesDeleted: commit.lines_deleted || 0,
+      }));
+
+      // Generate AI summary
+      const aiResult = await this.aiSummaryService.generateCommitSummary(
+        commitData,
+        watchlist.package.repo_name,
+      );
+
+      // Calculate additional statistics
+      const totalStats = commitData.reduce(
+        (acc, commit) => ({
+          linesAdded: acc.linesAdded + commit.linesAdded,
+          linesDeleted: acc.linesDeleted + commit.linesDeleted,
+          filesChanged: acc.filesChanged + commit.filesChanged,
+        }),
+        { linesAdded: 0, linesDeleted: 0, filesChanged: 0 },
+      );
+
+      const uniqueAuthors = [...new Set(commitData.map(c => c.author))];
+      const dateRange = `${commitData[commitData.length - 1].timestamp.toISOString().split('T')[0]} to ${commitData[0].timestamp.toISOString().split('T')[0]}`;
+
+      return {
+        summary: aiResult.summary,
+        commitCount: commitData.length,
+        dateRange,
+        totalLinesAdded: totalStats.linesAdded,
+        totalLinesDeleted: totalStats.linesDeleted,
+        totalFilesChanged: totalStats.filesChanged,
+        authors: uniqueAuthors,
+        generatedAt: aiResult.generatedAt,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error generating commit summary for watchlist ${watchlistId}:`,
+        error,
+      );
+      throw new HttpException(
+        `Failed to generate commit summary: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 

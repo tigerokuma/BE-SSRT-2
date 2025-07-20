@@ -26,6 +26,17 @@ export interface RepositoryData {
   }>;
 }
 
+export interface CommitData {
+  sha: string;
+  message: string;
+  author: string;
+  email: string;
+  timestamp: Date;
+  filesChanged: number;
+  linesAdded: number;
+  linesDeleted: number;
+}
+
 export interface AISummaryResult {
   summary: string;
   confidence: number;
@@ -298,5 +309,131 @@ Generate a 2-3 sentence summary of this repository highlighting what it does, it
       this.logger.error('Model connection test failed:', error);
       return false;
     }
+  }
+
+  async generateCommitSummary(
+    commits: CommitData[],
+    repoName: string,
+  ): Promise<AISummaryResult> {
+    try {
+      if (commits.length === 0) {
+        return {
+          summary: 'No recent commits found to summarize.',
+          confidence: 1.0,
+          generatedAt: new Date(),
+          modelUsed: 'fallback',
+        };
+      }
+
+      const prompt = this.buildCommitSummaryPrompt(commits, repoName);
+      const startTime = Date.now();
+      const summary = await this.generateWithMistral(prompt);
+      const generationTimeMs = Date.now() - startTime;
+
+      return {
+        summary: this.cleanMistralOutput(summary),
+        confidence: this.calculateCommitSummaryConfidence(commits),
+        generatedAt: new Date(),
+        modelUsed: this.modelName,
+        promptLength: prompt.length,
+        outputLength: summary.length,
+        generationTimeMs,
+      };
+    } catch (error) {
+      this.logger.error('Failed to generate commit summary:', error);
+      return this.generateFallbackCommitSummary(commits, repoName);
+    }
+  }
+
+  private buildCommitSummaryPrompt(commits: CommitData[], repoName: string): string {
+    const commitDetails = commits
+      .map((commit, index) => {
+        const date = commit.timestamp.toISOString().split('T')[0];
+        return `${index + 1}. ${commit.message} (${commit.author}, ${date})
+   - Files changed: ${commit.filesChanged}
+   - Lines added: ${commit.linesAdded}, deleted: ${commit.linesDeleted}`;
+      })
+      .join('\n\n');
+
+    const totalStats = commits.reduce(
+      (acc, commit) => ({
+        linesAdded: acc.linesAdded + commit.linesAdded,
+        linesDeleted: acc.linesDeleted + commit.linesDeleted,
+        filesChanged: acc.filesChanged + commit.filesChanged,
+      }),
+      { linesAdded: 0, linesDeleted: 0, filesChanged: 0 },
+    );
+
+    const uniqueAuthors = [...new Set(commits.map(c => c.author))];
+    const dateRange = `${commits[commits.length - 1].timestamp.toISOString().split('T')[0]} to ${commits[0].timestamp.toISOString().split('T')[0]}`;
+
+    return `Analyze the following recent commits from the ${repoName} repository and provide a concise, informative summary (max 200 characters) that highlights:
+
+1. The main themes or areas of development
+2. Key changes or improvements made
+3. Overall development activity level
+
+Repository: ${repoName}
+Period: ${dateRange}
+Total commits: ${commits.length}
+Authors: ${uniqueAuthors.join(', ')}
+Total changes: +${totalStats.linesAdded} -${totalStats.linesDeleted} lines, ${totalStats.filesChanged} files
+
+Recent commits:
+${commitDetails}
+
+Summary:`;
+  }
+
+  private calculateCommitSummaryConfidence(commits: CommitData[]): number {
+    if (commits.length === 0) return 0;
+
+    // Calculate confidence based on commit data quality
+    let score = 0;
+    let total = commits.length;
+
+    for (const commit of commits) {
+      if (commit.message && commit.message.length > 5) score += 1;
+      if (commit.author && commit.author.length > 0) score += 1;
+      if (commit.timestamp) score += 1;
+      if (commit.filesChanged >= 0) score += 1;
+      if (commit.linesAdded >= 0) score += 1;
+      if (commit.linesDeleted >= 0) score += 1;
+    }
+
+    return score / (total * 6); // 6 fields per commit
+  }
+
+  private generateFallbackCommitSummary(
+    commits: CommitData[],
+    repoName: string,
+  ): AISummaryResult {
+    if (commits.length === 0) {
+      return {
+        summary: 'No recent commits found to summarize.',
+        confidence: 1.0,
+        generatedAt: new Date(),
+        modelUsed: 'fallback',
+      };
+    }
+
+    const totalStats = commits.reduce(
+      (acc, commit) => ({
+        linesAdded: acc.linesAdded + commit.linesAdded,
+        linesDeleted: acc.linesDeleted + commit.linesDeleted,
+        filesChanged: acc.filesChanged + commit.filesChanged,
+      }),
+      { linesAdded: 0, linesDeleted: 0, filesChanged: 0 },
+    );
+
+    const uniqueAuthors = [...new Set(commits.map(c => c.author))];
+    const summary = `Recent activity in ${repoName}: ${commits.length} commits by ${uniqueAuthors.length} authors, with ${totalStats.linesAdded} lines added and ${totalStats.linesDeleted} lines deleted across ${totalStats.filesChanged} files.`;
+
+    return {
+      summary: this.truncateSummary(summary),
+      confidence: 0.3,
+      generatedAt: new Date(),
+      modelUsed: 'fallback',
+    };
   }
 }

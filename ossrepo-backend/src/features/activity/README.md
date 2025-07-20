@@ -398,6 +398,35 @@ The activity module now includes a comprehensive polling system that automatical
 
 ### API Endpoints
 
+#### Generate Commit Summary
+```bash
+POST /activity/watchlist/{watchlistId}/commit-summary
+```
+
+Generates an AI-powered summary of recent commits for a repository.
+
+**Request Body:**
+```json
+{
+  "watchlistId": "watchlist_owner_repo_1234567890",
+  "commitCount": 10
+}
+```
+
+**Response:**
+```json
+{
+  "summary": "Recent commits show active development on the authentication system, with 3 commits adding new login features and 2 commits fixing security vulnerabilities.",
+  "commitCount": 10,
+  "dateRange": "2024-01-01 to 2024-01-15",
+  "totalLinesAdded": 1250,
+  "totalLinesDeleted": 450,
+  "totalFilesChanged": 25,
+  "authors": ["john.doe@example.com", "jane.smith@example.com"],
+  "generatedAt": "2024-01-15T10:30:00Z"
+}
+```
+
 #### Trigger Daily Polling
 ```bash
 POST /activity/trigger-polling
@@ -472,6 +501,7 @@ curl -X POST http://localhost:3000/activity/trigger-polling
 - [x] Repository setup processor implemented
 - [x] Repository polling processor implemented
 - [x] BullMQ job queues configured
+- [x] AI commit summary endpoint implemented
 - [x] API endpoints tested manually
 - [x] Documentation updated
 
