@@ -126,6 +126,7 @@ model Watchlist {
   weeklySummaryData                WeeklySummaryData[]
   contributorStats                 ContributorStats[]
   repoStats                        RepoStats?
+  alertTriggered                   AlertTriggered[]
 }
 
 model UserWatchlist {
@@ -142,6 +143,7 @@ model UserWatchlist {
   jira         Jira?
   emailTime    EmailTime?
   Alert        Alert[]
+  AlertTriggered AlertTriggered[]
 
   @@index([user_id])
   @@index([watchlist_id])
@@ -311,6 +313,33 @@ model Alert {
   userWatchlist UserWatchlist @relation(fields: [id], references: [id])
 
   @@id([id, alert_id])
+}
+
+model AlertTriggered {
+  id              String    @id @default(uuid())
+  user_watchlist_id String
+  watchlist_id    String
+  commit_sha      String
+  contributor     String
+  metric          String    // e.g., 'lines_added', 'lines_deleted', 'files_changed', 'commit_time'
+  value           Float
+  alert_level     String    // 'mild', 'moderate', 'critical'
+  threshold_type  String    // 'contributor_stddev', 'repo_average', 'absolute', 'user_defined'
+  threshold_value Float
+  description     String
+  details_json    Json?
+  created_at      DateTime  @default(now())
+  acknowledged_at DateTime?
+  resolved_at     DateTime?
+
+  userWatchlist   UserWatchlist @relation(fields: [user_watchlist_id], references: [id], onDelete: Cascade)
+  watchlist       Watchlist     @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([user_watchlist_id])
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@index([created_at])
+  @@map("alert_triggered")
 }
 
 enum WaitValue {
