@@ -303,50 +303,53 @@ The activity module now includes a comprehensive alerting system that monitors c
 
 ### Alert Types
 
-The system supports multiple types of alerts:
+The system supports multiple types of alerts based on the actual alert configuration schema:
 
 #### **Metrics Monitored**
-- **Lines Added**: Number of lines added in a commit
-- **Lines Deleted**: Number of lines deleted in a commit  
+- **Lines Added/Deleted**: Total lines changed in a commit
 - **Files Changed**: Number of files modified in a commit
-- **Commit Time**: Commits made during unusual hours (2 AM - 6 AM)
+- **High Churn**: High lines-to-files ratio indicating potential issues
+- **Unusual Author Activity**: Commits outside contributor's typical patterns
+- **Ancestry Breaks**: Complex git history analysis (not implemented in basic version)
 
 #### **Threshold Types**
-- **Absolute**: Fixed numeric threshold (e.g., > 1000 lines)
-- **Repository Average**: Exceeds repository average (e.g., > 2x repo average)
-- **Contributor Standard Deviation**: Exceeds contributor's personal average + N standard deviations
-- **User Defined**: Custom threshold defined by the user
-
-#### **Alert Levels**
-- **Mild**: Minor deviation from normal patterns
-- **Moderate**: Significant deviation requiring attention
-- **Critical**: Major deviation that may indicate issues
+- **Hardcoded Threshold**: Fixed numeric threshold (e.g., > 1000 lines)
+- **Contributor Variance**: Exceeds contributor's average + N standard deviations
+- **Repository Variance**: Exceeds repository average by N multiplier
+- **High Churn Multiplier**: Exceeds repository churn ratio by N multiplier
+- **Unusual Activity Percentage**: Commits outside contributor's typical time patterns
 
 ### User Configuration
 
 Users can configure alerts by setting the `alerts` field in the `UserWatchlist` table as a JSON string:
 
 ```json
-[
-  {
-    "metric": "lines_added",
-    "threshold": 500,
-    "thresholdType": "absolute",
-    "alertLevel": "moderate"
+{
+  "lines_added_deleted": {
+    "enabled": true,
+    "contributor_variance": 2.5,
+    "repository_variance": 3,
+    "hardcoded_threshold": 1000
   },
-  {
-    "metric": "files_changed", 
-    "threshold": 2,
-    "thresholdType": "contributor_stddev",
-    "alertLevel": "critical"
+  "files_changed": {
+    "enabled": true,
+    "contributor_variance": 2,
+    "repository_variance": 2.5,
+    "hardcoded_threshold": 20
   },
-  {
-    "metric": "commit_time",
-    "threshold": 1,
-    "thresholdType": "absolute", 
-    "alertLevel": "mild"
+  "high_churn": {
+    "enabled": true,
+    "multiplier": 2.5,
+    "hardcoded_threshold": 10
+  },
+  "ancestry_breaks": {
+    "enabled": true
+  },
+  "unusual_author_activity": {
+    "enabled": true,
+    "percentage_outside_range": 80
   }
-]
+}
 ```
 
 ### Alert Processing

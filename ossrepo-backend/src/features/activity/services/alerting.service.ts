@@ -1,11 +1,31 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 
-interface AlertThreshold {
-  metric: string;
-  threshold: number;
-  thresholdType: 'contributor_stddev' | 'repo_average' | 'absolute' | 'user_defined';
-  alertLevel: 'mild' | 'moderate' | 'critical';
+interface AlertConfig {
+  lines_added_deleted?: {
+    enabled: boolean;
+    contributor_variance: number;
+    repository_variance: number;
+    hardcoded_threshold: number;
+  };
+  files_changed?: {
+    enabled: boolean;
+    contributor_variance: number;
+    repository_variance: number;
+    hardcoded_threshold: number;
+  };
+  high_churn?: {
+    enabled: boolean;
+    multiplier: number;
+    hardcoded_threshold: number;
+  };
+  ancestry_breaks?: {
+    enabled: boolean;
+  };
+  unusual_author_activity?: {
+    enabled: boolean;
+    percentage_outside_range: number;
+  };
 }
 
 interface CommitData {
@@ -91,30 +111,60 @@ export class AlertingService {
     try {
       // Parse user's alert configuration
       const alertConfig = this.parseAlertConfig(userWatchlist.alerts);
-      if (!alertConfig || alertConfig.length === 0) {
+      if (!alertConfig) {
         return; // No alerts configured
       }
 
-      // Check each threshold
-      for (const threshold of alertConfig) {
-        const shouldAlert = await this.checkThreshold(
-          threshold,
+      // Check lines added/deleted alerts
+      if (alertConfig.lines_added_deleted?.enabled) {
+        await this.checkLinesAddedDeletedAlert(
+          userWatchlist.id,
+          watchlistId,
           commitData,
+          alertConfig.lines_added_deleted,
           repoStats,
           contributorStats,
         );
-
-        if (shouldAlert) {
-          await this.createAlert(
-            userWatchlist.id,
-            watchlistId,
-            commitData,
-            threshold,
-            repoStats,
-            contributorStats,
-          );
-        }
       }
+
+      // Check files changed alerts
+      if (alertConfig.files_changed?.enabled) {
+        await this.checkFilesChangedAlert(
+          userWatchlist.id,
+          watchlistId,
+          commitData,
+          alertConfig.files_changed,
+          repoStats,
+          contributorStats,
+        );
+      }
+
+      // Check high churn alerts
+      if (alertConfig.high_churn?.enabled) {
+        await this.checkHighChurnAlert(
+          userWatchlist.id,
+          watchlistId,
+          commitData,
+          alertConfig.high_churn,
+          repoStats,
+          contributorStats,
+        );
+      }
+
+      // Check unusual author activity
+      if (alertConfig.unusual_author_activity?.enabled) {
+        await this.checkUnusualAuthorActivityAlert(
+          userWatchlist.id,
+          watchlistId,
+          commitData,
+          alertConfig.unusual_author_activity,
+          contributorStats,
+        );
+      }
+
+      // Note: ancestry_breaks would require more complex git analysis
+      // and is not implemented in this basic version
+
     } catch (error) {
       this.logger.error(`Error checking alerts for user ${userWatchlist.user_id}:`, error);
     }
@@ -123,117 +173,244 @@ export class AlertingService {
   /**
    * Parse user's alert configuration from JSON string
    */
-  private parseAlertConfig(alertsJson: string | null): AlertThreshold[] {
+  private parseAlertConfig(alertsJson: string | null): AlertConfig | null {
     if (!alertsJson) {
-      return [];
+      return null;
     }
 
     try {
       const config = JSON.parse(alertsJson);
-      return Array.isArray(config) ? config : [];
+      return config as AlertConfig;
     } catch (error) {
       this.logger.error(`Error parsing alert config: ${error.message}`);
-      return [];
+      return null;
     }
   }
 
   /**
-   * Check if a commit meets a specific threshold
+   * Check lines added/deleted alerts
    */
-  private async checkThreshold(
-    threshold: AlertThreshold,
+  private async checkLinesAddedDeletedAlert(
+    userWatchlistId: string,
+    watchlistId: string,
     commitData: CommitData,
+    config: AlertConfig['lines_added_deleted'],
     repoStats: any,
     contributorStats: any,
-  ): Promise<boolean> {
-    const { metric, thresholdType, threshold: thresholdValue } = threshold;
+  ): Promise<void> {
+    if (!config) return;
 
-    let actualValue: number = 0;
-    let comparisonValue: number = 0;
-
-    // Get the actual value from the commit
-    switch (metric) {
-      case 'lines_added':
-        actualValue = commitData.linesAdded || 0;
-        break;
-      case 'lines_deleted':
-        actualValue = commitData.linesDeleted || 0;
-        break;
-      case 'files_changed':
-        actualValue = commitData.filesChanged?.length || 0;
-        break;
-      case 'commit_time':
-        // Check if commit is outside normal hours (e.g., between 2 AM and 6 AM)
-        const hour = commitData.date.getHours();
-        actualValue = hour >= 2 && hour <= 6 ? 1 : 0;
-        break;
-      default:
-        return false;
+    const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
+    
+    // Check hardcoded threshold
+    if (totalLines > config.hardcoded_threshold) {
+      await this.createAlert(
+        userWatchlistId,
+        watchlistId,
+        commitData,
+        'lines_added_deleted',
+        'hardcoded_threshold',
+        totalLines,
+        config.hardcoded_threshold,
+        `Total lines changed (${totalLines}) exceeds hardcoded threshold (${config.hardcoded_threshold})`,
+      );
     }
 
-    // Get the comparison value based on threshold type
-    switch (thresholdType) {
-      case 'absolute':
-        comparisonValue = thresholdValue;
-        break;
-      case 'repo_average':
-        if (!repoStats) return false;
-        switch (metric) {
-          case 'lines_added':
-            comparisonValue = repoStats.avg_lines_added;
-            break;
-          case 'lines_deleted':
-            comparisonValue = repoStats.avg_lines_deleted;
-            break;
-          case 'files_changed':
-            comparisonValue = repoStats.avg_files_changed;
-            break;
+    // Check contributor variance
+    if (contributorStats && config.contributor_variance > 0) {
+      const contributorAvg = contributorStats.avg_lines_added + contributorStats.avg_lines_deleted;
+      const contributorThreshold = contributorAvg + (config.contributor_variance * 
+        Math.sqrt(contributorStats.stddev_lines_added ** 2 + contributorStats.stddev_lines_deleted ** 2));
+      
+      if (totalLines > contributorThreshold) {
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'lines_added_deleted',
+          'contributor_variance',
+          totalLines,
+          contributorThreshold,
+          `Total lines changed (${totalLines}) exceeds contributor's normal range (${contributorThreshold.toFixed(1)})`,
+        );
+      }
+    }
+
+    // Check repository variance
+    if (repoStats && config.repository_variance > 0) {
+      const repoAvg = repoStats.avg_lines_added + repoStats.avg_lines_deleted;
+      const repoThreshold = repoAvg * config.repository_variance;
+      
+      if (totalLines > repoThreshold) {
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'lines_added_deleted',
+          'repository_variance',
+          totalLines,
+          repoThreshold,
+          `Total lines changed (${totalLines}) exceeds repository average by ${config.repository_variance}x (${repoThreshold.toFixed(1)})`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Check files changed alerts
+   */
+  private async checkFilesChangedAlert(
+    userWatchlistId: string,
+    watchlistId: string,
+    commitData: CommitData,
+    config: AlertConfig['files_changed'],
+    repoStats: any,
+    contributorStats: any,
+  ): Promise<void> {
+    if (!config) return;
+
+    const filesChanged = commitData.filesChanged?.length || 0;
+    
+    // Check hardcoded threshold
+    if (filesChanged > config.hardcoded_threshold) {
+      await this.createAlert(
+        userWatchlistId,
+        watchlistId,
+        commitData,
+        'files_changed',
+        'hardcoded_threshold',
+        filesChanged,
+        config.hardcoded_threshold,
+        `Files changed (${filesChanged}) exceeds hardcoded threshold (${config.hardcoded_threshold})`,
+      );
+    }
+
+    // Check contributor variance
+    if (contributorStats && config.contributor_variance > 0) {
+      const contributorThreshold = contributorStats.avg_files_changed + 
+        (config.contributor_variance * contributorStats.stddev_files_changed);
+      
+      if (filesChanged > contributorThreshold) {
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'files_changed',
+          'contributor_variance',
+          filesChanged,
+          contributorThreshold,
+          `Files changed (${filesChanged}) exceeds contributor's normal range (${contributorThreshold.toFixed(1)})`,
+        );
+      }
+    }
+
+    // Check repository variance
+    if (repoStats && config.repository_variance > 0) {
+      const repoThreshold = repoStats.avg_files_changed * config.repository_variance;
+      
+      if (filesChanged > repoThreshold) {
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'files_changed',
+          'repository_variance',
+          filesChanged,
+          repoThreshold,
+          `Files changed (${filesChanged}) exceeds repository average by ${config.repository_variance}x (${repoThreshold.toFixed(1)})`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Check high churn alerts
+   */
+  private async checkHighChurnAlert(
+    userWatchlistId: string,
+    watchlistId: string,
+    commitData: CommitData,
+    config: AlertConfig['high_churn'],
+    repoStats: any,
+    contributorStats: any,
+  ): Promise<void> {
+    if (!config) return;
+
+    const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
+    const filesChanged = commitData.filesChanged?.length || 0;
+    
+    // High churn = high lines changed relative to files changed
+    if (filesChanged > 0) {
+      const churnRatio = totalLines / filesChanged;
+      
+      // Check hardcoded threshold
+      if (churnRatio > config.hardcoded_threshold) {
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'high_churn',
+          'hardcoded_threshold',
+          churnRatio,
+          config.hardcoded_threshold,
+          `High churn ratio (${churnRatio.toFixed(1)} lines/file) exceeds threshold (${config.hardcoded_threshold})`,
+        );
+      }
+
+      // Check multiplier against repository average
+      if (repoStats && config.multiplier > 0) {
+        const repoChurnRatio = (repoStats.avg_lines_added + repoStats.avg_lines_deleted) / repoStats.avg_files_changed;
+        const multiplierThreshold = repoChurnRatio * config.multiplier;
+        
+        if (churnRatio > multiplierThreshold) {
+          await this.createAlert(
+            userWatchlistId,
+            watchlistId,
+            commitData,
+            'high_churn',
+            'multiplier',
+            churnRatio,
+            multiplierThreshold,
+            `High churn ratio (${churnRatio.toFixed(1)}) exceeds repository average by ${config.multiplier}x (${multiplierThreshold.toFixed(1)})`,
+          );
         }
-        break;
-      case 'contributor_stddev':
-        if (!contributorStats) return false;
-        const avg = this.getContributorAverage(contributorStats, metric);
-        const stddev = this.getContributorStddev(contributorStats, metric);
-        comparisonValue = avg + (thresholdValue * stddev);
-        break;
-      case 'user_defined':
-        comparisonValue = thresholdValue;
-        break;
-    }
-
-    // Check if the actual value exceeds the threshold
-    return actualValue > comparisonValue;
-  }
-
-  /**
-   * Get contributor average for a specific metric
-   */
-  private getContributorAverage(contributorStats: any, metric: string): number {
-    switch (metric) {
-      case 'lines_added':
-        return contributorStats.avg_lines_added || 0;
-      case 'lines_deleted':
-        return contributorStats.avg_lines_deleted || 0;
-      case 'files_changed':
-        return contributorStats.avg_files_changed || 0;
-      default:
-        return 0;
+      }
     }
   }
 
   /**
-   * Get contributor standard deviation for a specific metric
+   * Check unusual author activity alerts
    */
-  private getContributorStddev(contributorStats: any, metric: string): number {
-    switch (metric) {
-      case 'lines_added':
-        return contributorStats.stddev_lines_added || 0;
-      case 'lines_deleted':
-        return contributorStats.stddev_lines_deleted || 0;
-      case 'files_changed':
-        return contributorStats.stddev_files_changed || 0;
-      default:
-        return 0;
+  private async checkUnusualAuthorActivityAlert(
+    userWatchlistId: string,
+    watchlistId: string,
+    commitData: CommitData,
+    config: AlertConfig['unusual_author_activity'],
+    contributorStats: any,
+  ): Promise<void> {
+    if (!config || !contributorStats) return;
+
+    // Check if commit time is outside contributor's typical hours
+    const commitHour = commitData.date.getHours();
+    const timeHistogram = contributorStats.commit_time_histogram as Record<string, number>;
+    
+    if (timeHistogram) {
+      const totalCommits = Object.values(timeHistogram).reduce((sum, count) => sum + count, 0);
+      const commitsAtHour = timeHistogram[commitHour.toString()] || 0;
+      const percentageAtHour = (commitsAtHour / totalCommits) * 100;
+      
+      if (percentageAtHour < config.percentage_outside_range) {
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'unusual_author_activity',
+          'percentage_outside_range',
+          percentageAtHour,
+          config.percentage_outside_range,
+          `Commit at ${commitHour}:00 (${percentageAtHour.toFixed(1)}% of contributor's activity) is unusual`,
+        );
+      }
     }
   }
 
@@ -244,18 +421,13 @@ export class AlertingService {
     userWatchlistId: string,
     watchlistId: string,
     commitData: CommitData,
-    threshold: AlertThreshold,
-    repoStats: any,
-    contributorStats: any,
+    metric: string,
+    thresholdType: string,
+    value: number,
+    threshold: number,
+    description: string,
   ): Promise<void> {
     try {
-      const description = this.generateAlertDescription(
-        threshold,
-        commitData,
-        repoStats,
-        contributorStats,
-      );
-
       const details = {
         commit: {
           sha: commitData.sha,
@@ -268,25 +440,10 @@ export class AlertingService {
           filesChanged: commitData.filesChanged,
         },
         threshold: {
-          metric: threshold.metric,
-          thresholdType: threshold.thresholdType,
-          thresholdValue: threshold.threshold,
-          alertLevel: threshold.alertLevel,
-        },
-        context: {
-          repoStats: repoStats ? {
-            avgLinesAdded: repoStats.avg_lines_added,
-            avgLinesDeleted: repoStats.avg_lines_deleted,
-            avgFilesChanged: repoStats.avg_files_changed,
-          } : null,
-          contributorStats: contributorStats ? {
-            avgLinesAdded: contributorStats.avg_lines_added,
-            avgLinesDeleted: contributorStats.avg_lines_deleted,
-            avgFilesChanged: contributorStats.avg_files_changed,
-            stddevLinesAdded: contributorStats.stddev_lines_added,
-            stddevLinesDeleted: contributorStats.stddev_lines_deleted,
-            stddevFilesChanged: contributorStats.stddev_files_changed,
-          } : null,
+          metric,
+          thresholdType,
+          thresholdValue: threshold,
+          actualValue: value,
         },
       };
 
@@ -296,109 +453,21 @@ export class AlertingService {
           watchlist_id: watchlistId,
           commit_sha: commitData.sha,
           contributor: commitData.author,
-          metric: threshold.metric,
-          value: this.getCommitValue(commitData, threshold.metric),
-          alert_level: threshold.alertLevel,
-          threshold_type: threshold.thresholdType,
-          threshold_value: threshold.threshold,
+          metric,
+          value,
+          alert_level: 'moderate', // Default level since schema doesn't have specific levels
+          threshold_type: thresholdType,
+          threshold_value: threshold,
           description,
           details_json: details,
         },
       });
 
       this.logger.log(
-        `🚨 ALERT CREATED: ${threshold.alertLevel.toUpperCase()} - ${commitData.author} - ${threshold.metric}: ${this.getCommitValue(commitData, threshold.metric)}`,
+        `🚨 ALERT CREATED: ${metric} - ${commitData.author} - ${description}`,
       );
     } catch (error) {
       this.logger.error(`Error creating alert:`, error);
-    }
-  }
-
-  /**
-   * Get the numeric value for a specific metric from commit data
-   */
-  private getCommitValue(commitData: CommitData, metric: string): number {
-    switch (metric) {
-      case 'lines_added':
-        return commitData.linesAdded || 0;
-      case 'lines_deleted':
-        return commitData.linesDeleted || 0;
-      case 'files_changed':
-        return commitData.filesChanged?.length || 0;
-      case 'commit_time':
-        const hour = commitData.date.getHours();
-        return hour >= 2 && hour <= 6 ? 1 : 0;
-      default:
-        return 0;
-    }
-  }
-
-  /**
-   * Generate a human-readable alert description
-   */
-  private generateAlertDescription(
-    threshold: AlertThreshold,
-    commitData: CommitData,
-    repoStats: any,
-    contributorStats: any,
-  ): string {
-    const value = this.getCommitValue(commitData, threshold.metric);
-    const metricName = this.getMetricDisplayName(threshold.metric);
-
-    switch (threshold.thresholdType) {
-      case 'absolute':
-        return `${commitData.author} made ${value} ${metricName} (exceeds absolute threshold of ${threshold.threshold})`;
-      
-      case 'repo_average':
-        const repoAvg = this.getRepoAverage(repoStats, threshold.metric);
-        return `${commitData.author} made ${value} ${metricName} (exceeds repository average of ${repoAvg.toFixed(1)})`;
-      
-      case 'contributor_stddev':
-        const contributorAvg = this.getContributorAverage(contributorStats, threshold.metric);
-        const stddev = this.getContributorStddev(contributorStats, threshold.metric);
-        return `${commitData.author} made ${value} ${metricName} (exceeds personal average of ${contributorAvg.toFixed(1)} + ${threshold.threshold}σ)`;
-      
-      case 'user_defined':
-        return `${commitData.author} made ${value} ${metricName} (exceeds user-defined threshold of ${threshold.threshold})`;
-      
-      default:
-        return `${commitData.author} triggered ${threshold.metric} alert`;
-    }
-  }
-
-  /**
-   * Get display name for a metric
-   */
-  private getMetricDisplayName(metric: string): string {
-    switch (metric) {
-      case 'lines_added':
-        return 'lines added';
-      case 'lines_deleted':
-        return 'lines deleted';
-      case 'files_changed':
-        return 'files changed';
-      case 'commit_time':
-        return 'commits during unusual hours';
-      default:
-        return metric;
-    }
-  }
-
-  /**
-   * Get repository average for a specific metric
-   */
-  private getRepoAverage(repoStats: any, metric: string): number {
-    if (!repoStats) return 0;
-    
-    switch (metric) {
-      case 'lines_added':
-        return repoStats.avg_lines_added || 0;
-      case 'lines_deleted':
-        return repoStats.avg_lines_deleted || 0;
-      case 'files_changed':
-        return repoStats.avg_files_changed || 0;
-      default:
-        return 0;
     }
   }
 } 
