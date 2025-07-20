@@ -17,6 +17,7 @@ import { RateLimitManagerService } from '../services/rate-limit-manager.service'
 import { GitHubApiService } from '../services/github-api.service';
 import { PollingProcessor } from '../processors/polling.processor';
 import { AlertingService } from '../services/alerting.service';
+import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -34,6 +35,7 @@ export class ActivityController {
     private readonly githubApiService: GitHubApiService,
     private readonly pollingProcessor: PollingProcessor,
     private readonly alertingService: AlertingService,
+    private readonly aiAnomalyDetection: AIAnomalyDetectionService,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {}
@@ -288,6 +290,94 @@ export class ActivityController {
         success: false,
         error: error.message,
         message: `❌ Error testing AI summary for ${owner}/${repo}`,
+      };
+    }
+  }
+
+  @Get('ai-anomaly-detection/test')
+  @ApiOperation({ summary: 'Test AI anomaly detection for a commit' })
+  @ApiResponse({
+    status: 200,
+    description: 'AI anomaly detection test completed',
+  })
+  async testAIAnomalyDetection(
+    @Query('owner') owner: string,
+    @Query('repo') repo: string,
+  ) {
+    this.logger.log(`🤖 Testing AI anomaly detection for ${owner}/${repo}`);
+
+    try {
+      // Test the AI model connection first
+      const modelConnected = await this.aiAnomalyDetection.testModelConnection();
+      
+      if (!modelConnected) {
+        return {
+          success: false,
+          error: 'AI model not available',
+          message: '❌ AI model (Gemma2:2b) is not available. Please ensure Ollama is running and the model is downloaded.',
+        };
+      }
+
+      // Create a test commit with suspicious characteristics
+      const testCommitData = {
+        sha: 'test123456789',
+        author: 'Test User',
+        email: 'test@example.com',
+        message: 'WIP: massive refactor - removing all security checks',
+        date: new Date(),
+        linesAdded: 1500,
+        linesDeleted: 800,
+        filesChanged: ['src/security/auth.js', 'src/security/permissions.js', 'src/config/database.js', 'src/api/endpoints.js'],
+        contributorStats: {
+          avgLinesAdded: 50,
+          avgLinesDeleted: 20,
+          avgFilesChanged: 2,
+          stddevLinesAdded: 30,
+          stddevLinesDeleted: 15,
+          stddevFilesChanged: 1,
+          totalCommits: 25,
+          commitTimeHistogram: { '9': 5, '10': 8, '11': 6, '14': 4, '15': 2 },
+        },
+        repoStats: {
+          avgLinesAdded: 80,
+          avgLinesDeleted: 30,
+          avgFilesChanged: 3,
+          totalCommits: 1500,
+          totalContributors: 45,
+        },
+      };
+
+      const result = await this.aiAnomalyDetection.analyzeCommitForAnomalies(testCommitData);
+
+      return {
+        success: true,
+        testCommit: {
+          sha: testCommitData.sha,
+          author: testCommitData.author,
+          message: testCommitData.message,
+          linesChanged: testCommitData.linesAdded + testCommitData.linesDeleted,
+          filesChanged: testCommitData.filesChanged.length,
+        },
+        analysis: {
+          isAnomalous: result.isAnomalous,
+          confidence: result.confidence,
+          reasoning: result.reasoning,
+          riskLevel: result.riskLevel,
+          suspiciousFactors: result.suspiciousFactors,
+        },
+        message: result.isAnomalous
+          ? `🚨 AI detected suspicious activity in test commit (confidence: ${(result.confidence * 100).toFixed(1)}%)`
+          : `✅ AI analysis completed - no anomalies detected in test commit`,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error testing AI anomaly detection for ${owner}/${repo}:`,
+        error,
+      );
+      return {
+        success: false,
+        error: error.message,
+        message: `❌ Error testing AI anomaly detection for ${owner}/${repo}`,
       };
     }
   }

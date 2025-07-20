@@ -231,7 +231,9 @@ export class PollingProcessor {
           email: commit.email,
           message: commit.message,
           date: commit.date,
-          // Note: linesAdded, linesDeleted, filesChanged will be populated when we enhance commit logging
+          linesAdded: commit.linesAdded,
+          linesDeleted: commit.linesDeleted,
+          filesChanged: commit.filesChanged,
         });
       }
 
@@ -322,6 +324,7 @@ export class PollingProcessor {
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
+      // Get basic commit information
       const command = `cd ${repoPath} && git log ${sinceSha}..HEAD --pretty=format:"%H|%an|%ae|%ad|%s" --date=iso`;
       const { stdout } = await execAsync(command);
 
@@ -329,16 +332,57 @@ export class PollingProcessor {
         return [];
       }
 
-      const commits = stdout.trim().split('\n').map(line => {
+      const commits: any[] = [];
+      const lines = stdout.trim().split('\n');
+      
+      for (const line of lines) {
         const [sha, author, email, date, message] = line.split('|');
-        return {
+        
+        // Get detailed commit statistics
+        const statsCommand = `cd ${repoPath} && git show --stat --format="" ${sha}`;
+        let linesAdded = 0;
+        let linesDeleted = 0;
+        let filesChanged: string[] = [];
+        
+        try {
+          const { stdout: statsOutput } = await execAsync(statsCommand);
+          
+          // Parse the stats output
+          const statsLines = statsOutput.split('\n');
+          for (const statLine of statsLines) {
+            // Look for lines like " 5 files changed, 123 insertions(+), 45 deletions(-)"
+            const fileMatch = statLine.match(/(\d+) files? changed/);
+            const insertionMatch = statLine.match(/(\d+) insertions?\(\+\)/);
+            const deletionMatch = statLine.match(/(\d+) deletions?\(-\)/);
+            
+            if (insertionMatch) {
+              linesAdded = parseInt(insertionMatch[1], 10);
+            }
+            if (deletionMatch) {
+              linesDeleted = parseInt(deletionMatch[1], 10);
+            }
+          }
+          
+          // Get list of changed files
+          const filesCommand = `cd ${repoPath} && git show --name-only --format="" ${sha}`;
+          const { stdout: filesOutput } = await execAsync(filesCommand);
+          filesChanged = filesOutput.trim().split('\n').filter(file => file.trim() !== '');
+          
+        } catch (statsError) {
+          this.logger.warn(`Could not get detailed stats for commit ${sha}: ${statsError.message}`);
+        }
+        
+        commits.push({
           sha,
           author,
           email,
           date: new Date(date),
           message,
-        };
-      });
+          linesAdded,
+          linesDeleted,
+          filesChanged,
+        });
+      }
 
       return commits;
     } catch (error) {
@@ -363,6 +407,9 @@ export class PollingProcessor {
               email: commit.email,
               message: commit.message,
               date: commit.date.toISOString(),
+              linesAdded: commit.linesAdded,
+              linesDeleted: commit.linesDeleted,
+              filesChanged: commit.filesChanged,
             },
           },
         });

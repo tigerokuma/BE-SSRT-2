@@ -264,6 +264,31 @@ model Alert {
   @@id([id, alert_id])
 }
 
+model AlertTriggered {
+  id                String   @id @default(uuid())
+  user_watchlist_id String
+  watchlist_id      String
+  commit_sha        String
+  contributor       String
+  metric            String
+  value             Float
+  alert_level       String
+  threshold_type    String
+  threshold_value   Float
+  description       String
+  details_json      Json
+  created_at        DateTime @default(now())
+
+  userWatchlist UserWatchlist @relation(fields: [user_watchlist_id], references: [id], onDelete: Cascade)
+  watchlist     Watchlist     @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([user_watchlist_id])
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@index([created_at])
+  @@map("alert_triggered")
+}
+
 model EmailTime {
   id              String        @id @default(uuid())
   last_email_time DateTime

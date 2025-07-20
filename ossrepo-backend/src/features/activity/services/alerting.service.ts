@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { AIAnomalyDetectionService } from './ai-anomaly-detection.service';
 
 interface AlertConfig {
   lines_added_deleted?: {
@@ -26,6 +27,9 @@ interface AlertConfig {
     enabled: boolean;
     percentage_outside_range: number;
   };
+  ai_powered_anomaly_detection?: {
+    enabled: boolean;
+  };
 }
 
 interface CommitData {
@@ -43,7 +47,10 @@ interface CommitData {
 export class AlertingService {
   private readonly logger = new Logger(AlertingService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly aiAnomalyDetection: AIAnomalyDetectionService,
+  ) {}
 
   /**
    * Check a commit against all user alert thresholds for a watchlist
@@ -158,6 +165,17 @@ export class AlertingService {
           watchlistId,
           commitData,
           alertConfig.unusual_author_activity,
+          contributorStats,
+        );
+      }
+
+      // Check AI-powered anomaly detection
+      if (alertConfig.ai_powered_anomaly_detection?.enabled) {
+        await this.checkAIAnomalyDetectionAlert(
+          userWatchlist.id,
+          watchlistId,
+          commitData,
+          repoStats,
           contributorStats,
         );
       }
@@ -411,6 +429,72 @@ export class AlertingService {
           `Commit at ${commitHour}:00 (${percentageAtHour.toFixed(1)}% of contributor's activity) is unusual`,
         );
       }
+    }
+  }
+
+  /**
+   * Check AI-powered anomaly detection alerts
+   */
+  private async checkAIAnomalyDetectionAlert(
+    userWatchlistId: string,
+    watchlistId: string,
+    commitData: CommitData,
+    repoStats: any,
+    contributorStats: any,
+  ): Promise<void> {
+    try {
+      // Prepare data for AI analysis
+      const analysisData = {
+        sha: commitData.sha,
+        author: commitData.author,
+        email: commitData.email,
+        message: commitData.message,
+        date: commitData.date,
+        linesAdded: commitData.linesAdded,
+        linesDeleted: commitData.linesDeleted,
+        filesChanged: commitData.filesChanged,
+        contributorStats: contributorStats ? {
+          avgLinesAdded: contributorStats.avg_lines_added || 0,
+          avgLinesDeleted: contributorStats.avg_lines_deleted || 0,
+          avgFilesChanged: contributorStats.avg_files_changed || 0,
+          stddevLinesAdded: contributorStats.stddev_lines_added || 0,
+          stddevLinesDeleted: contributorStats.stddev_lines_deleted || 0,
+          stddevFilesChanged: contributorStats.stddev_files_changed || 0,
+          totalCommits: contributorStats.total_commits || 0,
+          commitTimeHistogram: contributorStats.commit_time_histogram,
+        } : undefined,
+        repoStats: repoStats ? {
+          avgLinesAdded: repoStats.avg_lines_added || 0,
+          avgLinesDeleted: repoStats.avg_lines_deleted || 0,
+          avgFilesChanged: repoStats.avg_files_changed || 0,
+          totalCommits: repoStats.total_commits || 0,
+          totalContributors: repoStats.total_contributors || 0,
+        } : undefined,
+      };
+
+      // Analyze commit with AI
+      const result = await this.aiAnomalyDetection.analyzeCommitForAnomalies(analysisData);
+
+      // If AI detects an anomaly, create an alert
+      if (result.isAnomalous) {
+        const confidence = result.confidence;
+        const riskLevel = result.riskLevel;
+        const reasoning = result.reasoning;
+        const suspiciousFactors = result.suspiciousFactors.join(', ');
+
+        await this.createAlert(
+          userWatchlistId,
+          watchlistId,
+          commitData,
+          'ai_powered_anomaly_detection',
+          'ai_analysis',
+          confidence,
+          0.5, // Threshold for AI confidence
+          `AI detected suspicious activity (confidence: ${(confidence * 100).toFixed(1)}%, risk: ${riskLevel}): ${reasoning}. Factors: ${suspiciousFactors}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error in AI anomaly detection for commit ${commitData.sha}:`, error);
     }
   }
 
