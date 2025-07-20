@@ -16,6 +16,7 @@ import { ScorecardService } from '../services/scorecard.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
 import { PollingProcessor } from '../processors/polling.processor';
+import { AlertingService } from '../services/alerting.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -32,6 +33,7 @@ export class ActivityController {
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApiService: GitHubApiService,
     private readonly pollingProcessor: PollingProcessor,
+    private readonly alertingService: AlertingService,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {}
@@ -451,6 +453,49 @@ export class ActivityController {
       this.logger.error(`Error triggering polling: ${error.message}`);
       throw new HttpException(
         `Failed to trigger polling: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('alerts/:userWatchlistId')
+  @ApiOperation({
+    summary: 'Get triggered alerts for a user watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Alerts retrieved successfully',
+  })
+  async getAlerts(@Param('userWatchlistId') userWatchlistId: string) {
+    this.logger.log(`📊 Getting alerts for user watchlist ${userWatchlistId}`);
+
+    try {
+      const alerts = await this.prisma.alertTriggered.findMany({
+        where: { user_watchlist_id: userWatchlistId },
+        orderBy: { created_at: 'desc' },
+        include: {
+          watchlist: {
+            include: {
+              package: {
+                select: {
+                  repo_name: true,
+                  repo_url: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      return {
+        alerts,
+        count: alerts.length,
+        userWatchlistId,
+      };
+    } catch (error) {
+      this.logger.error(`Error getting alerts: ${error.message}`);
+      throw new HttpException(
+        `Failed to get alerts: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

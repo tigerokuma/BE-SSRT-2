@@ -12,6 +12,7 @@ import { BusFactorService } from './services/bus-factor.service';
 import { ActivityAnalysisService } from './services/activity-analysis.service';
 import { AISummaryService } from './services/ai-summary.service';
 import { RepositorySummaryService } from './services/repository-summary.service';
+import { AlertingService } from './services/alerting.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { ConfigModule } from '@nestjs/config';
@@ -39,6 +40,7 @@ import { ConfigModule } from '@nestjs/config';
     ActivityAnalysisService,
     AISummaryService,
     RepositorySummaryService,
+    AlertingService,
   ],
   exports: [ActivityService, AISummaryService, RepositorySummaryService],
 })

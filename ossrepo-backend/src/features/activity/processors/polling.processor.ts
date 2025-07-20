@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { GitManagerService } from '../services/git-manager.service';
+import { AlertingService } from '../services/alerting.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 
@@ -28,6 +29,7 @@ export class PollingProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gitManager: GitManagerService,
+    private readonly alertingService: AlertingService,
     @InjectQueue('polling') private readonly pollingQueue: Queue,
     @InjectQueue('repository-setup') private readonly setupQueue: Queue,
   ) {
@@ -220,6 +222,18 @@ export class PollingProcessor {
 
       // Log commits to database
       await this.logCommitsToDatabase(watchlistId, newCommits);
+
+      // Check for alerts on each commit
+      for (const commit of newCommits) {
+        await this.alertingService.checkCommitForAlerts(watchlistId, {
+          sha: commit.sha,
+          author: commit.author,
+          email: commit.email,
+          message: commit.message,
+          date: commit.date,
+          // Note: linesAdded, linesDeleted, filesChanged will be populated when we enhance commit logging
+        });
+      }
 
       // Update contributor and repository statistics
       await this.updateStatistics(watchlistId);

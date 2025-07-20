@@ -297,6 +297,76 @@ Consider supporting these common activity types:
 
 ---
 
+## 🚨 User Alerting System
+
+The activity module now includes a comprehensive alerting system that monitors commits against user-defined thresholds and creates alerts when conditions are met.
+
+### Alert Types
+
+The system supports multiple types of alerts:
+
+#### **Metrics Monitored**
+- **Lines Added**: Number of lines added in a commit
+- **Lines Deleted**: Number of lines deleted in a commit  
+- **Files Changed**: Number of files modified in a commit
+- **Commit Time**: Commits made during unusual hours (2 AM - 6 AM)
+
+#### **Threshold Types**
+- **Absolute**: Fixed numeric threshold (e.g., > 1000 lines)
+- **Repository Average**: Exceeds repository average (e.g., > 2x repo average)
+- **Contributor Standard Deviation**: Exceeds contributor's personal average + N standard deviations
+- **User Defined**: Custom threshold defined by the user
+
+#### **Alert Levels**
+- **Mild**: Minor deviation from normal patterns
+- **Moderate**: Significant deviation requiring attention
+- **Critical**: Major deviation that may indicate issues
+
+### User Configuration
+
+Users can configure alerts by setting the `alerts` field in the `UserWatchlist` table as a JSON string:
+
+```json
+[
+  {
+    "metric": "lines_added",
+    "threshold": 500,
+    "thresholdType": "absolute",
+    "alertLevel": "moderate"
+  },
+  {
+    "metric": "files_changed", 
+    "threshold": 2,
+    "thresholdType": "contributor_stddev",
+    "alertLevel": "critical"
+  },
+  {
+    "metric": "commit_time",
+    "threshold": 1,
+    "thresholdType": "absolute", 
+    "alertLevel": "mild"
+  }
+]
+```
+
+### Alert Processing
+
+1. **Commit Detection**: When new commits are found during polling
+2. **User Discovery**: Find all users watching the repository
+3. **Threshold Checking**: Compare commit metrics against each user's thresholds
+4. **Alert Creation**: Create `AlertTriggered` records for exceeded thresholds
+5. **Notification**: Store detailed alert information for user review
+
+### Alert Data Structure
+
+Each alert includes:
+- **Commit Information**: SHA, author, message, date, metrics
+- **Threshold Context**: What threshold was exceeded and how
+- **Statistical Context**: Repository and contributor averages for comparison
+- **Alert Metadata**: Level, type, description, timestamps
+
+---
+
 ## 🔄 Repository Polling System
 
 The activity module now includes a comprehensive polling system that automatically checks repositories for new commits and updates statistics.
@@ -332,6 +402,13 @@ POST /activity/trigger-polling
 
 Manually triggers the daily polling process for all ready repositories.
 
+#### Get User Alerts
+```bash
+GET /activity/alerts/{userWatchlistId}
+```
+
+Retrieves all triggered alerts for a specific user watchlist.
+
 ### BullMQ Jobs
 
 #### `polling` Queue
@@ -353,6 +430,7 @@ The polling system updates:
 - `logs`: New commit records with full metadata
 - `contributor_stats`: Updated contributor statistics
 - `repo_stats`: Updated repository statistics
+- `alert_triggered`: New alert records when thresholds are exceeded
 
 ### Error Handling
 
