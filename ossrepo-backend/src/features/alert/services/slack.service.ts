@@ -3,52 +3,59 @@ import axios from 'axios';
 import { SlackRepository } from "../repositories/slack.repository";
 import { SlackOauthSend } from "../dto/slack.dto";
 
-
 @Injectable()
 export class SlackService{
-    constructor(private slackRepository: SlackRepository) {}
+    private readonly clientId: string;
+    private readonly clientSecret: string;
+    private readonly redirectUrl: string;
 
-    async exchangeCodeForToken(code: string): Promise<string> {
-        const clientId = process.env.SLACK_CLIENT_ID;
-        const clientSecret = process.env.SLACK_CLIENT_SECRET;
-        const redirectUrl = process.env.SLACK_REDIRECT_URL;
+    constructor(private slackRepository: SlackRepository) {
+        this.clientId = process.env.SLACK_CLIENT_ID!;
+        this.clientSecret = process.env.SLACK_CLIENT_SECRET!;
+        this.redirectUrl = process.env.SLACK_REDIRECT_URL!;
+    }
 
-        if (!clientId || !clientSecret || !redirectUrl) {
-            throw new Error('SLACK_CLIENT_ID is not set in .env');
+    async exchangeCodeForToken(uwlId: string, code: string, state: string): Promise<string> {
+        try {
+            if (uwlId !== state) {
+                throw new Error('Invalid or expired state token');
+            }
+
+            const slackOauthSend = new SlackOauthSend();
+            slackOauthSend.code = code;
+            slackOauthSend.client_id = this.clientId;
+            slackOauthSend.client_secret = this.clientSecret;
+            slackOauthSend.redirect_uri = this.redirectUrl;
+
+            const response = await axios.post(
+            'https://slack.com/api/oauth.v2.access',
+            new URLSearchParams(Object.entries(slackOauthSend)),
+            {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            }
+            );
+
+            if (!response.data.ok) {
+                throw new Error(`Slack OAuth error: ${response.data.error}`);
+            }
+            
+            this.slackRepository.insertSlackInfo({
+                userId: uwlId,
+                token: response.data.access_token,
+            })
+
+            return response.data.access_token;
+        }catch(err) {
+            console.error('Failed to add slack workspace.');
+            return err;
         }
 
-        const slackOauthSend = new SlackOauthSend();
-        slackOauthSend.code = code;
-        slackOauthSend.client_id = clientId;
-        slackOauthSend.client_secret = clientSecret;
-        slackOauthSend.redirect_uri = redirectUrl;
-
-
-        const response = await axios.post(
-        'https://slack.com/api/oauth.v2.access',
-        new URLSearchParams(Object.entries(slackOauthSend)),
-        {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        }
-        );
-
-        if (!response.data.ok) {
-        throw new Error(`Slack OAuth error: ${response.data.error}`);
-        }
-
-        
-        this.slackRepository.insertSlackInfo({
-            userId: '1',
-            token: response.data.access_token,
-        })
-
-        return response.data.access_token;
 
     }
 
-    async getChannels(body: any) { 
+    async getChannels(uwlId: string) { 
         try {
-            const token = await this.slackRepository.getSlackInfo('1');
+            const token = await this.slackRepository.getSlackInfo(uwlId);
             const response = await axios.get('https://slack.com/api/conversations.list', {
                 headers: {
                 Authorization: `Bearer ${token?.slack_token}`,
@@ -69,9 +76,19 @@ export class SlackService{
         }
     }
 
-    async joinChannel(text: string) {
+    getOAuthUrl(uwlId: string) {
+        const slackUrl = new URL('https://slack.com/oauth/v2/authorize');
+        slackUrl.searchParams.set('client_id', this.clientId);
+        slackUrl.searchParams.set('scope', 'chat:write, channels:read, channels:join, channels:manage');
+        slackUrl.searchParams.set('redirect_uri', this.redirectUrl);
+        slackUrl.searchParams.set('state', uwlId);
+
+        return slackUrl.toString();
+    }
+
+    async joinChannel(uwlId: string, text: string) {
         try{
-            const token = await this.slackRepository.getSlackInfo('1');
+            const token = await this.slackRepository.getSlackInfo(uwlId);
             const response = await axios.post(
             'https://slack.com/api/conversations.join',
             { channel: text },
@@ -87,7 +104,7 @@ export class SlackService{
             throw new Error(`Slack API error: ${response.data.error}`);
             }
             this.slackRepository.insertSlackInfo({
-                userId: '1', 
+                userId: uwlId, 
                 token: token!.slack_token,
                 channel: text
             });
@@ -99,9 +116,9 @@ export class SlackService{
 
     }
 
-    async sendMessage(text: string) {
+    async sendMessage(uwlId: string, text: string) {
         try {
-            const repo = await this.slackRepository.getSlackInfo('1');
+            const repo = await this.slackRepository.getSlackInfo(uwlId);
             const response = await axios.post(
                 'https://slack.com/api/chat.postMessage',
                 {

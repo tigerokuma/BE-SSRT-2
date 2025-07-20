@@ -1,18 +1,45 @@
+import { IsString, IsNotEmpty, IsDefined } from "class-validator";
+
 export class SlackOauthConnect {
-    code: string;
-    state: string;
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  code: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  state: string;
 }
 
 export class SlackInsert {
-    userId: string;
-    token: string;
-    channel?: string;
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  userId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  token: string;
+
+  @IsString()
+  channel?: string;
 }
 
 export class SlackOauthSend {
-    code: string;
-    client_id: string;
-    client_secret: string;
-    redirect_uri: string;
+  @IsString()
+  @IsString()
+  @IsNotEmpty()
+  code: string;
+
+  client_id: string;
+
+  client_secret: string;
+
+  @IsString()
+  @IsString()
+  @IsNotEmpty()
+  redirect_uri: string;
 
 }
