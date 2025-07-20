@@ -8,20 +8,17 @@ export class NpmPackagesRepository {
 
   async findByName(packageName: string): Promise<NpmPackage | null> {
     return this.prisma.npmPackage.findUnique({
-      where: { package_name: packageName }
+      where: { package_name: packageName },
     });
   }
 
   async searchByName(name: string): Promise<NpmPackage[]> {
     return this.prisma.npmPackage.findMany({
       where: {
-        package_name: { contains: name, mode: 'insensitive' }
+        package_name: { contains: name, mode: 'insensitive' },
       },
-      orderBy: [
-        { downloads: 'desc' },
-        { fetched_at: 'desc' }
-      ],
-      take: 10
+      orderBy: [{ downloads: 'desc' }, { fetched_at: 'desc' }],
+      take: 10,
     });
   }
 
@@ -41,7 +38,7 @@ export class NpmPackagesRepository {
         maintainers: packageData.maintainers || [],
         risk_score: packageData.risk_score,
         repo_url: packageData.repo_url,
-        fetched_at: new Date()
+        fetched_at: new Date(),
       },
       create: {
         package_name: packageData.package_name!,
@@ -57,8 +54,8 @@ export class NpmPackagesRepository {
         maintainers: packageData.maintainers || [],
         risk_score: packageData.risk_score,
         repo_url: packageData.repo_url,
-        fetched_at: new Date()
-      }
+        fetched_at: new Date(),
+      },
     });
   }
 
@@ -67,4 +64,4 @@ export class NpmPackagesRepository {
     const hoursAgo = (Date.now() - fetchedAt.getTime()) / (1000 * 60 * 60);
     return hoursAgo < 12; // Fresh if less than 12 hours old
   }
-} 
+}

@@ -41,9 +41,9 @@ export class PackageDetailsDto extends PackageCardDto {
   risk_score: number;
   npm_url: string;
   homepage?: string;
-  
+
   // GitHub fields (optional - may not be available if GitHub API fails)
   stars?: number;
   forks?: number;
   contributors?: number;
-} 
+}

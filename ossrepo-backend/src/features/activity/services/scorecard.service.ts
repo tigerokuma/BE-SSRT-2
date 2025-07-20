@@ -41,10 +41,10 @@ export class ScorecardService {
    * This is used to match with commit timelines instead of running local health checks
    */
   async getHistoricalScorecardData(
-    owner: string, 
-    repo: string, 
-    startDate: Date, 
-    endDate: Date
+    owner: string,
+    repo: string,
+    startDate: Date,
+    endDate: Date,
   ): Promise<HistoricalScorecardData[]> {
     try {
       const repoUrl = `github.com/${owner}/${repo}`;
@@ -63,10 +63,10 @@ export class ScorecardService {
 
       const options = {
         query,
-        params: { 
+        params: {
           repo: repoUrl,
           startDate: startDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
-          endDate: endDate.toISOString().split('T')[0]
+          endDate: endDate.toISOString().split('T')[0],
         },
         location: 'US',
       };
@@ -76,10 +76,12 @@ export class ScorecardService {
 
       // Log the number of records found
       if (rows.length > 0) {
-        this.logger.log(`📊 Found ${rows.length} Scorecard records from BigQuery`);
+        this.logger.log(
+          `📊 Found ${rows.length} Scorecard records from BigQuery`,
+        );
       }
-      
-      const historicalData: HistoricalScorecardData[] = rows.map(row => {
+
+      const historicalData: HistoricalScorecardData[] = rows.map((row) => {
         // BigQuery returns dates as objects with a 'value' property
         let parsedDate: Date;
         try {
@@ -89,10 +91,13 @@ export class ScorecardService {
           } else if (typeof row.date === 'string') {
             parsedDate = new Date(row.date);
           } else {
-            this.logger.warn(`⚠️ Unexpected date format from BigQuery:`, row.date);
+            this.logger.warn(
+              `⚠️ Unexpected date format from BigQuery:`,
+              row.date,
+            );
             parsedDate = new Date();
           }
-          
+
           if (isNaN(parsedDate.getTime())) {
             this.logger.warn(`⚠️ Invalid date from BigQuery:`, row.date);
             parsedDate = new Date();
@@ -101,18 +106,21 @@ export class ScorecardService {
           this.logger.warn(`⚠️ Error parsing BigQuery date:`, row.date, error);
           parsedDate = new Date();
         }
-        
+
         return {
           date: parsedDate,
           score: row.score,
-          checks: row.checks || []
+          checks: row.checks || [],
         };
       });
 
       // No logging to reduce noise
       return historicalData;
     } catch (error) {
-      this.logger.error(`❌ Error fetching historical Scorecard data for ${owner}/${repo}:`, error.message);
+      this.logger.error(
+        `❌ Error fetching historical Scorecard data for ${owner}/${repo}:`,
+        error.message,
+      );
       return [];
     }
   }
@@ -120,7 +128,10 @@ export class ScorecardService {
   /**
    * Get the latest Scorecard data for a repository
    */
-  async getLatestScorecard(owner: string, repo: string): Promise<ScorecardData | null> {
+  async getLatestScorecard(
+    owner: string,
+    repo: string,
+  ): Promise<ScorecardData | null> {
     try {
       const repoUrl = `github.com/${owner}/${repo}`;
       this.logger.log(`🔍 Querying Scorecard data for ${repoUrl}`);
@@ -152,12 +163,17 @@ export class ScorecardService {
       }
 
       const scorecardData = rows[0] as ScorecardData;
-      this.logger.log(`✅ Found Scorecard data for ${repoUrl} - Score: ${scorecardData.score}`);
+      this.logger.log(
+        `✅ Found Scorecard data for ${repoUrl} - Score: ${scorecardData.score}`,
+      );
 
       return scorecardData;
     } catch (error) {
-      this.logger.error(`❌ Error fetching Scorecard data for ${owner}/${repo}:`, error.message);
-      
+      this.logger.error(
+        `❌ Error fetching Scorecard data for ${owner}/${repo}:`,
+        error.message,
+      );
+
       // Don't throw error - just return null so we can fall back to local analysis
       return null;
     }
@@ -166,10 +182,16 @@ export class ScorecardService {
   /**
    * Get Scorecard data for multiple repositories
    */
-  async getScorecardForMultipleRepos(repos: Array<{ owner: string; repo: string }>): Promise<Map<string, ScorecardData>> {
+  async getScorecardForMultipleRepos(
+    repos: Array<{ owner: string; repo: string }>,
+  ): Promise<Map<string, ScorecardData>> {
     try {
-      const repoUrls = repos.map(({ owner, repo }) => `github.com/${owner}/${repo}`);
-      this.logger.log(`🔍 Querying Scorecard data for ${repoUrls.length} repositories`);
+      const repoUrls = repos.map(
+        ({ owner, repo }) => `github.com/${owner}/${repo}`,
+      );
+      this.logger.log(
+        `🔍 Querying Scorecard data for ${repoUrls.length} repositories`,
+      );
 
       const query = `
         SELECT 
@@ -202,10 +224,15 @@ export class ScorecardService {
         result.set(scorecardData.repo, scorecardData);
       }
 
-      this.logger.log(`✅ Found Scorecard data for ${result.size}/${repoUrls.length} repositories`);
+      this.logger.log(
+        `✅ Found Scorecard data for ${result.size}/${repoUrls.length} repositories`,
+      );
       return result;
     } catch (error) {
-      this.logger.error(`❌ Error fetching Scorecard data for multiple repos:`, error.message);
+      this.logger.error(
+        `❌ Error fetching Scorecard data for multiple repos:`,
+        error.message,
+      );
       return new Map();
     }
   }
@@ -216,7 +243,7 @@ export class ScorecardService {
   async hasScorecardData(owner: string, repo: string): Promise<boolean> {
     try {
       const repoUrl = `github.com/${owner}/${repo}`;
-      
+
       const query = `
         SELECT COUNT(*) as count
         FROM \`openssf.scorecardcron.scorecard-v2\`
@@ -234,10 +261,13 @@ export class ScorecardService {
 
       const hasData = rows[0]?.count > 0;
       this.logger.log(`🔍 Scorecard data exists for ${repoUrl}: ${hasData}`);
-      
+
       return hasData;
     } catch (error) {
-      this.logger.error(`❌ Error checking Scorecard data existence for ${owner}/${repo}:`, error.message);
+      this.logger.error(
+        `❌ Error checking Scorecard data existence for ${owner}/${repo}:`,
+        error.message,
+      );
       return false;
     }
   }
@@ -245,7 +275,10 @@ export class ScorecardService {
   /**
    * Get a summary of Scorecard checks for a repository
    */
-  async getScorecardSummary(owner: string, repo: string): Promise<{
+  async getScorecardSummary(
+    owner: string,
+    repo: string,
+  ): Promise<{
     score: number;
     totalChecks: number;
     passedChecks: number;
@@ -253,21 +286,21 @@ export class ScorecardService {
     checkDetails: Array<{ name: string; score: number; reason: string }>;
   } | null> {
     const scorecardData = await this.getLatestScorecard(owner, repo);
-    
+
     if (!scorecardData) {
       return null;
     }
 
     const checks = scorecardData.checks || [];
-    const passedChecks = checks.filter(check => check.score > 0).length;
-    const failedChecks = checks.filter(check => check.score === 0).length;
+    const passedChecks = checks.filter((check) => check.score > 0).length;
+    const failedChecks = checks.filter((check) => check.score === 0).length;
 
     return {
       score: scorecardData.score,
       totalChecks: checks.length,
       passedChecks,
       failedChecks,
-      checkDetails: checks.map(check => ({
+      checkDetails: checks.map((check) => ({
         name: check.name,
         score: check.score,
         reason: check.reason,
@@ -278,7 +311,10 @@ export class ScorecardService {
   /**
    * Get a summary of available Scorecard data for a repository
    */
-  async getScorecardDataSummary(owner: string, repo: string): Promise<{
+  async getScorecardDataSummary(
+    owner: string,
+    repo: string,
+  ): Promise<{
     hasData: boolean;
     totalRecords: number;
     dateRange: { start: string; end: string } | null;
@@ -286,7 +322,7 @@ export class ScorecardService {
   }> {
     try {
       const repoUrl = `github.com/${owner}/${repo}`;
-      
+
       const query = `
         SELECT 
           COUNT(*) as totalRecords,
@@ -318,14 +354,19 @@ export class ScorecardService {
       return {
         hasData,
         totalRecords: row.totalRecords || 0,
-        dateRange: hasData ? {
-          start: row.startDate,
-          end: row.endDate
-        } : null,
+        dateRange: hasData
+          ? {
+              start: row.startDate,
+              end: row.endDate,
+            }
+          : null,
         latestScore: row.latestScore || null,
       };
     } catch (error) {
-      this.logger.error(`❌ Error getting Scorecard data summary for ${owner}/${repo}:`, error.message);
+      this.logger.error(
+        `❌ Error getting Scorecard data summary for ${owner}/${repo}:`,
+        error.message,
+      );
       return {
         hasData: false,
         totalRecords: 0,
@@ -334,4 +375,4 @@ export class ScorecardService {
       };
     }
   }
-} 
+}

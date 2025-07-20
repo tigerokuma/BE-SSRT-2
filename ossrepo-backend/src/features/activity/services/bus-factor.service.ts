@@ -66,13 +66,19 @@ export class BusFactorService {
       }
 
       // Sort contributors by total commits (descending)
-      const sortedContributors = contributorStats.sort((a, b) => b.totalCommits - a.totalCommits);
+      const sortedContributors = contributorStats.sort(
+        (a, b) => b.totalCommits - a.totalCommits,
+      );
 
       // Calculate bus factor
       const busFactor = this.calculateBusFactorScore(sortedContributors);
 
       // Determine risk level
-      const riskLevel = this.determineRiskLevel(busFactor, totalContributors, sortedContributors);
+      const riskLevel = this.determineRiskLevel(
+        busFactor,
+        totalContributors,
+        sortedContributors,
+      );
 
       // Get top contributors (up to 5)
       const topContributors = sortedContributors.slice(0, 5);
@@ -82,15 +88,25 @@ export class BusFactorService {
         totalContributors,
         topContributors,
         riskLevel,
-        riskReason: this.getRiskReason(riskLevel, busFactor, totalContributors, sortedContributors),
+        riskReason: this.getRiskReason(
+          riskLevel,
+          busFactor,
+          totalContributors,
+          sortedContributors,
+        ),
         analysisDate: new Date(),
       };
 
-      this.logger.log(`✅ Bus factor calculated: ${busFactor} (${riskLevel} risk) - ${totalContributors} contributors`);
+      this.logger.log(
+        `✅ Bus factor calculated: ${busFactor} (${riskLevel} risk) - ${totalContributors} contributors`,
+      );
 
       return result;
     } catch (error) {
-      this.logger.error(`❌ Error calculating bus factor for ${watchlistId}:`, error.message);
+      this.logger.error(
+        `❌ Error calculating bus factor for ${watchlistId}:`,
+        error.message,
+      );
       return this.createEmptyResult();
     }
   }
@@ -103,7 +119,7 @@ export class BusFactorService {
 
     for (const commit of commits) {
       const author = commit.actor;
-      const payload = commit.payload as any;
+      const payload = commit.payload;
       const timestamp = new Date(commit.timestamp);
 
       // Skip automated bots and CI/CD systems
@@ -145,14 +161,20 @@ export class BusFactorService {
     // Calculate derived metrics
     for (const stats of contributorMap.values()) {
       stats.contributionSpan = Math.ceil(
-        (stats.lastCommit.getTime() - stats.firstCommit.getTime()) / (1000 * 60 * 60 * 24)
+        (stats.lastCommit.getTime() - stats.firstCommit.getTime()) /
+          (1000 * 60 * 60 * 24),
       );
-      stats.averageLinesPerCommit = stats.totalCommits > 0 
-        ? Math.round((stats.totalLinesAdded + stats.totalLinesDeleted) / stats.totalCommits)
-        : 0;
-      stats.averageFilesPerCommit = stats.totalCommits > 0 
-        ? Math.round(stats.totalFilesChanged / stats.totalCommits)
-        : 0;
+      stats.averageLinesPerCommit =
+        stats.totalCommits > 0
+          ? Math.round(
+              (stats.totalLinesAdded + stats.totalLinesDeleted) /
+                stats.totalCommits,
+            )
+          : 0;
+      stats.averageFilesPerCommit =
+        stats.totalCommits > 0
+          ? Math.round(stats.totalFilesChanged / stats.totalCommits)
+          : 0;
     }
 
     return Array.from(contributorMap.values());
@@ -181,7 +203,7 @@ export class BusFactorService {
       /cd/i,
     ];
 
-    return botPatterns.some(pattern => pattern.test(author));
+    return botPatterns.some((pattern) => pattern.test(author));
   }
 
   /**
@@ -191,7 +213,10 @@ export class BusFactorService {
     if (contributors.length === 0) return 0;
     if (contributors.length === 1) return 1;
 
-    const totalCommits = contributors.reduce((sum, c) => sum + c.totalCommits, 0);
+    const totalCommits = contributors.reduce(
+      (sum, c) => sum + c.totalCommits,
+      0,
+    );
     if (totalCommits === 0) return 0;
 
     // Calculate how many contributors we need to reach 50% of total commits
@@ -201,7 +226,7 @@ export class BusFactorService {
     for (const contributor of contributors) {
       cumulativeCommits += contributor.totalCommits;
       contributorsNeeded++;
-      
+
       if (cumulativeCommits >= totalCommits * 0.5) {
         break;
       }
@@ -214,23 +239,32 @@ export class BusFactorService {
    * Determine risk level based on bus factor and contributor patterns
    */
   private determineRiskLevel(
-    busFactor: number, 
-    totalContributors: number, 
-    contributors: ContributorStats[]
+    busFactor: number,
+    totalContributors: number,
+    contributors: ContributorStats[],
   ): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
-    
     // Critical: Only 1-2 contributors total, or bus factor of 1
     if (totalContributors <= 2 || busFactor === 1) {
       return 'CRITICAL';
     }
 
     // High: Bus factor of 2-3, or single contributor has >70% of commits
-    if (busFactor <= 3 || (contributors[0]?.totalCommits / contributors.reduce((sum, c) => sum + c.totalCommits, 0)) > 0.7) {
+    if (
+      busFactor <= 3 ||
+      contributors[0]?.totalCommits /
+        contributors.reduce((sum, c) => sum + c.totalCommits, 0) >
+        0.7
+    ) {
       return 'HIGH';
     }
 
     // Medium: Bus factor of 4-6, or top contributor has >50% of commits
-    if (busFactor <= 6 || (contributors[0]?.totalCommits / contributors.reduce((sum, c) => sum + c.totalCommits, 0)) > 0.5) {
+    if (
+      busFactor <= 6 ||
+      contributors[0]?.totalCommits /
+        contributors.reduce((sum, c) => sum + c.totalCommits, 0) >
+        0.5
+    ) {
       return 'MEDIUM';
     }
 
@@ -242,15 +276,19 @@ export class BusFactorService {
    * Generate human-readable risk reason
    */
   private getRiskReason(
-    riskLevel: string, 
-    busFactor: number, 
-    totalContributors: number, 
-    contributors: ContributorStats[]
+    riskLevel: string,
+    busFactor: number,
+    totalContributors: number,
+    contributors: ContributorStats[],
   ): string {
-    const totalCommits = contributors.reduce((sum, c) => sum + c.totalCommits, 0);
-    const topContributorPercentage = totalCommits > 0 
-      ? Math.round((contributors[0]?.totalCommits / totalCommits) * 100)
-      : 0;
+    const totalCommits = contributors.reduce(
+      (sum, c) => sum + c.totalCommits,
+      0,
+    );
+    const topContributorPercentage =
+      totalCommits > 0
+        ? Math.round((contributors[0]?.totalCommits / totalCommits) * 100)
+        : 0;
 
     switch (riskLevel) {
       case 'CRITICAL':
@@ -283,15 +321,24 @@ export class BusFactorService {
   /**
    * Store bus factor results in database
    */
-  async storeBusFactorResults(watchlistId: string, results: BusFactorResult): Promise<void> {
+  async storeBusFactorResults(
+    watchlistId: string,
+    results: BusFactorResult,
+  ): Promise<void> {
     try {
       // For now, we'll just log the results
       // TODO: Implement proper storage when we have the bus factor table schema
-      this.logger.log(`📊 Bus factor results for ${watchlistId}: ${results.busFactor} (${results.riskLevel})`);
-      this.logger.log(`   Top contributors: ${results.topContributors.map(c => `${c.author} (${c.totalCommits} commits)`).join(', ')}`);
+      this.logger.log(
+        `📊 Bus factor results for ${watchlistId}: ${results.busFactor} (${results.riskLevel})`,
+      );
+      this.logger.log(
+        `   Top contributors: ${results.topContributors.map((c) => `${c.author} (${c.totalCommits} commits)`).join(', ')}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Failed to store bus factor results: ${error.message}`);
+      this.logger.error(
+        `❌ Failed to store bus factor results: ${error.message}`,
+      );
       throw error;
     }
   }
-} 
+}

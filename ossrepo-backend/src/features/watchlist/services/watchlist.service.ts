@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { WatchlistRepository } from '../repositories/watchlist.repository';
-import { AddToWatchlistRequest, UpdateWatchlistRequest } from '../dto/watchlist.dto';
+import {
+  AddToWatchlistRequest,
+  UpdateWatchlistRequest,
+} from '../dto/watchlist.dto';
 
 @Injectable()
 export class WatchlistService {
@@ -40,4 +43,4 @@ export class WatchlistService {
     // - Return import summary
     return this.watchlistRepository.importFromGithub(repoUrl);
   }
-} 
+}

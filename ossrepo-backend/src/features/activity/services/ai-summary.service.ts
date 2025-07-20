@@ -53,7 +53,10 @@ export class AISummaryService {
       await this.ensureModelDownloaded();
       this.logger.log('✅ AI Summary service initialized with Mistral model');
     } catch (error) {
-      this.logger.warn('⚠️ AI Summary service initialization failed, will use fallback summaries', error);
+      this.logger.warn(
+        '⚠️ AI Summary service initialization failed, will use fallback summaries',
+        error,
+      );
     }
   }
 
@@ -62,7 +65,9 @@ export class AISummaryService {
       await execAsync('ollama --version');
       return true;
     } catch (error) {
-      this.logger.warn('Ollama not found. Please install Ollama to enable AI summaries.');
+      this.logger.warn(
+        'Ollama not found. Please install Ollama to enable AI summaries.',
+      );
       return false;
     }
   }
@@ -84,13 +89,15 @@ export class AISummaryService {
     }
   }
 
-  async generateRepositorySummary(repoData: RepositoryData): Promise<AISummaryResult> {
+  async generateRepositorySummary(
+    repoData: RepositoryData,
+  ): Promise<AISummaryResult> {
     try {
       const prompt = this.buildSummaryPrompt(repoData);
       const startTime = Date.now();
       const summary = await this.generateWithMistral(prompt);
       const generationTimeMs = Date.now() - startTime;
-      
+
       return {
         summary: this.truncateSummary(summary),
         confidence: this.calculateConfidence(repoData),
@@ -101,18 +108,28 @@ export class AISummaryService {
         generationTimeMs,
       };
     } catch (error) {
-      this.logger.error('Failed to generate AI summary, using fallback:', error);
+      this.logger.error(
+        'Failed to generate AI summary, using fallback:',
+        error,
+      );
       return this.generateFallbackSummary(repoData);
     }
   }
 
   private buildSummaryPrompt(repoData: RepositoryData): string {
     // Clean and simplify the data to avoid command line issues
-    const cleanDescription = (repoData.description || 'No description').replace(/[^\w\s.,!?-]/g, ' ').substring(0, 200);
-    const cleanRecentCommits = repoData.recentCommits?.slice(0, 3).map(commit => 
-      `${commit.message.replace(/[^\w\s.,!?-]/g, ' ').substring(0, 100)} (${commit.author})`
-    ).join('; ') || 'No recent commits';
-    
+    const cleanDescription = (repoData.description || 'No description')
+      .replace(/[^\w\s.,!?-]/g, ' ')
+      .substring(0, 200);
+    const cleanRecentCommits =
+      repoData.recentCommits
+        ?.slice(0, 3)
+        .map(
+          (commit) =>
+            `${commit.message.replace(/[^\w\s.,!?-]/g, ' ').substring(0, 100)} (${commit.author})`,
+        )
+        .join('; ') || 'No recent commits';
+
     const context = `Repository: ${repoData.name}
 Description: ${cleanDescription}
 Stars: ${repoData.stars || 0}
@@ -130,42 +147,50 @@ Generate a 2-3 sentence summary of this repository highlighting what it does, it
   private async generateWithMistral(prompt: string): Promise<string> {
     try {
       // Use full path on Windows to avoid PATH issues
-      const ollamaPath = process.platform === 'win32' 
-        ? 'C:\\Users\\hruck\\AppData\\Local\\Programs\\Ollama\\ollama.exe'
-        : 'ollama';
-      
-      this.logger.log(`🔍 Executing Ollama: ${ollamaPath} run ${this.modelName}`);
+      const ollamaPath =
+        process.platform === 'win32'
+          ? 'C:\\Users\\hruck\\AppData\\Local\\Programs\\Ollama\\ollama.exe'
+          : 'ollama';
+
+      this.logger.log(
+        `🔍 Executing Ollama: ${ollamaPath} run ${this.modelName}`,
+      );
       this.logger.log(`🔍 Prompt length: ${prompt.length} characters`);
-      
+
       // Use a simpler approach - write prompt to a temporary file
       const fs = require('fs');
       const os = require('os');
       const path = require('path');
-      
-      const tempFile = path.join(os.tmpdir(), `ollama-prompt-${Date.now()}.txt`);
+
+      const tempFile = path.join(
+        os.tmpdir(),
+        `ollama-prompt-${Date.now()}.txt`,
+      );
       fs.writeFileSync(tempFile, prompt, 'utf8');
-      
+
       const command = `"${ollamaPath}" run ${this.modelName} < "${tempFile}"`;
-      
+
       const { stdout, stderr } = await execAsync(command, {
         timeout: 30000, // 30 second timeout
-        maxBuffer: 1024 * 1024 // 1MB buffer
+        maxBuffer: 1024 * 1024, // 1MB buffer
       });
-      
+
       if (stderr) {
         this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
       }
-      
+
       const cleanOutput = this.cleanMistralOutput(stdout);
-      this.logger.log(`✅ Ollama execution successful, output length: ${cleanOutput.length}`);
-      
+      this.logger.log(
+        `✅ Ollama execution successful, output length: ${cleanOutput.length}`,
+      );
+
       // Clean up temp file
       try {
         fs.unlinkSync(tempFile);
       } catch (error) {
         this.logger.warn(`⚠️ Failed to clean up temp file: ${error.message}`);
       }
-      
+
       return cleanOutput;
     } catch (error) {
       this.logger.error(`❌ Ollama execution failed: ${error.message}`);
@@ -194,14 +219,38 @@ Generate a 2-3 sentence summary of this repository highlighting what it does, it
     let score = 0;
     let total = 0;
 
-    if (repoData.description) { score += 1; total += 1; }
-    if (repoData.stars !== undefined) { score += 1; total += 1; }
-    if (repoData.forks !== undefined) { score += 1; total += 1; }
-    if (repoData.contributors !== undefined) { score += 1; total += 1; }
-    if (repoData.language) { score += 1; total += 1; }
-    if (repoData.topics && repoData.topics.length > 0) { score += 1; total += 1; }
-    if (repoData.readmeContent) { score += 1; total += 1; }
-    if (repoData.recentCommits && repoData.recentCommits.length > 0) { score += 1; total += 1; }
+    if (repoData.description) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.stars !== undefined) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.forks !== undefined) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.contributors !== undefined) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.language) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.topics && repoData.topics.length > 0) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.readmeContent) {
+      score += 1;
+      total += 1;
+    }
+    if (repoData.recentCommits && repoData.recentCommits.length > 0) {
+      score += 1;
+      total += 1;
+    }
 
     return total > 0 ? score / total : 0;
   }
@@ -250,4 +299,4 @@ Generate a 2-3 sentence summary of this repository highlighting what it does, it
       return false;
     }
   }
-} 
+}

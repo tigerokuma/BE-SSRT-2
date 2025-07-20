@@ -1,4 +1,14 @@
-import { Body, Controller, Post, Get, Param, Logger, Query, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  Get,
+  Param,
+  Logger,
+  Query,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { ActivityService } from '../services/activity.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
@@ -6,13 +16,14 @@ import { ScorecardService } from '../services/scorecard.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @ApiTags('Activity')
 @Controller('activity')
 export class ActivityController {
   private readonly logger = new Logger(ActivityController.name);
-  
+
   constructor(
     private readonly activityService: ActivityService,
     private readonly repositorySummaryService: RepositorySummaryService,
@@ -20,61 +31,86 @@ export class ActivityController {
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApiService: GitHubApiService,
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('user-watchlist-added')
-  @ApiResponse({ status: 201, description: 'Repository added to watchlist with alert configuration' })
+  @ApiResponse({
+    status: 201,
+    description: 'Repository added to watchlist with alert configuration',
+  })
   async addToWatchlist(@Body() dto: AddToWatchlistDto) {
     this.logger.log(`📝 Adding ${dto.repo_url} to watchlist (${dto.added_by})`);
-    
+
     // Call the service to handle database operations
     const result = await this.activityService.addToWatchlist(dto);
-    
+
     return result;
   }
 
   @Get('watchlist/:watchlistId/status')
-  @ApiResponse({ status: 200, description: 'Watchlist status retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Watchlist status retrieved successfully',
+  })
   async getWatchlistStatus(@Param('watchlistId') watchlistId: string) {
     return await this.activityService.getWatchlistStatus(watchlistId);
   }
 
   @Get('scorecard/test')
-  @ApiOperation({ summary: 'Test Scorecard data availability for a repository' })
-  @ApiResponse({ status: 200, description: 'Scorecard data summary retrieved successfully' })
+  @ApiOperation({
+    summary: 'Test Scorecard data availability for a repository',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Scorecard data summary retrieved successfully',
+  })
   async testScorecardData(
     @Query('owner') owner: string,
-    @Query('repo') repo: string
+    @Query('repo') repo: string,
   ) {
     this.logger.log(`🔍 Testing Scorecard data for ${owner}/${repo}`);
-    
-    const summary = await this.scorecardService.getScorecardDataSummary(owner, repo);
-    const latestData = await this.scorecardService.getLatestScorecard(owner, repo);
-    
+
+    const summary = await this.scorecardService.getScorecardDataSummary(
+      owner,
+      repo,
+    );
+    const latestData = await this.scorecardService.getLatestScorecard(
+      owner,
+      repo,
+    );
+
     return {
       summary,
-      latestData: latestData ? {
-        score: latestData.score,
-        date: latestData.date,
-        checksCount: latestData.checks?.length || 0
-      } : null,
-      message: summary.hasData 
+      latestData: latestData
+        ? {
+            score: latestData.score,
+            date: latestData.date,
+            checksCount: latestData.checks?.length || 0,
+          }
+        : null,
+      message: summary.hasData
         ? `✅ Scorecard data available for ${owner}/${repo}`
-        : `❌ No Scorecard data found for ${owner}/${repo}`
+        : `❌ No Scorecard data found for ${owner}/${repo}`,
     };
   }
 
   @Get('rate-limit/status')
-  @ApiOperation({ summary: 'Get GitHub API rate limit status and processing strategy' })
-  @ApiResponse({ status: 200, description: 'Rate limit status and strategy retrieved successfully' })
+  @ApiOperation({
+    summary: 'Get GitHub API rate limit status and processing strategy',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Rate limit status and strategy retrieved successfully',
+  })
   async getRateLimitStatus() {
     this.logger.log(`📊 Getting GitHub API rate limit status`);
-    
+
     const rateLimit = await this.rateLimitManager.getRateLimitStatus();
     const strategy = await this.rateLimitManager.getProcessingStrategy();
     const timeUntilReset = await this.rateLimitManager.getTimeUntilReset();
     const isApproachingLimit = await this.rateLimitManager.isApproachingLimit();
-    
+
     return {
       rateLimit,
       strategy,
@@ -85,52 +121,66 @@ export class ActivityController {
   }
 
   @Get('rate-limit/token-strategy')
-  @ApiOperation({ summary: 'Get detailed token strategy and cloning thresholds' })
-  @ApiResponse({ status: 200, description: 'Token strategy summary retrieved successfully' })
+  @ApiOperation({
+    summary: 'Get detailed token strategy and cloning thresholds',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Token strategy summary retrieved successfully',
+  })
   async getTokenStrategySummary() {
     this.logger.log(`📊 Getting token strategy summary`);
-    
+
     const summary = await this.rateLimitManager.getTokenStrategySummary();
-    
+
     return {
       ...summary,
       message: `Current token strategy: ${summary.strategy} - Cloning repos > ${summary.cloningThresholdMB}MB`,
       explanation: {
         strategy: summary.strategy,
         cloningThreshold: `${summary.cloningThresholdMB}MB (${summary.cloningThresholdKB}KB)`,
-        apiUsage: summary.shouldUseApiForCommits ? 'Will use API for commits' : 'Will use local cloning for commits',
+        apiUsage: summary.shouldUseApiForCommits
+          ? 'Will use API for commits'
+          : 'Will use local cloning for commits',
         tokenStatus: `${summary.remainingTokens}/${summary.totalTokens} tokens remaining (${summary.percentageUsed}% used)`,
       },
     };
   }
 
   @Post('test-setup')
-  @ApiOperation({ summary: 'Test repository setup with different configurations' })
-  @ApiResponse({ status: 201, description: 'Test repository setup job queued successfully' })
+  @ApiOperation({
+    summary: 'Test repository setup with different configurations',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Test repository setup job queued successfully',
+  })
   async testRepositorySetup(
     @Body() dto: AddToWatchlistDto,
     @Query('forceLocalCloning') forceLocalCloning?: boolean,
     @Query('forceLocalHealthAnalysis') forceLocalHealthAnalysis?: boolean,
-    @Query('maxCommits') maxCommits?: number
+    @Query('maxCommits') maxCommits?: number,
   ) {
-    this.logger.log(`🧪 Testing repository setup for ${dto.repo_url} with options: localCloning=${forceLocalCloning}, localHealth=${forceLocalHealthAnalysis}, maxCommits=${maxCommits || 'default'}`);
-    
+    this.logger.log(
+      `🧪 Testing repository setup for ${dto.repo_url} with options: localCloning=${forceLocalCloning}, localHealth=${forceLocalHealthAnalysis}, maxCommits=${maxCommits || 'default'}`,
+    );
+
     // Extract owner and repo name from GitHub URL
     const { owner, repo } = this.parseGitHubUrl(dto.repo_url);
-    
+
     // Fetch repository info from GitHub API
     const repoInfo = await this.fetchGitHubRepoInfo(owner, repo);
-    
+
     // Ensure user exists (create if not)
     const user = await this.ensureUserExists(dto.added_by);
-    
+
     // Generate package name for lookup
     const packageName = `${owner}/${repo}`;
-    
+
     // Create test watchlist entry
     const packageId = `package_${owner}_${repo}_${Date.now()}`;
     const watchlistId = `watchlist_${owner}_${repo}_${Date.now()}`;
-    
+
     // Create or update package entry
     const packageEntry = await this.prisma.package.upsert({
       where: { package_name: packageName },
@@ -163,15 +213,15 @@ export class ActivityController {
 
     // Queue test job with specified options
     await this.activityService.queueRepositorySetupJob(
-      watchlistEntry.watchlist_id, 
-      owner, 
-      repo, 
-      repoInfo.default_branch, 
-      repoInfo.is_large_repo, 
+      watchlistEntry.watchlist_id,
+      owner,
+      repo,
+      repoInfo.default_branch,
+      repoInfo.is_large_repo,
       repoInfo.size,
       maxCommits,
       forceLocalCloning,
-      forceLocalHealthAnalysis
+      forceLocalHealthAnalysis,
     );
 
     return {
@@ -180,7 +230,7 @@ export class ActivityController {
       options: {
         forceLocalCloning: !!forceLocalCloning,
         forceLocalHealthAnalysis: !!forceLocalHealthAnalysis,
-        maxCommits: maxCommits || 'default'
+        maxCommits: maxCommits || 'default',
       },
       repository_info: {
         owner,
@@ -194,75 +244,186 @@ export class ActivityController {
 
   @Get('ai-summary/test')
   @ApiOperation({ summary: 'Test AI summary generation for a repository' })
-  @ApiResponse({ status: 200, description: 'AI summary generated successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'AI summary generated successfully',
+  })
   async testAISummary(
     @Query('owner') owner: string,
-    @Query('repo') repo: string
+    @Query('repo') repo: string,
   ) {
     this.logger.log(`🤖 Testing AI summary generation for ${owner}/${repo}`);
-    
+
     try {
-      const result = await this.repositorySummaryService.testSummaryGeneration(owner, repo);
-      
+      const result = await this.repositorySummaryService.testSummaryGeneration(
+        owner,
+        repo,
+      );
+
       return {
         success: result.success,
-        summary: result.summary ? {
-          text: result.summary.summary,
-          confidence: result.summary.confidence,
-          model: result.summary.modelUsed,
-          generatedAt: result.summary.generatedAt,
-        } : null,
+        summary: result.summary
+          ? {
+              text: result.summary.summary,
+              confidence: result.summary.confidence,
+              model: result.summary.modelUsed,
+              generatedAt: result.summary.generatedAt,
+            }
+          : null,
         error: result.error,
-        message: result.success 
+        message: result.success
           ? `✅ AI summary generated successfully for ${owner}/${repo}`
-          : `❌ Failed to generate AI summary for ${owner}/${repo}: ${result.error}`
+          : `❌ Failed to generate AI summary for ${owner}/${repo}: ${result.error}`,
       };
     } catch (error) {
-      this.logger.error(`Error testing AI summary for ${owner}/${repo}:`, error);
+      this.logger.error(
+        `Error testing AI summary for ${owner}/${repo}:`,
+        error,
+      );
       return {
         success: false,
         error: error.message,
-        message: `❌ Error testing AI summary for ${owner}/${repo}`
+        message: `❌ Error testing AI summary for ${owner}/${repo}`,
       };
     }
   }
 
   @Get('health-data/test')
-  @ApiOperation({ summary: 'Test health data storage and retrieval' })
-  @ApiResponse({ status: 200, description: 'Health data test results' })
+  @ApiOperation({
+    summary: 'Test health data retrieval for a watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Health data retrieved successfully',
+  })
   async testHealthData() {
+    this.logger.log(`🔍 Testing health data retrieval`);
+
+    const healthData = await this.prisma.healthData.findMany({
+      take: 5,
+      orderBy: { created_at: 'desc' },
+      include: {
+        watchlist: {
+          include: {
+            package: true,
+          },
+        },
+      },
+    });
+
+    return {
+      count: healthData.length,
+      data: healthData.map((item) => ({
+        id: item.id,
+        watchlist_id: item.watchlist_id,
+        repo_name: item.watchlist.package.repo_name,
+        commit_sha: item.commit_sha,
+        overall_health_score: item.overall_health_score,
+        analysis_date: item.analysis_date,
+        source: item.source,
+        created_at: item.created_at,
+      })),
+    };
+  }
+
+  @Get('watchlist/:watchlistId/contributor-stats')
+  @ApiOperation({
+    summary: 'Get contributor statistics for a watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Contributor statistics retrieved successfully',
+  })
+  async getContributorStats(@Param('watchlistId') watchlistId: string) {
+    this.logger.log(`📊 Getting contributor stats for watchlist ${watchlistId}`);
+
+    const contributorStats = await this.prisma.contributorStats.findMany({
+      where: { watchlist_id: watchlistId },
+      orderBy: { total_commits: 'desc' },
+    });
+
+    return {
+      watchlist_id: watchlistId,
+      count: contributorStats.length,
+      contributors: contributorStats.map((stat) => ({
+        author_email: stat.author_email,
+        author_name: stat.author_name,
+        total_commits: stat.total_commits,
+        avg_lines_added: stat.avg_lines_added,
+        avg_lines_deleted: stat.avg_lines_deleted,
+        avg_files_changed: stat.avg_files_changed,
+        last_commit_date: stat.last_commit_date,
+        typical_days_active: stat.typical_days_active,
+      })),
+    };
+  }
+
+  @Get('watchlist/:watchlistId/repo-stats')
+  @ApiOperation({
+    summary: 'Get repository statistics for a watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Repository statistics retrieved successfully',
+  })
+  async getRepoStats(@Param('watchlistId') watchlistId: string) {
+    this.logger.log(`📊 Getting repo stats for watchlist ${watchlistId}`);
+
+    const repoStats = await this.prisma.repoStats.findUnique({
+      where: { watchlist_id: watchlistId },
+    });
+
+    if (!repoStats) {
+      throw new HttpException(
+        'Repository statistics not found for this watchlist',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    return {
+      watchlist_id: watchlistId,
+      total_commits: repoStats.total_commits,
+      avg_lines_added: repoStats.avg_lines_added,
+      avg_lines_deleted: repoStats.avg_lines_deleted,
+      avg_files_changed: repoStats.avg_files_changed,
+      commit_time_histogram: repoStats.commit_time_histogram,
+      typical_days_active: repoStats.typical_days_active,
+      last_updated: repoStats.last_updated,
+    };
+  }
+
+  @Post('watchlist/:watchlistId/calculate-stats')
+  @ApiOperation({
+    summary: 'Manually trigger calculation of repository and contributor statistics',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistics calculation completed successfully',
+  })
+  async calculateStats(@Param('watchlistId') watchlistId: string) {
+    this.logger.log(`📊 Manually triggering stats calculation for watchlist ${watchlistId}`);
+
     try {
-      const healthData = await this.prisma.healthData.findMany({
-        take: 5,
-        orderBy: { created_at: 'desc' },
-        include: {
-          watchlist: {
-            select: {
-              watchlist_id: true,
-              package: {
-                select: {
-                  package_name: true
-                }
-              }
-            }
-          }
-        }
-      });
-      
+      // Import GitManagerService here to avoid circular dependency
+      const { GitManagerService } = await import('../services/git-manager.service');
+      const gitManager = new GitManagerService(
+        this.configService,
+        this.prisma,
+      );
+
+      await gitManager.updateContributorStats(watchlistId);
+
       return {
-        count: healthData.length,
-        data: healthData.map(h => ({
-          id: h.id,
-          watchlist_id: h.watchlist_id,
-          package_name: h.watchlist.package.package_name,
-          score: h.overall_health_score,
-          metrics: h.scorecard_metrics,
-          source: h.source,
-          created_at: h.created_at
-        }))
+        watchlist_id: watchlistId,
+        message: 'Statistics calculation completed successfully',
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      return { error: error.message };
+      this.logger.error(`❌ Failed to calculate stats: ${error.message}`);
+      throw new HttpException(
+        `Failed to calculate statistics: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 
@@ -270,43 +431,54 @@ export class ActivityController {
   private parseGitHubUrl(url: string): { owner: string; repo: string } {
     try {
       const urlObj = new URL(url);
-      
+
       if (!urlObj.hostname.includes('github.com')) {
         throw new Error('URL must be a GitHub repository URL');
       }
-      
+
       const pathParts = urlObj.pathname.split('/').filter(Boolean);
-      
+
       if (pathParts.length < 2) {
-        throw new Error('Invalid GitHub repository URL format. Expected: https://github.com/owner/repo');
+        throw new Error(
+          'Invalid GitHub repository URL format. Expected: https://github.com/owner/repo',
+        );
       }
-      
+
       const owner = pathParts[0];
       const repo = pathParts[1].replace('.git', '');
-      
+
       if (!owner || !repo) {
         throw new Error('Invalid owner or repository name');
       }
-      
+
       return { owner, repo };
     } catch (error) {
       if (error instanceof Error) {
         throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
       }
-      throw new HttpException('Invalid GitHub repository URL', HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        'Invalid GitHub repository URL',
+        HttpStatus.BAD_REQUEST,
+      );
     }
   }
 
   private async fetchGitHubRepoInfo(owner: string, repo: string) {
     try {
-      const repoData = await this.githubApiService.getRepositoryInfo(owner, repo);
-      
+      const repoData = await this.githubApiService.getRepositoryInfo(
+        owner,
+        repo,
+      );
+
       if (repoData.private) {
         throw new Error('Private repositories are not supported');
       }
 
-      const isLargeRepo = repoData.stargazers_count > 100 || (repoData.size / 1024) > 100 || repoData.forks_count > 100;
-      
+      const isLargeRepo =
+        repoData.stargazers_count > 100 ||
+        repoData.size / 1024 > 100 ||
+        repoData.forks_count > 100;
+
       return {
         default_branch: repoData.default_branch || 'main',
         name: repoData.name,
@@ -352,4 +524,4 @@ export class ActivityController {
       );
     }
   }
-} 
+}

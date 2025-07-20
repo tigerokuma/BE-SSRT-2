@@ -13,15 +13,18 @@ export class GitHubService {
           q: query,
           sort: 'stars',
           order: 'desc',
-          per_page: 10
+          per_page: 10,
         },
-        headers: this.getHeaders()
+        headers: this.getHeaders(),
       });
-      
+
       return response.data.items;
     } catch (error) {
       console.error('GitHub API search error:', error);
-      throw new HttpException('Failed to search GitHub', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        'Failed to search GitHub',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -29,29 +32,32 @@ export class GitHubService {
     try {
       const [repoResponse, contributorsResponse] = await Promise.all([
         axios.get(`${this.baseUrl}/repos/${owner}/${repo}`, {
-          headers: this.getHeaders()
+          headers: this.getHeaders(),
         }),
         axios.get(`${this.baseUrl}/repos/${owner}/${repo}/contributors`, {
-          params: { per_page: 1 },  // Just get count
-          headers: this.getHeaders()
-        })
+          params: { per_page: 1 }, // Just get count
+          headers: this.getHeaders(),
+        }),
       ]);
 
       return {
         ...repoResponse.data,
-        contributors_count: contributorsResponse.data.length
+        contributors_count: contributorsResponse.data.length,
       };
     } catch (error) {
       console.error('GitHub API details error:', error);
-      throw new HttpException('Failed to get repository details', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        'Failed to get repository details',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
   private getHeaders() {
     return {
-      'Authorization': `token ${this.token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'OSS-Repository-Backend'
+      Authorization: `token ${this.token}`,
+      Accept: 'application/vnd.github.v3+json',
+      'User-Agent': 'OSS-Repository-Backend',
     };
   }
 }

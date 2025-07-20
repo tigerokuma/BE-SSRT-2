@@ -9,7 +9,8 @@ import { GitHubApiService } from './github-api.service';
 export class ActivityService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('repository-setup') private readonly repositorySetupQueue: Queue,
+    @InjectQueue('repository-setup')
+    private readonly repositorySetupQueue: Queue,
     private readonly githubApiService: GitHubApiService,
   ) {}
 
@@ -17,16 +18,16 @@ export class ActivityService {
     try {
       // Extract owner and repo name from GitHub URL
       const { owner, repo } = this.parseGitHubUrl(dto.repo_url);
-      
+
       // Fetch repository info from GitHub API
       const repoInfo = await this.fetchGitHubRepoInfo(owner, repo);
-      
+
       // Ensure user exists (create if not)
       const user = await this.ensureUserExists(dto.added_by);
-      
+
       // Generate package name for lookup
       const packageName = `${owner}/${repo}`;
-      
+
       // Check if package already exists in watchlist
       const existingPackage = await this.prisma.package.findUnique({
         where: { package_name: packageName },
@@ -34,11 +35,11 @@ export class ActivityService {
           watchlists: {
             include: {
               userWatchlistEntries: {
-                where: { user_id: user.user_id }
-              }
-            }
-          }
-        }
+                where: { user_id: user.user_id },
+              },
+            },
+          },
+        },
       });
 
       let watchlistEntry;
@@ -48,7 +49,7 @@ export class ActivityService {
       if (existingPackage && existingPackage.watchlists.length > 0) {
         // Repository already exists in watchlist
         const existingWatchlist = existingPackage.watchlists[0];
-        
+
         // Check if user is already watching this repository
         if (existingWatchlist.userWatchlistEntries.length > 0) {
           throw new HttpException(
@@ -56,10 +57,10 @@ export class ActivityService {
             HttpStatus.CONFLICT,
           );
         }
-        
+
         // User is not watching, add them to existing watchlist
         watchlistEntry = existingWatchlist;
-        
+
         // Create user_watchlist entry for existing watchlist
         const userWatchlistId = `user_watchlist_${dto.added_by}_${existingWatchlist.watchlist_id}`;
         userWatchlistEntry = await this.prisma.userWatchlist.create({
@@ -73,16 +74,15 @@ export class ActivityService {
             created_at: new Date(),
           },
         });
-        
+
         // No need to queue setup job since repo already exists
         shouldQueueSetup = false;
-        
       } else {
         // Repository is new, create everything from scratch
         const packageId = `package_${owner}_${repo}_${Date.now()}`;
         const watchlistId = `watchlist_${owner}_${repo}_${Date.now()}`;
         const userWatchlistId = `user_watchlist_${dto.added_by}_${watchlistId}`;
-        
+
         // Create or update package entry
         const packageEntry = await this.prisma.package.upsert({
           where: { package_name: packageName },
@@ -125,18 +125,25 @@ export class ActivityService {
             created_at: new Date(),
           },
         });
-        
+
         // Queue background job for repository setup
         shouldQueueSetup = true;
       }
 
       // Queue setup job only for new repositories
       if (shouldQueueSetup) {
-        await this.queueRepositorySetupJob(watchlistEntry.watchlist_id, owner, repo, repoInfo.default_branch, repoInfo.is_large_repo, repoInfo.size);
+        await this.queueRepositorySetupJob(
+          watchlistEntry.watchlist_id,
+          owner,
+          repo,
+          repoInfo.default_branch,
+          repoInfo.is_large_repo,
+          repoInfo.size,
+        );
       }
 
       return {
-        message: shouldQueueSetup 
+        message: shouldQueueSetup
           ? 'Repository added to watchlist. Background processing will begin shortly.'
           : 'Repository already exists in watchlist. You have been added as a watcher.',
         user: user,
@@ -154,7 +161,9 @@ export class ActivityService {
       if (error instanceof HttpException) {
         // Log user-friendly message for expected errors
         if (error.getStatus() === HttpStatus.CONFLICT) {
-          console.log(`📝 Duplicate repository in watchlist: ${dto.repo_url} (${dto.added_by})`);
+          console.log(
+            `📝 Duplicate repository in watchlist: ${dto.repo_url} (${dto.added_by})`,
+          );
         } else {
           console.error('Error adding to watchlist:', error.message);
         }
@@ -200,33 +209,32 @@ export class ActivityService {
   private parseGitHubUrl(url: string): { owner: string; repo: string } {
     try {
       const urlObj = new URL(url);
-      
+
       // Validate it's actually a GitHub URL
       if (!urlObj.hostname.includes('github.com')) {
         throw new Error('URL must be a GitHub repository URL');
       }
-      
+
       const pathParts = urlObj.pathname.split('/').filter(Boolean);
-      
+
       if (pathParts.length < 2) {
-        throw new Error('Invalid GitHub repository URL format. Expected: https://github.com/owner/repo');
+        throw new Error(
+          'Invalid GitHub repository URL format. Expected: https://github.com/owner/repo',
+        );
       }
-      
+
       const owner = pathParts[0];
       const repo = pathParts[1].replace('.git', '');
-      
+
       // Basic validation
       if (!owner || !repo) {
         throw new Error('Invalid owner or repository name');
       }
-      
+
       return { owner, repo };
     } catch (error) {
       if (error instanceof Error) {
-        throw new HttpException(
-          error.message,
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
       }
       throw new HttpException(
         'Invalid GitHub repository URL',
@@ -237,8 +245,11 @@ export class ActivityService {
 
   private async fetchGitHubRepoInfo(owner: string, repo: string) {
     try {
-      const repoData = await this.githubApiService.getRepositoryInfo(owner, repo);
-      
+      const repoData = await this.githubApiService.getRepositoryInfo(
+        owner,
+        repo,
+      );
+
       // Check if repository is private
       if (repoData.private) {
         throw new HttpException(
@@ -249,7 +260,7 @@ export class ActivityService {
 
       // Determine if this is a large repository
       const isLargeRepo = this.isLargeRepository(repoData);
-      
+
       return {
         default_branch: repoData.default_branch || 'main',
         name: repoData.name,
@@ -267,7 +278,7 @@ export class ActivityService {
       if (error instanceof HttpException) {
         throw error;
       }
-      
+
       // Handle specific GitHub API errors
       if (error.message.includes('not found')) {
         throw new HttpException(
@@ -275,28 +286,28 @@ export class ActivityService {
           HttpStatus.NOT_FOUND,
         );
       }
-      
+
       if (error.message.includes('rate limit exceeded')) {
         throw new HttpException(
           'GitHub API rate limit exceeded. Job will be retried in 1 hour.',
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      
+
       if (error.message.includes('forbidden')) {
         throw new HttpException(
           'Repository is private or access is restricted. Please ensure the repository is public or you have proper access.',
           HttpStatus.FORBIDDEN,
         );
       }
-      
+
       if (error.message.includes('unauthorized')) {
         throw new HttpException(
           'GitHub authentication failed. Please check your GitHub token.',
           HttpStatus.UNAUTHORIZED,
         );
       }
-      
+
       // Handle network errors
       if (error instanceof TypeError && error.message.includes('fetch')) {
         throw new HttpException(
@@ -304,7 +315,7 @@ export class ActivityService {
           HttpStatus.SERVICE_UNAVAILABLE,
         );
       }
-      
+
       throw new HttpException(
         `Failed to fetch repository info: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -321,47 +332,67 @@ export class ActivityService {
     // - Large size (>100 MB)
     // - Many forks (>100)
     // - High commit frequency
-    
+
     const sizeMB = repoData.size / 124; // Convert KB to MB
-    const isLarge = 
+    const isLarge =
       repoData.stargazers_count > 100 ||
       sizeMB > 100 ||
-      repoData.forks_count > 100    
+      repoData.forks_count > 100;
     return isLarge;
   }
 
-  async queueRepositorySetupJob(watchlistId: string, owner: string, repo: string, branch: string, isLargeRepo: boolean = false, repoSizeKB: number = 0, maxCommits?: number, forceLocalCloning?: boolean, forceLocalHealthAnalysis?: boolean): Promise<void> {
+  async queueRepositorySetupJob(
+    watchlistId: string,
+    owner: string,
+    repo: string,
+    branch: string,
+    isLargeRepo: boolean = false,
+    repoSizeKB: number = 0,
+    maxCommits?: number,
+    forceLocalCloning?: boolean,
+    forceLocalHealthAnalysis?: boolean,
+  ): Promise<void> {
     try {
       const delay = isLargeRepo ? 0 : 0; // No delay for now, but could add delays for large repos
-      
-      await this.repositorySetupQueue.add('clone-and-analyze', {
-        watchlistId,
-        owner,
-        repo,
-        branch,
-        isLargeRepo,
-        repoSizeKB,
-        maxCommits,
-        forceLocalCloning,
-        forceLocalHealthAnalysis,
-      }, {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
+
+      await this.repositorySetupQueue.add(
+        'clone-and-analyze',
+        {
+          watchlistId,
+          owner,
+          repo,
+          branch,
+          isLargeRepo,
+          repoSizeKB,
+          maxCommits,
+          forceLocalCloning,
+          forceLocalHealthAnalysis,
         },
-        removeOnComplete: 10,
-        removeOnFail: 50,
-      });
-      
+        {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+          removeOnComplete: 10,
+          removeOnFail: 50,
+        },
+      );
+
       const options: string[] = [];
       if (forceLocalCloning) options.push('force-local-cloning');
       if (forceLocalHealthAnalysis) options.push('force-local-health');
-      const optionsStr = options.length > 0 ? `, options: ${options.join(', ')}` : '';
-      
-      console.log(`Queued repository setup job for ${owner}/${repo} (watchlist: ${watchlistId}, large: ${isLargeRepo}, size: ${repoSizeKB}KB, maxCommits: ${maxCommits || 'default'}${optionsStr})`);
+      const optionsStr =
+        options.length > 0 ? `, options: ${options.join(', ')}` : '';
+
+      console.log(
+        `Queued repository setup job for ${owner}/${repo} (watchlist: ${watchlistId}, large: ${isLargeRepo}, size: ${repoSizeKB}KB, maxCommits: ${maxCommits || 'default'}${optionsStr})`,
+      );
     } catch (error) {
-      console.error(`Failed to queue repository setup job for ${owner}/${repo}:`, error);
+      console.error(
+        `Failed to queue repository setup job for ${owner}/${repo}:`,
+        error,
+      );
       // Don't throw error here as the watchlist entry was already created
       // The job can be retried manually if needed
     }
@@ -405,4 +436,4 @@ export class ActivityService {
       );
     }
   }
-} 
+}

@@ -15,11 +15,7 @@ import { HistoryRepository } from './repositories/history.repository';
 import { GitHubService } from './services/github.service';
 import { NPMService } from './services/npm.service';
 @Module({
-  controllers: [
-    WatchlistController,
-    PackagesController,
-    HistoryController,
-  ],
+  controllers: [WatchlistController, PackagesController, HistoryController],
   providers: [
     WatchlistService,
     PackagesService,

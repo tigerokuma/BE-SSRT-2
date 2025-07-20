@@ -13,21 +13,21 @@ export class NPMService {
         params: {
           text: query,
           size: limit,
-          quality: 0.5,    // Prioritize quality packages
-          popularity: 0.3, // Some weight to popularity  
-          maintenance: 0.2 // Some weight to maintenance
-        }
+          quality: 0.5, // Prioritize quality packages
+          popularity: 0.3, // Some weight to popularity
+          maintenance: 0.2, // Some weight to maintenance
+        },
       });
-      
+
       // Get basic search results
-      const searchResults = response.data.objects.map(item => ({
+      const searchResults = response.data.objects.map((item) => ({
         name: item.package.name,
         description: item.package.description,
         version: item.package.version,
         npmUrl: `https://www.npmjs.com/package/${item.package.name}`,
         repoUrl: this.extractGitHubUrl(item.package.links?.repository),
         lastUpdated: new Date(item.package.date),
-        score: item.score.final
+        score: item.score.final,
       }));
 
       // Fetch download statistics for all packages in parallel
@@ -36,7 +36,10 @@ export class NPMService {
           const downloads = await this.getWeeklyDownloads(pkg.name);
           return { ...pkg, weeklyDownloads: downloads };
         } catch (error) {
-          console.warn(`Failed to get downloads for ${pkg.name}:`, error.message);
+          console.warn(
+            `Failed to get downloads for ${pkg.name}:`,
+            error.message,
+          );
           return { ...pkg, weeklyDownloads: null };
         }
       });
@@ -44,7 +47,10 @@ export class NPMService {
       return await Promise.all(downloadPromises);
     } catch (error) {
       console.error('NPM Registry search error:', error);
-      throw new HttpException('Failed to search NPM registry', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        'Failed to search NPM registry',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -52,7 +58,7 @@ export class NPMService {
     try {
       const response = await axios.get(`${this.npmRegistryUrl}/${packageName}`);
       const data = response.data;
-      
+
       return {
         name: data.name,
         description: data.description,
@@ -61,7 +67,7 @@ export class NPMService {
         homepage: data.homepage,
         keywords: data.keywords || [],
         lastUpdated: new Date(data.time?.[data['dist-tags']?.latest]),
-        license: data.license
+        license: data.license,
       };
     } catch (error) {
       console.error('NPM package details error:', error);
@@ -71,7 +77,9 @@ export class NPMService {
 
   async getWeeklyDownloads(packageName: string): Promise<number | null> {
     try {
-      const response = await axios.get(`${this.npmDownloadsUrl}/point/last-week/${encodeURIComponent(packageName)}`);
+      const response = await axios.get(
+        `${this.npmDownloadsUrl}/point/last-week/${encodeURIComponent(packageName)}`,
+      );
       return response.data.downloads || null;
     } catch (error) {
       // Don't log every download error as it's non-critical
@@ -81,7 +89,7 @@ export class NPMService {
 
   private extractGitHubUrl(repoUrl: string): string | null {
     if (!repoUrl) return null;
-    
+
     // Handle various GitHub URL formats
     const match = repoUrl.match(/github\.com[\/:]([^\/]+\/[^\/]+)/);
     return match ? `https://github.com/${match[1].replace('.git', '')}` : null;

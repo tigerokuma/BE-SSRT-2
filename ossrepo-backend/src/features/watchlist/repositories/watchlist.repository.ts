@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { AddToWatchlistRequest, UpdateWatchlistRequest } from '../dto/watchlist.dto';
+import {
+  AddToWatchlistRequest,
+  UpdateWatchlistRequest,
+} from '../dto/watchlist.dto';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
 export class WatchlistRepository {
   constructor(private readonly prisma: PrismaService) {} // Injects PrismaService
-  
+
   async getWatchlist() {
     // TODO: Implement data access for watchlist retrieval
     // - Query database for user's watchlist items
@@ -43,4 +46,4 @@ export class WatchlistRepository {
     // - Return success status
     throw new Error('Not implemented');
   }
-} 
+}

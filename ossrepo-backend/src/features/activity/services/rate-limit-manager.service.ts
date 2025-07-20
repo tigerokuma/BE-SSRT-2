@@ -3,10 +3,10 @@ import { ConfigService } from '@nestjs/config';
 
 /**
  * Rate Limit Manager Service
- * 
+ *
  * This service implements a token-based strategy for efficient GitHub API usage.
  * The strategy scales repository cloning thresholds based on available API tokens:
- * 
+ *
  * Token-Based Strategy:
  * - < 50MB repos: Always cloned (regardless of tokens)
  * - 4000+ tokens: Clone repos < 100MB (use API for larger repos)
@@ -14,13 +14,13 @@ import { ConfigService } from '@nestjs/config';
  * - 2000+ tokens: Clone repos < 500MB
  * - 1000+ tokens: Clone repos < 1GB
  * - < 1000 tokens: Clone repos < 50MB (only very small repos)
- * 
+ *
  * This approach:
  * 1. Preserves API tokens for essential operations
  * 2. Uses local cloning for smaller repos (faster and more reliable)
  * 3. Scales API usage based on available tokens
  * 4. Prevents hitting rate limits during high-volume processing
- * 
+ *
  * Flow for Repository Processing:
  * 1. Check available tokens
  * 2. Determine cloning threshold based on tokens
@@ -52,7 +52,10 @@ export class RateLimitManagerService {
   // No caching - always fetch fresh rate limit data
 
   constructor(private readonly configService: ConfigService) {
-    this.baseUrl = this.configService.get<string>('GITHUB_API_BASE_URL', 'https://api.github.com');
+    this.baseUrl = this.configService.get<string>(
+      'GITHUB_API_BASE_URL',
+      'https://api.github.com',
+    );
     this.token = this.configService.get<string>('GITHUB_TOKEN');
   }
 
@@ -66,7 +69,9 @@ export class RateLimitManagerService {
       });
 
       if (!response.ok) {
-        throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `GitHub API error: ${response.status} ${response.statusText}`,
+        );
       }
 
       const data = await response.json();
@@ -80,12 +85,14 @@ export class RateLimitManagerService {
 
       // Only log rate limit when it's getting low
       if (rateLimit.remaining < 1000) {
-        this.logger.log(`📊 Rate limit: ${rateLimit.remaining}/${rateLimit.limit} remaining (${rateLimit.used} used)`);
+        this.logger.log(
+          `📊 Rate limit: ${rateLimit.remaining}/${rateLimit.limit} remaining (${rateLimit.used} used)`,
+        );
       }
       return rateLimit;
     } catch (error) {
       this.logger.error('Error fetching rate limit status:', error);
-      
+
       // Return a conservative estimate if we can't fetch
       return {
         limit: 5000,
@@ -109,7 +116,9 @@ export class RateLimitManagerService {
 
     // Log strategy when approaching limits or when it's not the default API-Heavy mode
     if (remaining < 4000 || percentageUsed > 80) {
-      this.logger.log(`🎯 Processing strategy: ${remaining}/${limit} remaining (${percentageUsed.toFixed(1)}% used)`);
+      this.logger.log(
+        `🎯 Processing strategy: ${remaining}/${limit} remaining (${percentageUsed.toFixed(1)}% used)`,
+      );
     }
 
     // New token-based strategy for more efficient API usage
@@ -119,8 +128,8 @@ export class RateLimitManagerService {
     // Token-based scaling for larger repositories
     let maxRepoSizeForCloning = baseCloningThreshold;
     let useApiForCommits = true;
-    let useApiForLargeRepos = true;
-    let useLocalCloning = true;
+    const useApiForLargeRepos = true;
+    const useLocalCloning = true;
     let reason = '';
 
     if (remaining >= 4000) {
@@ -173,7 +182,7 @@ export class RateLimitManagerService {
     const limit = rateLimit.limit;
     const percentageUsed = (rateLimit.used / limit) * 100;
     const cloningThreshold = this.getCloningThresholdForTokens(remaining);
-    
+
     let strategy = '';
     if (remaining >= 4000) {
       strategy = 'Token-Heavy (4000+ tokens remaining)';
@@ -186,13 +195,13 @@ export class RateLimitManagerService {
     } else {
       strategy = 'Conservative (<1000 tokens remaining)';
     }
-    
+
     return {
       remainingTokens: remaining,
       totalTokens: limit,
       percentageUsed: Math.round(percentageUsed * 100) / 100,
       cloningThresholdKB: cloningThreshold,
-      cloningThresholdMB: Math.round(cloningThreshold / 1024 * 100) / 100,
+      cloningThresholdMB: Math.round((cloningThreshold / 1024) * 100) / 100,
       strategy,
       shouldUseApiForCommits: remaining >= 1000,
     };
@@ -224,22 +233,26 @@ export class RateLimitManagerService {
   async shouldUseApiForRepo(repoSizeKB: number): Promise<boolean> {
     const rateLimit = await this.getRateLimitStatus();
     const remaining = rateLimit.remaining;
-    
+
     // Get the cloning threshold based on available tokens
     const cloningThreshold = this.getCloningThresholdForTokens(remaining);
-    
+
     // Use API if repository is larger than the cloning threshold
     // This means we'll clone smaller repos and use API for larger ones
     const shouldUseApi = repoSizeKB >= cloningThreshold;
-    
+
     // Debug logging to understand the decision
-    this.logger.log(`🔍 Repo decision: ${repoSizeKB}KB >= ${cloningThreshold}KB = ${shouldUseApi} (tokens: ${remaining})`);
-    
+    this.logger.log(
+      `🔍 Repo decision: ${repoSizeKB}KB >= ${cloningThreshold}KB = ${shouldUseApi} (tokens: ${remaining})`,
+    );
+
     // Only log when we're using API (local cloning is the default)
     if (shouldUseApi) {
-      this.logger.log(`📡 Using GitHub API for ${repoSizeKB}KB repo (threshold: ${cloningThreshold}KB, tokens: ${remaining})`);
+      this.logger.log(
+        `📡 Using GitHub API for ${repoSizeKB}KB repo (threshold: ${cloningThreshold}KB, tokens: ${remaining})`,
+      );
     }
-    
+
     return shouldUseApi;
   }
 
@@ -250,16 +263,18 @@ export class RateLimitManagerService {
   async shouldUseApiForCommits(): Promise<boolean> {
     const rateLimit = await this.getRateLimitStatus();
     const remaining = rateLimit.remaining;
-    
+
     // Use API for commits only when we have at least 1000 tokens
     // This prevents us from running out of tokens for essential operations
     const shouldUseApi = remaining >= 1000;
-    
+
     // Only log when we're using API (local cloning is the default)
     if (shouldUseApi) {
-      this.logger.log(`📡 Using GitHub API for commits (tokens: ${remaining} >= 1000)`);
+      this.logger.log(
+        `📡 Using GitHub API for commits (tokens: ${remaining} >= 1000)`,
+      );
     }
-    
+
     return shouldUseApi;
   }
 
@@ -286,7 +301,7 @@ export class RateLimitManagerService {
    */
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      'Accept': 'application/vnd.github.v3+json',
+      Accept: 'application/vnd.github.v3+json',
       'User-Agent': 'OSS-Repository-Backend',
     };
 

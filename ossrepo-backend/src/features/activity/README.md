@@ -109,6 +109,119 @@ export class ActivityController {
 
 ---
 
+## 📊 Repository and Contributor Statistics
+
+The activity module now includes comprehensive repository and contributor statistics tracking. This feature automatically calculates and stores detailed analytics about repository activity and individual contributor patterns.
+
+### Database Schema
+
+Two new tables have been added to track statistics:
+
+#### `contributor_stats` Table
+- **watchlist_id**: Reference to the watchlist
+- **author_email**: Contributor's email address (unique per watchlist)
+- **author_name**: Contributor's display name
+- **total_commits**: Total number of commits by this contributor
+- **avg_lines_added**: Average lines added per commit
+- **avg_lines_deleted**: Average lines deleted per commit
+- **avg_files_changed**: Average files changed per commit
+- **commit_time_histogram**: JSON object showing commit frequency by hour
+- **last_commit_date**: Date of the contributor's most recent commit
+- **stddev_lines_added**: Standard deviation of lines added
+- **stddev_lines_deleted**: Standard deviation of lines deleted
+- **stddev_files_changed**: Standard deviation of files changed
+- **typical_days_active**: JSON array of days when contributor is most active
+
+#### `repo_stats` Table
+- **watchlist_id**: Reference to the watchlist (unique)
+- **total_commits**: Total number of commits in the repository
+- **avg_lines_added**: Average lines added per commit across all contributors
+- **avg_lines_deleted**: Average lines deleted per commit across all contributors
+- **avg_files_changed**: Average files changed per commit across all contributors
+- **commit_time_histogram**: JSON object showing overall commit frequency by hour
+- **typical_days_active**: JSON object showing commit frequency by day of week
+- **last_updated**: Timestamp of last statistics update
+
+### Automatic Calculation
+
+Statistics are automatically calculated during the repository setup process:
+
+1. **Commit Logging**: When commits are logged to the database
+2. **Stats Calculation**: Repository and contributor statistics are calculated
+3. **Data Storage**: Results are stored in the respective tables
+4. **Real-time Updates**: Statistics are updated whenever new commits are processed
+
+### API Endpoints
+
+#### Get Contributor Statistics
+```bash
+GET /activity/watchlist/{watchlistId}/contributor-stats
+```
+
+Returns detailed statistics for all contributors in a watchlist, ordered by total commits.
+
+#### Get Repository Statistics
+```bash
+GET /activity/watchlist/{watchlistId}/repo-stats
+```
+
+Returns overall repository statistics including averages and patterns.
+
+#### Manually Trigger Stats Calculation
+```bash
+POST /activity/watchlist/{watchlistId}/calculate-stats
+```
+
+Manually triggers the calculation of statistics for a watchlist (useful for existing repositories).
+
+### Implementation Details
+
+#### GitManagerService Methods
+- `updateContributorStats(watchlistId)`: Calculates and stores contributor statistics
+- `updateRepoStats(watchlistId)`: Calculates and stores repository statistics
+- `ensureStatsExist(watchlistId)`: Checks if stats exist and calculates them if missing
+
+#### Integration Points
+- **Repository Setup Processor**: Automatically calls stats calculation after commit logging
+- **Activity Controller**: Provides API endpoints for accessing statistics
+- **Database**: Uses Prisma for type-safe database operations
+
+### Usage Examples
+
+#### Accessing Contributor Stats
+```typescript
+// Get all contributors for a watchlist
+const contributorStats = await this.prisma.contributorStats.findMany({
+  where: { watchlist_id: watchlistId },
+  orderBy: { total_commits: 'desc' }
+});
+
+// Get top contributor
+const topContributor = contributorStats[0];
+console.log(`Top contributor: ${topContributor.author_name} with ${topContributor.total_commits} commits`);
+```
+
+#### Accessing Repository Stats
+```typescript
+// Get repository statistics
+const repoStats = await this.prisma.repoStats.findUnique({
+  where: { watchlist_id: watchlistId }
+});
+
+console.log(`Repository has ${repoStats.total_commits} total commits`);
+console.log(`Average lines added per commit: ${repoStats.avg_lines_added}`);
+```
+
+### Benefits
+
+1. **Performance Insights**: Understand repository activity patterns
+2. **Contributor Analysis**: Identify key contributors and their patterns
+3. **Anomaly Detection**: Detect unusual commit patterns
+4. **Trend Analysis**: Track changes in repository activity over time
+5. **Risk Assessment**: Identify repositories with high bus factor risk
+
+---
+
 ## 🧪 Testing
 
 ### Development Server

@@ -1,6 +1,9 @@
 import { Controller, Get, Post, Patch, Body, Param } from '@nestjs/common';
 import { WatchlistService } from '../services/watchlist.service';
-import { AddToWatchlistRequest, UpdateWatchlistRequest } from '../dto/watchlist.dto';
+import {
+  AddToWatchlistRequest,
+  UpdateWatchlistRequest,
+} from '../dto/watchlist.dto';
 
 @Controller('watchlist')
 export class WatchlistController {
@@ -21,7 +24,7 @@ export class WatchlistController {
   @Patch(':id')
   async updateWatchlistItem(
     @Param('id') id: string,
-    @Body() request: UpdateWatchlistRequest
+    @Body() request: UpdateWatchlistRequest,
   ) {
     // TODO: Implement watchlist item update
     return this.watchlistService.updateWatchlistItem(id, request);
@@ -32,4 +35,4 @@ export class WatchlistController {
     // TODO: Implement GitHub repository dependency import
     return this.watchlistService.importFromGithub(request.repoUrl);
   }
-} 
+}

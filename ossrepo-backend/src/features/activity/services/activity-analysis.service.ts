@@ -55,17 +55,17 @@ export class ActivityAnalysisService {
 
     // Focus on last 3 months for weekly rate calculation
     const now = new Date();
-    const threeMonthsAgo = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
-    const recentCommits = commits.filter(c => c.date >= threeMonthsAgo);
-    
+    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const recentCommits = commits.filter((c) => c.date >= threeMonthsAgo);
+
     if (recentCommits.length === 0) return 0;
 
     // Calculate weeks in the 3-month period
     const weeksInPeriod = 12; // 3 months = ~12 weeks
-    
+
     // Calculate average weekly commits
     const weeklyCommitRate = recentCommits.length / weeksInPeriod;
-    
+
     return Math.round(weeklyCommitRate * 100) / 100; // Round to 2 decimal places
   }
 
@@ -88,32 +88,41 @@ export class ActivityAnalysisService {
 
     // Calculate time span
     const now = new Date();
-    const dates = commits.map(c => c.date).sort((a, b) => a.getTime() - b.getTime());
-    const timeSpan = (dates[dates.length - 1].getTime() - dates[0].getTime()) / (1000 * 60 * 60 * 24); // days
+    const dates = commits
+      .map((c) => c.date)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const timeSpan =
+      (dates[dates.length - 1].getTime() - dates[0].getTime()) /
+      (1000 * 60 * 60 * 24); // days
     const monthsSpan = timeSpan / 30;
 
     // Factor 1: Recent Commit Frequency (0-25 points) - Focus on last 3 months
-    const threeMonthsAgo = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
-    const recentCommits = commits.filter(c => c.date >= threeMonthsAgo);
+    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const recentCommits = commits.filter((c) => c.date >= threeMonthsAgo);
     const recentCommitsPerMonth = recentCommits.length / 3; // 3 months
     const commitFrequency = Math.min(recentCommitsPerMonth / 15, 1) * 25; // 15 commits/month in last 3 months = max score
 
     // Factor 2: Contributor Diversity (0-25 points)
-    const uniqueContributors = new Set(commits.map(c => c.author)).size;
+    const uniqueContributors = new Set(commits.map((c) => c.author)).size;
     const contributorDiversity = Math.min(uniqueContributors / 5, 1) * 25; // 5+ contributors = max score
 
     // Factor 3: Code Churn (0-25 points)
-    const totalLinesChanged = commits.reduce((sum, c) => sum + c.linesAdded + c.linesDeleted, 0);
+    const totalLinesChanged = commits.reduce(
+      (sum, c) => sum + c.linesAdded + c.linesDeleted,
+      0,
+    );
     const avgLinesPerCommit = totalLinesChanged / commits.length;
     const codeChurn = Math.min(avgLinesPerCommit / 50, 1) * 25; // 50+ lines/commit = max score
 
     // Factor 4: Recency (0-25 points)
     const latestCommit = dates[dates.length - 1];
-    const daysSinceLastCommit = (now.getTime() - latestCommit.getTime()) / (1000 * 60 * 60 * 24);
+    const daysSinceLastCommit =
+      (now.getTime() - latestCommit.getTime()) / (1000 * 60 * 60 * 24);
     const recency = Math.max(0, (30 - daysSinceLastCommit) / 30) * 25; // 0 days = max, 30+ days = 0
 
-    const totalScore = commitFrequency + contributorDiversity + codeChurn + recency;
-    
+    const totalScore =
+      commitFrequency + contributorDiversity + codeChurn + recency;
+
     let level: ActivityScore['level'];
     if (totalScore >= 80) level = 'VERY_HIGH';
     else if (totalScore >= 60) level = 'HIGH';
@@ -138,12 +147,15 @@ export class ActivityAnalysisService {
   analyzeFileChurn(commits: CommitData[]): FileChurnData[] {
     if (commits.length === 0) return [];
 
-    const fileStats = new Map<string, {
-      commitCount: number;
-      totalLinesAdded: number;
-      totalLinesDeleted: number;
-      lastModified: Date;
-    }>();
+    const fileStats = new Map<
+      string,
+      {
+        commitCount: number;
+        totalLinesAdded: number;
+        totalLinesDeleted: number;
+        lastModified: Date;
+      }
+    >();
 
     // Aggregate file statistics
     for (const commit of commits) {
@@ -158,7 +170,7 @@ export class ActivityAnalysisService {
         existing.commitCount++;
         existing.totalLinesAdded += commit.linesAdded;
         existing.totalLinesDeleted += commit.linesDeleted;
-        
+
         if (commit.date > existing.lastModified) {
           existing.lastModified = commit.date;
         }
@@ -168,19 +180,25 @@ export class ActivityAnalysisService {
     }
 
     // Calculate time span for churn rate
-    const dates = commits.map(c => c.date).sort((a, b) => a.getTime() - b.getTime());
-    const timeSpan = (dates[dates.length - 1].getTime() - dates[0].getTime()) / (1000 * 60 * 60 * 24 * 30); // months
+    const dates = commits
+      .map((c) => c.date)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const timeSpan =
+      (dates[dates.length - 1].getTime() - dates[0].getTime()) /
+      (1000 * 60 * 60 * 24 * 30); // months
 
     // Convert to array and calculate additional metrics
-    const fileChurnData: FileChurnData[] = Array.from(fileStats.entries()).map(([filePath, stats]) => ({
-      filePath,
-      commitCount: stats.commitCount,
-      totalLinesAdded: stats.totalLinesAdded,
-      totalLinesDeleted: stats.totalLinesDeleted,
-      netChange: stats.totalLinesAdded - stats.totalLinesDeleted,
-      lastModified: stats.lastModified,
-      churnRate: stats.commitCount / Math.max(timeSpan, 1),
-    }));
+    const fileChurnData: FileChurnData[] = Array.from(fileStats.entries()).map(
+      ([filePath, stats]) => ({
+        filePath,
+        commitCount: stats.commitCount,
+        totalLinesAdded: stats.totalLinesAdded,
+        totalLinesDeleted: stats.totalLinesDeleted,
+        netChange: stats.totalLinesAdded - stats.totalLinesDeleted,
+        lastModified: stats.lastModified,
+        churnRate: stats.commitCount / Math.max(timeSpan, 1),
+      }),
+    );
 
     // Sort by commit count (most active files first)
     return fileChurnData.sort((a, b) => b.commitCount - a.commitCount);
@@ -237,7 +255,15 @@ export class ActivityAnalysisService {
       }
     }
 
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayNames = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
 
     return {
       dayOfWeek,
@@ -254,7 +280,10 @@ export class ActivityAnalysisService {
   /**
    * Get top N most active files
    */
-  getTopActiveFiles(fileChurnData: FileChurnData[], limit: number = 10): FileChurnData[] {
+  getTopActiveFiles(
+    fileChurnData: FileChurnData[],
+    limit: number = 10,
+  ): FileChurnData[] {
     return fileChurnData.slice(0, limit);
   }
 
@@ -265,12 +294,12 @@ export class ActivityAnalysisService {
     activityScore: ActivityScore,
     fileChurnData: FileChurnData[],
     heatmap: ActivityHeatmap,
-    weeklyCommitRate: number
+    weeklyCommitRate: number,
   ): string {
-    return `Activity Score: ${activityScore.score}/100 (${activityScore.level}) | ` +
-           `Weekly Commit Rate: ${weeklyCommitRate.toFixed(2)} commits/week | ` +
-           `Peak Activity: ${heatmap.peakActivity.day} ${heatmap.peakActivity.hour}:00 (${heatmap.peakActivity.count} commits)`;
+    return (
+      `Activity Score: ${activityScore.score}/100 (${activityScore.level}) | ` +
+      `Weekly Commit Rate: ${weeklyCommitRate.toFixed(2)} commits/week | ` +
+      `Peak Activity: ${heatmap.peakActivity.day} ${heatmap.peakActivity.hour}:00 (${heatmap.peakActivity.count} commits)`
+    );
   }
-
-
-} 
+}

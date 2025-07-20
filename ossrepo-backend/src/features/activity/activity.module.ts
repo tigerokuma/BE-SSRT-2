@@ -40,4 +40,4 @@ import { ConfigModule } from '@nestjs/config';
   ],
   exports: [ActivityService, AISummaryService, RepositorySummaryService],
 })
-export class ActivityModule {} 
+export class ActivityModule {}

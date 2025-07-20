@@ -8,11 +8,13 @@ export class GitHubRepositoriesRepository {
 
   async findByUrl(repoUrl: string): Promise<GitHubRepository | null> {
     return this.prisma.gitHubRepository.findUnique({
-      where: { repo_url: repoUrl }
+      where: { repo_url: repoUrl },
     });
   }
 
-  async createOrUpdate(repoData: Partial<GitHubRepository>): Promise<GitHubRepository> {
+  async createOrUpdate(
+    repoData: Partial<GitHubRepository>,
+  ): Promise<GitHubRepository> {
     return this.prisma.gitHubRepository.upsert({
       where: { repo_url: repoData.repo_url! },
       update: {
@@ -27,7 +29,7 @@ export class GitHubRepositoriesRepository {
         updated_at: repoData.updated_at,
         default_branch: repoData.default_branch,
         language: repoData.language,
-        fetched_at: new Date()
+        fetched_at: new Date(),
       },
       create: {
         repo_url: repoData.repo_url!,
@@ -42,8 +44,8 @@ export class GitHubRepositoriesRepository {
         updated_at: repoData.updated_at,
         default_branch: repoData.default_branch,
         language: repoData.language,
-        fetched_at: new Date()
-      }
+        fetched_at: new Date(),
+      },
     });
   }
 
@@ -55,13 +57,13 @@ export class GitHubRepositoriesRepository {
 
   async getStaleRepositories(limit: number = 10): Promise<GitHubRepository[]> {
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-    
+
     return this.prisma.gitHubRepository.findMany({
       where: {
-        fetched_at: { lt: sixHoursAgo }
+        fetched_at: { lt: sixHoursAgo },
       },
       orderBy: { fetched_at: 'asc' },
-      take: limit
+      take: limit,
     });
   }
-} 
+}

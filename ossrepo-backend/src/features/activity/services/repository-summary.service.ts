@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { AISummaryService, RepositoryData, AISummaryResult } from './ai-summary.service';
+import {
+  AISummaryService,
+  RepositoryData,
+  AISummaryResult,
+} from './ai-summary.service';
 import { GitHubApiService } from './github-api.service';
 import { BusFactorService } from './bus-factor.service';
 
@@ -18,65 +22,91 @@ export class RepositorySummaryService {
   async generateSummaryForRepository(
     owner: string,
     repo: string,
-    watchlistId: string
+    watchlistId: string,
   ): Promise<AISummaryResult | null> {
     try {
       this.logger.log(`🤖 Generating AI summary for ${owner}/${repo}`);
 
       // Collect comprehensive repository data
-      const repoData = await this.collectRepositoryData(owner, repo, watchlistId);
-      
+      const repoData = await this.collectRepositoryData(
+        owner,
+        repo,
+        watchlistId,
+      );
+
       if (!repoData) {
         this.logger.warn(`Could not collect data for ${owner}/${repo}`);
         return null;
       }
 
       // Generate AI summary
-      const summary = await this.aiSummaryService.generateRepositorySummary(repoData);
-      
-      this.logger.log(`✅ Generated summary for ${owner}/${repo}: "${summary.summary.substring(0, 50)}..."`);
-      
+      const summary =
+        await this.aiSummaryService.generateRepositorySummary(repoData);
+
+      this.logger.log(
+        `✅ Generated summary for ${owner}/${repo}: "${summary.summary.substring(0, 50)}..."`,
+      );
+
       // For now, we'll just return the summary
       // Later when we add the database fields, we can store it
       return summary;
-      
     } catch (error) {
-      this.logger.error(`Failed to generate summary for ${owner}/${repo}:`, error);
+      this.logger.error(
+        `Failed to generate summary for ${owner}/${repo}:`,
+        error,
+      );
       return null;
     }
   }
 
-  async generateSummaryWithData(repoData: RepositoryData): Promise<AISummaryResult | null> {
+  async generateSummaryWithData(
+    repoData: RepositoryData,
+  ): Promise<AISummaryResult | null> {
     try {
-      this.logger.log(`🤖 Generating AI summary with provided data for ${repoData.name}`);
+      this.logger.log(
+        `🤖 Generating AI summary with provided data for ${repoData.name}`,
+      );
 
       // Generate AI summary using the provided data (no API calls)
-      const summary = await this.aiSummaryService.generateRepositorySummary(repoData);
-      
-      this.logger.log(`✅ Generated summary for ${repoData.name}: "${summary.summary.substring(0, 50)}..."`);
-      
+      const summary =
+        await this.aiSummaryService.generateRepositorySummary(repoData);
+
+      this.logger.log(
+        `✅ Generated summary for ${repoData.name}: "${summary.summary.substring(0, 50)}..."`,
+      );
+
       return summary;
-      
     } catch (error) {
-      this.logger.error(`Failed to generate summary for ${repoData.name}:`, error);
+      this.logger.error(
+        `Failed to generate summary for ${repoData.name}:`,
+        error,
+      );
       return null;
     }
   }
 
-  private async collectRepositoryData(owner: string, repo: string, watchlistId: string): Promise<RepositoryData | null> {
+  private async collectRepositoryData(
+    owner: string,
+    repo: string,
+    watchlistId: string,
+  ): Promise<RepositoryData | null> {
     try {
       // Get basic repository info from GitHub API
-      const repoInfo = await this.githubApiService.getRepositoryInfo(owner, repo);
-      
+      const repoInfo = await this.githubApiService.getRepositoryInfo(
+        owner,
+        repo,
+      );
+
       // Get recent commits
       const recentCommits = await this.getRecentCommits(owner, repo);
-      
+
       // Get README content
       const readmeContent = await this.getReadmeContent(owner, repo);
-      
+
       // Calculate bus factor using watchlist ID
-      const busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
-      
+      const busFactorResult =
+        await this.busFactorService.calculateBusFactor(watchlistId);
+
       // Get commit count (approximate)
       const commitCount = await this.getCommitCount(owner, repo);
 
@@ -88,7 +118,9 @@ export class RepositorySummaryService {
         contributors: busFactorResult.totalContributors,
         language: undefined, // Not available in current GitHubRepoInfo
         topics: [], // Not available in current GitHubRepoInfo
-        lastCommitDate: repoInfo.pushed_at ? new Date(repoInfo.pushed_at) : undefined,
+        lastCommitDate: repoInfo.pushed_at
+          ? new Date(repoInfo.pushed_at)
+          : undefined,
         commitCount: commitCount,
         busFactor: busFactorResult.busFactor,
         riskScore: undefined, // Not available in current GitHubRepoInfo
@@ -98,37 +130,58 @@ export class RepositorySummaryService {
 
       return repoData;
     } catch (error) {
-      this.logger.error(`Failed to collect repository data for ${owner}/${repo}:`, error);
+      this.logger.error(
+        `Failed to collect repository data for ${owner}/${repo}:`,
+        error,
+      );
       return null;
     }
   }
 
-  private async getRecentCommits(owner: string, repo: string): Promise<Array<{
-    message: string;
-    author: string;
-    date: Date;
-    filesChanged: number;
-  }>> {
+  private async getRecentCommits(
+    owner: string,
+    repo: string,
+  ): Promise<
+    Array<{
+      message: string;
+      author: string;
+      date: Date;
+      filesChanged: number;
+    }>
+  > {
     try {
-      const commits = await this.githubApiService.getLatestCommits(owner, repo, 'main', 5);
-      
-      return commits.map(commit => ({
+      const commits = await this.githubApiService.getLatestCommits(
+        owner,
+        repo,
+        'main',
+        5,
+      );
+
+      return commits.map((commit) => ({
         message: commit.commit.message,
         author: commit.commit.author.name,
         date: new Date(commit.commit.author.date),
         filesChanged: 0, // GitHub API doesn't provide files in basic commit response
       }));
     } catch (error) {
-      this.logger.warn(`Could not fetch recent commits for ${owner}/${repo}:`, error);
+      this.logger.warn(
+        `Could not fetch recent commits for ${owner}/${repo}:`,
+        error,
+      );
       return [];
     }
   }
 
-  private async getReadmeContent(owner: string, repo: string): Promise<string | undefined> {
+  private async getReadmeContent(
+    owner: string,
+    repo: string,
+  ): Promise<string | undefined> {
     try {
       // For now, we'll skip README content as it requires additional GitHub API calls
       // This can be implemented later when we add the method to GitHubApiService
-      this.logger.log(`📝 README content fetching not yet implemented for ${owner}/${repo}`);
+      this.logger.log(
+        `📝 README content fetching not yet implemented for ${owner}/${repo}`,
+      );
       return undefined;
     } catch (error) {
       this.logger.warn(`Could not fetch README for ${owner}/${repo}:`, error);
@@ -136,14 +189,25 @@ export class RepositorySummaryService {
     }
   }
 
-  private async getCommitCount(owner: string, repo: string): Promise<number | undefined> {
+  private async getCommitCount(
+    owner: string,
+    repo: string,
+  ): Promise<number | undefined> {
     try {
       // This is a simplified approach - in a real implementation,
       // you might want to use GitHub's GraphQL API for more accurate counts
-      const commits = await this.githubApiService.getLatestCommits(owner, repo, 'main', 100);
+      const commits = await this.githubApiService.getLatestCommits(
+        owner,
+        repo,
+        'main',
+        100,
+      );
       return commits.length;
     } catch (error) {
-      this.logger.warn(`Could not get commit count for ${owner}/${repo}:`, error);
+      this.logger.warn(
+        `Could not get commit count for ${owner}/${repo}:`,
+        error,
+      );
       return undefined;
     }
   }
@@ -162,16 +226,23 @@ export class RepositorySummaryService {
       .trim();
   }
 
-  async testSummaryGeneration(owner: string, repo: string): Promise<{
+  async testSummaryGeneration(
+    owner: string,
+    repo: string,
+  ): Promise<{
     success: boolean;
     summary?: AISummaryResult;
     error?: string;
   }> {
     try {
       this.logger.log(`🧪 Testing summary generation for ${owner}/${repo}`);
-      
-      const summary = await this.generateSummaryForRepository(owner, repo, 'test-watchlist-id');
-      
+
+      const summary = await this.generateSummaryForRepository(
+        owner,
+        repo,
+        'test-watchlist-id',
+      );
+
       if (summary) {
         return {
           success: true,
@@ -190,4 +261,4 @@ export class RepositorySummaryService {
       };
     }
   }
-} 
+}

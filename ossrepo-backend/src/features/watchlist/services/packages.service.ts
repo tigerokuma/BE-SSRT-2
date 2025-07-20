@@ -8,15 +8,18 @@ export class PackagesService {
 
   async searchPackages(name: string): Promise<PackageCardDto[]> {
     const packages = await this.packageSearchService.searchPackages(name);
-    return packages.map(pkg => this.transformToCard(pkg));
+    return packages.map((pkg) => this.transformToCard(pkg));
   }
 
-  async getPackage(name: string, view: 'summary' | 'details'): Promise<PackageCardDto | PackageDetailsDto | null> {
+  async getPackage(
+    name: string,
+    view: 'summary' | 'details',
+  ): Promise<PackageCardDto | PackageDetailsDto | null> {
     const packageData = await this.packageSearchService.getPackageDetails(name);
-    
+
     if (!packageData) return null;
-    
-    return view === 'details' 
+
+    return view === 'details'
       ? this.transformToDetails(packageData)
       : this.transformToCard(packageData);
   }
@@ -29,9 +32,11 @@ export class PackagesService {
       keywords: pkg.keywords || [],
       downloads: pkg.downloads || 0,
       maintainers: pkg.maintainers || [],
-      last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
+      last_updated: pkg.last_updated
+        ? new Date(pkg.last_updated).toISOString().split('T')[0]
+        : '',
       version: pkg.version || '',
-      license: pkg.license || ''
+      license: pkg.license || '',
     };
   }
 
@@ -44,24 +49,30 @@ export class PackagesService {
       keywords: pkg.keywords || [],
       downloads: pkg.downloads || 0,
       maintainers: pkg.maintainers || [],
-      last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
+      last_updated: pkg.last_updated
+        ? new Date(pkg.last_updated).toISOString().split('T')[0]
+        : '',
       version: pkg.version || '',
       license: pkg.license || '',
-      
+
       // Additional detail fields
       package_id: pkg.package_id || '',
-      published: pkg.published_at ? new Date(pkg.published_at).toISOString().split('T')[0] : '',
+      published: pkg.published_at
+        ? new Date(pkg.published_at).toISOString().split('T')[0]
+        : '',
       published_at: pkg.published_at,
       risk_score: pkg.risk_score || 0,
       npm_url: pkg.npm_url || '',
-      
+
       // Optional GitHub fields (only included if available)
       ...(pkg.repo_url && { repo_url: pkg.repo_url }),
       ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),
       ...(pkg.homepage && { homepage: pkg.homepage }),
       ...(pkg.githubRepo?.stars && { stars: pkg.githubRepo.stars }),
       ...(pkg.githubRepo?.forks && { forks: pkg.githubRepo.forks }),
-      ...(pkg.githubRepo?.contributors && { contributors: pkg.githubRepo.contributors })
+      ...(pkg.githubRepo?.contributors && {
+        contributors: pkg.githubRepo.contributors,
+      }),
     };
   }
-} 
+}
