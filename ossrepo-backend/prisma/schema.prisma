@@ -124,6 +124,8 @@ model Watchlist {
   activityData                     ActivityData[]
   aiSummaryData                    AISummaryData[]
   weeklySummaryData                WeeklySummaryData[]
+  contributorStats                 ContributorStats[]
+  repoStats                        RepoStats?
 }
 
 model UserWatchlist {
@@ -410,25 +412,69 @@ model GraphEdge {
 
 // ENHANCED: Log model with diff data support
 model Log {
-  event_id        String   @id @default(uuid())
-  watchlist_id    String?  // Updated to reference watchlist_id (String)
+  event_id        String     @id @default(uuid())
+  watchlist_id    String?
   event_type      String
   actor           String
   timestamp       DateTime
   payload         Json?
   event_hash      String
   prev_event_hash String?
-  
-  // NEW: Enhanced diff data fields for commits
-  files_changed   Int?     @default(0)
-  lines_added     Int?     @default(0)
-  lines_deleted   Int?     @default(0)
-  diff_data       Json?    // Detailed file-by-file diff information
-
+  diff_data       Json?
+  files_changed   Int?       @default(0)
+  lines_added     Int?       @default(0)
+  lines_deleted   Int?       @default(0)
   repository      Watchlist? @relation(fields: [watchlist_id], references: [watchlist_id])
 
   @@index([watchlist_id])
   @@index([event_type])
   @@index([timestamp])
   @@map("logs")
+}
+
+model ContributorStats {
+  id                    String    @id @default(uuid())
+  watchlist_id          String
+  author_email          String
+  author_name           String?
+  total_commits         Int
+  avg_lines_added       Float
+  avg_lines_deleted     Float
+  avg_files_changed     Float
+  commit_time_histogram Json
+  last_commit_date      DateTime
+  stddev_lines_added    Float
+  stddev_lines_deleted  Float
+  stddev_files_changed  Float
+  typical_days_active   Json
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  repository            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id, author_email])
+  @@index([watchlist_id])
+  @@map("contributor_stats")
+}
+
+model RepoStats {
+  id                    String    @id @default(uuid())
+  watchlist_id          String
+  total_commits         Int
+  avg_lines_added       Float
+  avg_lines_deleted     Float
+  avg_files_changed     Float
+  stddev_lines_added    Float
+  stddev_lines_deleted  Float
+  stddev_files_changed  Float
+  commit_time_histogram Json
+  typical_days_active   Json
+  last_updated          DateTime  @default(now())
+  created_at            DateTime  @default(now())
+
+  repository            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id])
+  @@index([watchlist_id])
+  @@map("repo_stats")
 }
