@@ -18,8 +18,7 @@ async function bootstrap() {
   const { addQueue, removeQueue, setQueues, replaceQueues } = createBullBoard({
     queues: [
       new BullAdapter(app.get(getQueueToken('repository-setup'))),
-      new BullAdapter(app.get(getQueueToken('health-analysis'))),
-      new BullAdapter(app.get(getQueueToken('commit-backfill'))),
+      new BullAdapter(app.get(getQueueToken('polling'))),
     ],
     serverAdapter,
   });

@@ -297,22 +297,102 @@ Consider supporting these common activity types:
 
 ---
 
+## 🔄 Repository Polling System
+
+The activity module now includes a comprehensive polling system that automatically checks repositories for new commits and updates statistics.
+
+### Architecture
+
+- **Daily Polling Job**: BullMQ job with delay that runs once daily to queue individual repository polling jobs
+- **Individual Poll Jobs**: Process each repository in the watchlist
+- **Smart Depth Adjustment**: Efficiently clones repositories with just enough depth to find the previous commit
+- **Priority System**: Setup jobs take priority over polling jobs
+- **Self-Scheduling**: Each daily polling job schedules the next one for tomorrow at midnight
+
+### How It Works
+
+1. **Initialization**: When the application starts, it schedules the first daily polling job for the next midnight
+2. **Daily Trigger**: A BullMQ job with delay triggers daily polling at midnight
+3. **Priority Check**: The system checks for active setup jobs first (they take priority)
+4. **Repository Discovery**: Finds all repositories with `status: 'ready'` in the watchlist
+5. **Job Queuing**: Queues individual polling jobs for each repository
+6. **Next Schedule**: Schedules the next daily polling job for tomorrow at midnight
+7. **Commit Detection**: Uses `git ls-remote` to get the latest commit SHA
+8. **Smart Cloning**: Clones with increasing depth (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024) until the previous commit is found
+9. **Commit Logging**: Logs all new commits to the database
+10. **Statistics Update**: Updates contributor and repository statistics
+11. **Cleanup**: Removes temporary repository clones
+
+### API Endpoints
+
+#### Trigger Daily Polling
+```bash
+POST /activity/trigger-polling
+```
+
+Manually triggers the daily polling process for all ready repositories.
+
+### BullMQ Jobs
+
+#### `polling` Queue
+- **`daily-poll`**: Daily polling trigger job
+  - Parameters: None
+  - Delay: Scheduled for next midnight
+  - Retries: 1 (no retry if fails)
+  - Self-scheduling: Schedules next daily poll after completion
+
+- **`poll-repo`**: Individual repository polling job
+  - Parameters: `watchlistId`, `owner`, `repo`, `branch`
+  - Priority: 1 (lower than setup jobs)
+  - Retries: 3 with exponential backoff
+
+### Database Updates
+
+The polling system updates:
+- `watchlist.latest_commit_sha`: Latest commit SHA for each repository
+- `logs`: New commit records with full metadata
+- `contributor_stats`: Updated contributor statistics
+- `repo_stats`: Updated repository statistics
+
+### Error Handling
+
+- **GitHub CLI Failures**: Logs warning and skips repository
+- **Clone Failures**: Tries increasing depths, logs error if all fail
+- **Statistics Failures**: Logs error but doesn't fail the entire process
+- **Database Failures**: Throws error to trigger job retry
+
+### Testing
+
+Test the polling system:
+
+```bash
+# Trigger daily polling manually
+curl -X POST http://localhost:3000/activity/trigger-polling
+
+# Check BullMQ dashboard
+# Visit: http://localhost:3000/admin/queues
+```
+
+---
+
 ## ✅ Development Checklist
 
-- [ ] `activity.module.ts` created and configured
-- [ ] Module registered in `AppModule`
-- [ ] Controller created with CRUD endpoints
-- [ ] Service created with business logic
-- [ ] Repository created for data access
-- [ ] DTOs defined for different activity types
-- [ ] Entity models created for activities and events
-- [ ] Activity aggregation service implemented
-- [ ] Activity filtering and querying implemented
-- [ ] Statistics endpoints created
-- [ ] Basic error handling implemented
-- [ ] Unit tests written
-- [ ] API endpoints tested manually
-- [ ] Documentation updated
+- [x] `activity.module.ts` created and configured
+- [x] Module registered in `AppModule`
+- [x] Controller created with CRUD endpoints
+- [x] Service created with business logic
+- [x] Repository created for data access
+- [x] DTOs defined for different activity types
+- [x] Entity models created for activities and events
+- [x] Activity aggregation service implemented
+- [x] Activity filtering and querying implemented
+- [x] Statistics endpoints created
+- [x] Basic error handling implemented
+- [x] Repository setup processor implemented
+- [x] Repository polling processor implemented
+- [x] BullMQ job queues configured
+- [x] API endpoints tested manually
+- [x] Documentation updated
 
 ---
  

@@ -5,6 +5,7 @@ import { GitManagerService } from './services/git-manager.service';
 import { HealthAnalysisService } from './services/health-analysis.service';
 import { ScorecardService } from './services/scorecard.service';
 import { RepositorySetupProcessor } from './processors/repository-setup.processor';
+import { PollingProcessor } from './processors/polling.processor';
 import { RateLimitManagerService } from './services/rate-limit-manager.service';
 import { GitHubApiService } from './services/github-api.service';
 import { BusFactorService } from './services/bus-factor.service';
@@ -31,6 +32,7 @@ import { ConfigModule } from '@nestjs/config';
     HealthAnalysisService,
     ScorecardService,
     RepositorySetupProcessor,
+    PollingProcessor,
     RateLimitManagerService,
     GitHubApiService,
     BusFactorService,

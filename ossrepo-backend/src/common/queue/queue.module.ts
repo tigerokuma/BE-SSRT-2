@@ -29,10 +29,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         name: 'repository-setup',
       },
       {
-        name: 'health-analysis',
-      },
-      {
-        name: 'commit-backfill',
+        name: 'polling',
       },
     ),
   ],

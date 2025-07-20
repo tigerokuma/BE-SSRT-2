@@ -15,6 +15,7 @@ import { RepositorySummaryService } from '../services/repository-summary.service
 import { ScorecardService } from '../services/scorecard.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
+import { PollingProcessor } from '../processors/polling.processor';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -30,6 +31,7 @@ export class ActivityController {
     private readonly scorecardService: ScorecardService,
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApiService: GitHubApiService,
+    private readonly pollingProcessor: PollingProcessor,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {}
@@ -422,6 +424,33 @@ export class ActivityController {
       this.logger.error(`❌ Failed to calculate stats: ${error.message}`);
       throw new HttpException(
         `Failed to calculate statistics: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('trigger-polling')
+  @ApiOperation({
+    summary: 'Manually trigger daily polling for all repositories',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Daily polling triggered successfully',
+  })
+  async triggerPolling() {
+    this.logger.log(`🔍 Manually triggering daily polling`);
+
+    try {
+      await this.pollingProcessor.triggerPolling();
+
+      return {
+        message: 'Daily polling triggered successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(`Error triggering polling: ${error.message}`);
+      throw new HttpException(
+        `Failed to trigger polling: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
