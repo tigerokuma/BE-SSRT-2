@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PackageSearchService } from './package-search.service';
-import { PackageCardDto, PackageDetailsDto } from '../dto/watchlist.dto';
+import { PackageCardDto, PackageDetailsDto } from '../dto/packages.dto';
 
 @Injectable()
 export class PackagesService {
@@ -22,6 +22,10 @@ export class PackagesService {
     return view === 'details'
       ? this.transformToDetails(packageData)
       : this.transformToCard(packageData);
+  }
+
+  async forceRefreshCache(repoUrl?: string): Promise<{ clearedCount?: number; refreshed?: boolean }> {
+    return await this.packageSearchService.forceRefreshCache(repoUrl);
   }
 
   // Transform to card format (NPM data only - no GitHub fields)

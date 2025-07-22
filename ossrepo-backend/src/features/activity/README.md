@@ -64,7 +64,7 @@ export class AppModule {}
 ```typescript
 // src/features/activity/activity.module.ts
 import { Module } from '@nestjs/common';
-import { ActivityController } from './controllers/activity.controller';
+import { ActivityController } from './controllers/activity.controllers';
 import { ActivityService } from './services/activity.service';
 import { ActivityAggregationService } from './services/activity-aggregation.service';
 import { ActivityRepository } from './repositories/activity.repository';
@@ -80,7 +80,7 @@ export class ActivityModule {}
 ### 4. Implement REST Endpoints
 
 ```typescript
-// src/features/activity/controllers/activity.controller.ts
+// src/features/activity/controllers/activity.controllers.ts
 @Controller('activities')
 export class ActivityController {
   constructor(private readonly activityService: ActivityService) {}

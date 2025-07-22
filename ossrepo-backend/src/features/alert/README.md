@@ -68,8 +68,8 @@ export class AppModule {}
 ```typescript
 // src/features/alert/alert.module.ts
 import { Module } from '@nestjs/common';
-import { AlertController } from './controllers/alert.controller';
-import { NotificationController } from './controllers/notification.controller';
+import { AlertController } from './controllers/alert.controllers';
+import { NotificationController } from './controllers/notification.controllers';
 import { AlertService } from './services/alert.service';
 import { NotificationService } from './services/notification.service';
 import { AlertProcessorService } from './services/alert-processor.service';
@@ -93,7 +93,7 @@ export class AlertModule {}
 ### 4. Implement REST Endpoints
 
 ```typescript
-// src/features/alert/controllers/alert.controller.ts
+// src/features/alert/controllers/alert.controllers.ts
 @Controller('alerts')
 export class AlertController {
   constructor(private readonly alertService: AlertService) {}
