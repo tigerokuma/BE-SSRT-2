@@ -12,10 +12,14 @@ import { SlackRepository } from './repositories/slack.repository';
 import { JiraRepository } from './repositories/jira.repository';
 import { EmailRepository } from './repositories/email.repository';
 import { AlertCentreRepository } from './repositories/alert.repository'
+import { ScheduleModule } from '@nestjs/schedule';
 
 
 @Module({
-  imports: [ConfigModule],
+  imports: [
+    ConfigModule,
+    ScheduleModule.forRoot(),
+  ],
   controllers: [
     AlertCentreController,
     EmailController,

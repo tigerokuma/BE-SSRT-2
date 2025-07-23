@@ -507,3 +507,12 @@ model RepoStats {
   @@index([watchlist_id])
   @@map("repo_stats")
 }
+
+model TempJira {
+  code            String    @unique
+  project_key     String
+  webtrigger_url  String
+  expires_at      DateTime
+
+  @@unique([webtrigger_url, project_key])
+}
