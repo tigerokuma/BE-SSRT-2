@@ -1,3 +1,9 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -9,12 +15,12 @@ datasource db {
 }
 
 model User {
-  user_id           String          @id @default(uuid())
-  email             String          @unique
+  user_id           String             @id @default(uuid())
+  email             String             @unique
   name              String?
-  created_at        DateTime        @default(now())
+  created_at        DateTime           @default(now())
   userWatchlists    UserWatchlist[]
-  email_confirmed   Boolean         @default(false)
+  email_confirmed   Boolean            @default(false)
   EmailConfirmation EmailConfirmation?
 
   @@map("users")
@@ -96,15 +102,31 @@ model Watchlist {
   updated_at                       DateTime?
   default_branch                   String?
   latest_commit_sha                String?
-  commits_since_last_health_update Int?
+  commits_since_last_health_update Int              @default(0) // Fixed: should be 0 by default
   package_id                       String
   // New fields for background processing
   status                           String          @default("processing") // processing, ready, failed
   processing_started_at            DateTime?
   processing_completed_at          DateTime?
   last_error                       String?
+  
+  // Repository size tracking for cloning strategy
+  repo_size_kb                     Int?             // Repository size in KB from GitHub API
+  clone_time_ms                    Int?             // Time taken to clone repository in milliseconds
+  analysis_strategy                String?         @default("api-only") // api-only, full-clone, hybrid
+  
+  // Relations
   userWatchlistEntries             UserWatchlist[]
   package                          Package         @relation(fields: [package_id], references: [package_id])
+  logs                             Log[]
+  healthData                       HealthData[]
+  busFactorData                    BusFactorData[]
+  activityData                     ActivityData[]
+  aiSummaryData                    AISummaryData[]
+  weeklySummaryData                WeeklySummaryData[]
+  contributorStats                 ContributorStats[]
+  repoStats                        RepoStats?
+  alertTriggered                   AlertTriggered[]
 }
 
 model UserWatchlist {
@@ -121,40 +143,143 @@ model UserWatchlist {
   jira         Jira?
   emailTime    EmailTime?
   Alert        Alert[]
+  AlertTriggered AlertTriggered[]
 
   @@index([user_id])
   @@index([watchlist_id])
 }
 
-model BuildSubtask {
-  subtask_id  String    @id
-  task_id     String
-  language    String
-  step        String
-  status      String
-  message     String?
-  created_at  DateTime  @default(now())
-  started_at  DateTime?
-  finished_at DateTime?
-  BuildTask   BuildTask @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
+// NEW: Health analysis data storage
+model HealthData {
+  id                   String   @id @default(uuid())
+  watchlist_id         String
+  commit_sha           String?
+  commit_date          DateTime?
+  scorecard_metrics    Json?
+  overall_health_score Decimal? @db.Decimal(5, 2)
+  analysis_date        DateTime @default(now())
+  source               String   @default("scorecard") // scorecard, local-analysis
+  created_at           DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@map("health_data")
+}
+
+// NEW: Bus factor analysis data storage
+model BusFactorData {
+  id              String   @id @default(uuid())
+  watchlist_id    String
+  bus_factor      Int
+  total_contributors Int
+  top_contributors Json    // Array of contributor objects
+  risk_level      String   // LOW, MEDIUM, HIGH, CRITICAL
+  risk_reason     String?
+  analysis_date   DateTime @default(now())
+  created_at      DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("bus_factor_data")
+}
+
+// NEW: Activity analysis data storage
+model ActivityData {
+  id                    String   @id @default(uuid())
+  watchlist_id          String
+  activity_score        Int      // 0-100
+  activity_level        String   // LOW, MODERATE, HIGH, VERY_HIGH
+  weekly_commit_rate    Decimal  @db.Decimal(5, 2) // Average commits per week (e.g., 2.50)
+  total_files_analyzed  Int
+  file_churn_data       Json?    // Array of file churn objects
+  activity_heatmap      Json?    // Activity heatmap data
+  peak_activity         Json?    // Peak activity information
+  analysis_date         DateTime @default(now())
+  created_at            DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("activity_data")
+}
+
+// NEW: AI summary data storage
+model AISummaryData {
+  id           String   @id @default(uuid())
+  watchlist_id String
+  summary      String   @db.Text
+  confidence   Float    @default(1.0)
+  model_used   String   @default("gemma2:2b")
+  prompt_length Int?
+  output_length Int?
+  generation_time_ms Int?
+  created_at   DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("ai_summary_data")
+}
+
+// NEW: Weekly AI summary data storage
+model WeeklySummaryData {
+  id           String   @id @default(uuid())
+  watchlist_id String
+  week_start   DateTime
+  week_end     DateTime
+  summary      String   @db.Text
+  confidence   Float    @default(1.0)
+  model_used   String   @default("gemma2:2b")
+  metrics_summary Json? // Summary of weekly metrics
+  created_at   DateTime @default(now())
+
+  // Relations
+  watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id, week_start])
+  @@index([watchlist_id])
+  @@index([week_start])
+  @@map("weekly_summary_data")
 }
 
 model BuildTask {
-  task_id      String         @id
+  task_id      String         @id @default(uuid())
   repo_id      String
-  status       String
+  status       String // e.g., 'queued', 'in_progress', 'completed', 'failed'
   logs         String[]
   created_at   DateTime       @default(now())
   started_at   DateTime?
   finished_at  DateTime?
+  // Optionally add commit_id, assigned_to, retry_count, etc.
   commit_id    String?
   assigned_to  String?
   retry_count  Int            @default(0)
   BuildSubtask BuildSubtask[]
 }
 
+model BuildSubtask {
+  subtask_id    String          @id @default(uuid())
+  buildTask     BuildTask       @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
+  task_id       String
+  language      String // e.g., 'python', 'java', etc.
+  step          String // e.g., 'parse', 'graph', 'save'
+  status        String // e.g., 'pending', 'in_progress', 'completed', 'failed'
+  message       String? // details, errors, etc.
+  created_at    DateTime        @default(now())
+  started_at    DateTime?
+  finished_at   DateTime?
+  GraphSnapshot GraphSnapshot[]
+}
+
 model GraphExport {
-  export_id  String    @id
+  export_id  String    @id @default(uuid())
   repo_id    String
   format     String
   ready_time DateTime?
@@ -178,16 +303,43 @@ enum Status {
 }
 
 model Alert {
-  alert_id         String
-  id               String
-  risk             Risk
-  status           Status
-  created_at       DateTime      @default(now())
-  title            String
-  description      String
-  userWatchlist    UserWatchlist @relation(fields: [id], references: [id])
+  alert_id      String
+  id            String
+  risk          Risk
+  status        Status
+  created_at    DateTime      @default(now())
+  title         String
+  description   String
+  userWatchlist UserWatchlist @relation(fields: [id], references: [id])
 
   @@id([id, alert_id])
+}
+
+model AlertTriggered {
+  id              String    @id @default(uuid())
+  user_watchlist_id String
+  watchlist_id    String
+  commit_sha      String
+  contributor     String
+  metric          String    // e.g., 'lines_added', 'lines_deleted', 'files_changed', 'commit_time'
+  value           Float
+  alert_level     String    // 'mild', 'moderate', 'critical'
+  threshold_type  String    // 'contributor_stddev', 'repo_average', 'absolute', 'user_defined'
+  threshold_value Float
+  description     String
+  details_json    Json?
+  created_at      DateTime  @default(now())
+  acknowledged_at DateTime?
+  resolved_at     DateTime?
+
+  userWatchlist   UserWatchlist @relation(fields: [user_watchlist_id], references: [id], onDelete: Cascade)
+  watchlist       Watchlist     @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([user_watchlist_id])
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@index([created_at])
+  @@map("alert_triggered")
 }
 
 enum WaitValue {
@@ -207,11 +359,11 @@ model EmailTime {
 }
 
 model EmailConfirmation {
-  token     String    @id @default(uuid())
-  user_id   String    @unique
+  token      String   @id @default(uuid())
+  user_id    String   @unique
   expires_at DateTime
   created_at DateTime @default(now())
-  user      User      @relation(fields: [user_id], references: [user_id])
+  user       User     @relation(fields: [user_id], references: [user_id])
 
   @@index([expires_at])
 }
@@ -228,4 +380,130 @@ model Jira {
   webtrigger_url String
   project_key    String?
   userWatchlist  UserWatchlist @relation(fields: [id], references: [id])
+}
+
+model GraphSnapshot {
+  snapshot_id  String       @id @default(uuid())
+  subtask_id   String
+  repo_id      String
+  commit_id    String?
+  language     String
+  graph_type   String
+  version      Int
+  created_at   DateTime     @default(now())
+  node_count   Int?
+  edge_count   Int?
+  s3_url       String?
+  status       String // e.g., 'stored','invalidated','expired'
+  // Relations
+  buildSubtask BuildSubtask @relation(fields: [subtask_id], references: [subtask_id], onDelete: Cascade)
+  nodes        GraphNode[]
+  edges        GraphEdge[]
+
+  @@index([subtask_id])
+  @@index([repo_id])
+  @@map("graph_snapshots")
+}
+
+model GraphNode {
+  node_id     String        @id @default(uuid())
+  snapshot_id String
+  type        String
+  name        String?
+  file_path   String?
+  commit_id   String?
+  metadata    Json?
+  // Relations
+  snapshot    GraphSnapshot @relation(fields: [snapshot_id], references: [snapshot_id], onDelete: Cascade)
+  outgoing    GraphEdge[]   @relation("EdgeSource")
+  incoming    GraphEdge[]   @relation("EdgeTarget")
+
+  @@index([snapshot_id])
+  @@index([name])
+  @@map("graph_nodes")
+}
+
+model GraphEdge {
+  edge_id     String        @id @default(uuid())
+  snapshot_id String
+  source_id   String
+  target_id   String
+  relation    String
+  metadata    Json?
+  // Relations
+  snapshot    GraphSnapshot @relation(fields: [snapshot_id], references: [snapshot_id], onDelete: Cascade)
+  source      GraphNode     @relation("EdgeSource", fields: [source_id], references: [node_id])
+  target      GraphNode     @relation("EdgeTarget", fields: [target_id], references: [node_id])
+
+  @@index([relation])
+  @@map("graph_edges")
+}
+
+// ENHANCED: Log model with diff data support
+model Log {
+  event_id        String     @id @default(uuid())
+  watchlist_id    String?
+  event_type      String
+  actor           String
+  timestamp       DateTime
+  payload         Json?
+  event_hash      String
+  prev_event_hash String?
+  diff_data       Json?
+  files_changed   Int?       @default(0)
+  lines_added     Int?       @default(0)
+  lines_deleted   Int?       @default(0)
+  repository      Watchlist? @relation(fields: [watchlist_id], references: [watchlist_id])
+
+  @@index([watchlist_id])
+  @@index([event_type])
+  @@index([timestamp])
+  @@map("logs")
+}
+
+model ContributorStats {
+  id                    String    @id @default(uuid())
+  watchlist_id          String
+  author_email          String
+  author_name           String?
+  total_commits         Int
+  avg_lines_added       Float
+  avg_lines_deleted     Float
+  avg_files_changed     Float
+  commit_time_histogram Json
+  last_commit_date      DateTime
+  stddev_lines_added    Float
+  stddev_lines_deleted  Float
+  stddev_files_changed  Float
+  typical_days_active   Json
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  repository            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id, author_email])
+  @@index([watchlist_id])
+  @@map("contributor_stats")
+}
+
+model RepoStats {
+  id                    String    @id @default(uuid())
+  watchlist_id          String
+  total_commits         Int
+  avg_lines_added       Float
+  avg_lines_deleted     Float
+  avg_files_changed     Float
+  stddev_lines_added    Float
+  stddev_lines_deleted  Float
+  stddev_files_changed  Float
+  commit_time_histogram Json
+  typical_days_active   Json
+  last_updated          DateTime  @default(now())
+  created_at            DateTime  @default(now())
+
+  repository            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id])
+  @@index([watchlist_id])
+  @@map("repo_stats")
 }
