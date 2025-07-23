@@ -1,10 +1,26 @@
 // src/app.module.ts
-import { Module } from '@nestjs/common';
-import { WatchlistModule } from './features/watchlist/watchlist.module';
+import {Module} from '@nestjs/common';
+import {WatchlistModule} from './features/watchlist/watchlist.module';
+import {PrismaModule} from './common/prisma/prisma.module';
+import {GraphModule} from './features/graph/graph.module';
+import {ConfigModule} from '@nestjs/config';
+import {PackagesModule} from './features/packages/packages.module';
+import { UserModule } from './features/user/user.module';
 import { AlertModule } from './features/alert/alert.module';
-import { PrismaModule } from './common/prisma/prisma.module';
 
 @Module({
-  imports: [WatchlistModule, AlertModule, PrismaModule],
+    imports: [
+        ConfigModule.forRoot({
+            isGlobal: true, // Loads .env automatically
+        }),
+        ConfigModule,
+        PackagesModule,
+        WatchlistModule,
+        AlertModule,
+        PrismaModule,
+        GraphModule,
+        UserModule
+    ],
 })
-export class AppModule {}
+export class AppModule {
+}

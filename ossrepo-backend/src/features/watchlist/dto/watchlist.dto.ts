@@ -17,25 +17,3 @@ export class WatchlistItem {
   createdAt?: Date;
   updatedAt?: Date;
 }
-
-export class PackageSummary {
-  name: string;
-  version: string;
-  downloads: number;
-  lastUpdated: string;
-  riskScore: number;
-  trustedByOrgs: string;
-}
-
-export class PackageDetails {
-  name: string;
-  riskHistory: Array<{
-    date: string;
-    score: number;
-  }>;
-  changelog: string[];
-  maintainerStats: {
-    contributors: number;
-    maintainerActivity: string;
-  };
-} 
