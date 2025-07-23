@@ -7,7 +7,6 @@ export class WatchlistRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async getWatchlist(user_id: string) {
-    // Get all UserWatchlist entries for the user, including the related Watchlist and Package
     return this.prisma.userWatchlist.findMany({
       where: { user_id },
       include: {
@@ -21,9 +20,33 @@ export class WatchlistRepository {
   }
 
   async addToWatchlist(user_id: string, request: AddToWatchlistRequest) {
-    // Find the package by name
-    const pkg = await this.prisma.package.findUnique({ where: { package_name: request.name } });
-    if (!pkg) throw new Error('Package not found');
+    // Try to find the package in the Package table
+    let pkg = await this.prisma.package.findUnique({ where: { package_name: request.name } });
+    // If not found, try to import from NpmPackage
+    if (!pkg) {
+      const npmPkg = await this.prisma.npmPackage.findUnique({ where: { package_name: request.name } });
+      if (!npmPkg) throw new Error('Package not found');
+      // Create a new Package record from NpmPackage fields
+      pkg = await this.prisma.package.create({
+        data: {
+          package_name: npmPkg.package_name,
+          description: npmPkg.description,
+          version: npmPkg.version,
+          downloads: npmPkg.downloads,
+          keywords: npmPkg.keywords,
+          license: npmPkg.license,
+          npm_url: npmPkg.npm_url,
+          homepage: npmPkg.homepage,
+          published_at: npmPkg.published_at,
+          last_updated: npmPkg.last_updated,
+          maintainers: npmPkg.maintainers,
+          risk_score: npmPkg.risk_score,
+          repo_url: npmPkg.repo_url ?? '',
+          repo_name: npmPkg.repo_url ?? '', // fallback, you may want to parse repo_name
+          fetched_at: npmPkg.fetched_at,
+        },
+      });
+    }
 
     // Check for duplicate
     const existing = await this.prisma.userWatchlist.findFirst({
@@ -59,7 +82,6 @@ export class WatchlistRepository {
   }
 
   async updateWatchlistItem(user_id: string, id: string, request: UpdateWatchlistRequest) {
-    // Update notes and alerts for the UserWatchlist entry
     return this.prisma.userWatchlist.update({
       where: { id },
       data: {
@@ -70,7 +92,6 @@ export class WatchlistRepository {
   }
 
   async deleteWatchlistItem(user_id: string, id: string) {
-    // Delete the UserWatchlist entry
     return this.prisma.userWatchlist.delete({ where: { id } });
   }
 } 
