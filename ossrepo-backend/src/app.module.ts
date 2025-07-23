@@ -5,6 +5,7 @@ import {PrismaModule} from './common/prisma/prisma.module';
 import {GraphModule} from './features/graph/graph.module';
 import {ConfigModule} from '@nestjs/config';
 import {PackagesModule} from './features/packages/packages.module';
+import { UserModule } from './features/user/user.module';
 
 @Module({
     imports: [
@@ -15,7 +16,8 @@ import {PackagesModule} from './features/packages/packages.module';
         PackagesModule,
         WatchlistModule,
         PrismaModule,
-        GraphModule
+        GraphModule,
+        UserModule
     ],
 })
 export class AppModule {
