@@ -1,31 +1,34 @@
+// graph-snapshot.dto.ts
+
 export class CreateGraphSnapshotDto {
-  subtaskId: string;
-  repoId: string;
-  commitId?: string;
+  subtask_id: string;
+  repo_id: string;
+  commit_id?: string;
   language: string;
-  graphType: string;
+  graph_type: string;
   version: number;
+  status?: string;
 }
 
 export class UpdateGraphSnapshotDto {
-  snapshotId: string;
-  nodeCount?: number;
-  edgeCount?: number;
-  s3Url?: string;
-  status?: 'stored' | 'invalidated' | 'expired';
+  snapshot_id: string;
+  node_count?: number;
+  edge_count?: number;
+  status?: string;
+  s3_url?: string;
 }
 
 export class GraphSnapshotDto {
-  snapshotId: string;
-  subtaskId: string;
-  repoId: string;
-  commitId?: string;
+  snapshot_id: string;
+  subtask_id: string;
+  repo_id: string;
+  commit_id?: string;
   language: string;
-  graphType: string;
+  graph_type: string;
   version: number;
-  createdAt: Date;
-  nodeCount?: number;
-  edgeCount?: number;
-  s3Url?: string;
-  status: 'stored' | 'invalidated' | 'expired';
+  created_at: Date;
+  node_count?: number;
+  edge_count?: number;
+  s3_url?: string;
+  status: string;
 }

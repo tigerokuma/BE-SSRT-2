@@ -1,10 +1,9 @@
 import {Injectable} from '@nestjs/common';
 import {GraphRepository} from '../repositories/graph.repository';
-import {TriggerBuildDto} from '../dto/trigger-build.dto';
-import {BuildResponseDto} from '../dto/build-response.dto';
-import {BuildStatusDto} from '../dto/build-status.dto';
-import {ExportGraphDto} from '../dto/export-graph.dto';
+import {GraphExportDto} from '../dto/graph-export.dto';
+import {BuildTaskDto, TriggerBuildDto} from '../dto/build-task.dto';
 import {GraphBuilderService} from './graph-builder.service';
+import {mapTaskToDto} from '../utils/graph.mapper'
 import * as path from 'path';
 
 @Injectable()
@@ -15,15 +14,15 @@ export class GraphService {
     ) {
     }
 
-    async triggerBuild(repoId: string, dto: TriggerBuildDto): Promise<BuildResponseDto> {
-        // 1. Create a build task for the repo (whole repo, no language)
+    async triggerBuild(repoId: string, dto: TriggerBuildDto): Promise<BuildTaskDto> {
+        // 1. Create a build task for the repo
         const buildTask = await this.repo.createBuildTask(repoId, dto.commitId);
 
         // Immediately mark task as in_progress and set started_at
-        await this.repo.startBuildTask(buildTask.task_id);
+        const startedTask = await this.repo.startBuildTask(buildTask.task_id);
 
         // Optional: append log entry
-        await this.repo.appendLog(buildTask.task_id, "Build started and Python builder triggered.");
+        await this.repo.appendLog(buildTask.task_id, 'Build started and Python builder triggered.');
 
         const baseDir = process.cwd();
         const safeRepoId = repoId.replace(/[\/\\]/g, '_');
@@ -37,44 +36,59 @@ export class GraphService {
             commitId: dto.commitId,
         });
 
+        // Return the full BuildTaskDto (with status "in_progress")
         return {
-            message: 'Build triggered',
-            repoId,
-            status: 'in_progress',
-            buildTaskId: buildTask.task_id,
+            ...startedTask,
+            started_at: startedTask.started_at ?? undefined,
+            finished_at: startedTask.finished_at ?? undefined,
+            created_at: startedTask.created_at ?? undefined,
+            commit_id: startedTask.commit_id ?? undefined,
+            assigned_to: startedTask.assigned_to ?? undefined,
         };
     }
 
-
-    async getBuildStatus(repoId: string): Promise<BuildStatusDto | null> {
+    async getBuildStatus(repoId: string): Promise<BuildTaskDto | null> {
         const task = await this.repo.getLatestBuildTaskByRepoId(repoId);
         if (!task) return null;
+        // You may want to do some conversion (see below)
         return {
-            repoId,
-            buildTaskId: task.task_id,
-            status: task.status,
-            startedAt: task.started_at,
-            finishedAt: task.finished_at,
-            lastUpdated: task.created_at, // or another timestamp if you prefer
+            ...task,
+            started_at: task.started_at ?? undefined,
+            finished_at: task.finished_at ?? undefined,
+            created_at: task.created_at ?? undefined,
+            commit_id: task.commit_id ?? undefined,
+            assigned_to: task.assigned_to ?? undefined,
         };
     }
 
-    async updateBuildTaskStatus(taskId: string, status: string, message?: string) {
-    const updatedTask = await this.repo.updateBuildTaskStatus(taskId, status);
-    if (message) {
-        await this.repo.appendLog(taskId, message);
+    async updateBuildTaskStatus(
+        taskId: string,
+        status: string,
+        message?: string
+    ): Promise<BuildTaskDto> {
+        const updatedTask = await this.repo.updateBuildTaskStatus(taskId, status);
+        if (message) {
+            await this.repo.appendLog(taskId, message);
+        }
+        return mapTaskToDto(updatedTask);
     }
-    return updatedTask;
-}
 
-    async getExport(repoId: string, format: string = 'graphml'): Promise<ExportGraphDto | null> {
+    async getExport(
+        repoId: string,
+        format: string = 'graphml'
+    ): Promise<GraphExportDto | null> {
         const exportRow = await this.repo.getLatestExportByRepoId(repoId, format);
         if (!exportRow) return null;
-        if (!exportRow.s3_url) throw new Error("No export available for this repo/format");
+        if (!exportRow.s3_url) throw new Error('No export available for this repo/format');
         return {
-            repoId,
+            export_id: exportRow.export_id,
+            repo_id: exportRow.repo_id,
             format: exportRow.format,
-            downloadUrl: exportRow.s3_url,
+            ready_time: exportRow.ready_time ?? undefined,
+            s3_url: exportRow.s3_url ?? undefined,
+            status: exportRow.status,
+            actor: exportRow.actor ?? undefined,
+            created_at: exportRow.created_at ?? undefined,
         };
     }
 }

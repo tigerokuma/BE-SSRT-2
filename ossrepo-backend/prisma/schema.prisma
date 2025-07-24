@@ -6,7 +6,7 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
+  // output   = "../generated/prisma"
 }
 
 datasource db {
@@ -97,52 +97,52 @@ model Package {
 }
 
 model Watchlist {
-  watchlist_id                     String          @id @default(uuid())
+  watchlist_id                     String    @id @default(uuid())
   alert_cve_ids                    String[]
   updated_at                       DateTime?
   default_branch                   String?
   latest_commit_sha                String?
-  commits_since_last_health_update Int              @default(0) // Fixed: should be 0 by default
+  commits_since_last_health_update Int       @default(0) // Fixed: should be 0 by default
   package_id                       String
   // New fields for background processing
-  status                           String          @default("processing") // processing, ready, failed
+  status                           String    @default("processing") // processing, ready, failed
   processing_started_at            DateTime?
   processing_completed_at          DateTime?
   last_error                       String?
-  
+
   // Repository size tracking for cloning strategy
-  repo_size_kb                     Int?             // Repository size in KB from GitHub API
-  clone_time_ms                    Int?             // Time taken to clone repository in milliseconds
-  analysis_strategy                String?         @default("api-only") // api-only, full-clone, hybrid
-  
+  repo_size_kb      Int? // Repository size in KB from GitHub API
+  clone_time_ms     Int? // Time taken to clone repository in milliseconds
+  analysis_strategy String? @default("api-only") // api-only, full-clone, hybrid
+
   // Relations
-  userWatchlistEntries             UserWatchlist[]
-  package                          Package         @relation(fields: [package_id], references: [package_id])
-  logs                             Log[]
-  healthData                       HealthData[]
-  busFactorData                    BusFactorData[]
-  activityData                     ActivityData[]
-  aiSummaryData                    AISummaryData[]
-  weeklySummaryData                WeeklySummaryData[]
-  contributorStats                 ContributorStats[]
-  repoStats                        RepoStats?
-  alertTriggered                   AlertTriggered[]
+  userWatchlistEntries UserWatchlist[]
+  package              Package             @relation(fields: [package_id], references: [package_id])
+  logs                 Log[]
+  healthData           HealthData[]
+  busFactorData        BusFactorData[]
+  activityData         ActivityData[]
+  aiSummaryData        AISummaryData[]
+  weeklySummaryData    WeeklySummaryData[]
+  contributorStats     ContributorStats[]
+  repoStats            RepoStats?
+  alertTriggered       AlertTriggered[]
 }
 
 model UserWatchlist {
-  id           String     @id @default(uuid())
-  user_id      String
-  watchlist_id String
-  added_at     DateTime   @default(now())
-  alerts       String?
-  notes        String?
-  created_at   DateTime   @default(now())
-  user         User       @relation(fields: [user_id], references: [user_id])
-  watchlist    Watchlist  @relation(fields: [watchlist_id], references: [watchlist_id])
-  slack        Slack?
-  jira         Jira?
-  emailTime    EmailTime?
-  Alert        Alert[]
+  id             String           @id @default(uuid())
+  user_id        String
+  watchlist_id   String
+  added_at       DateTime         @default(now())
+  alerts         String?
+  notes          String?
+  created_at     DateTime         @default(now())
+  user           User             @relation(fields: [user_id], references: [user_id])
+  watchlist      Watchlist        @relation(fields: [watchlist_id], references: [watchlist_id])
+  slack          Slack?
+  jira           Jira?
+  emailTime      EmailTime?
+  Alert          Alert[]
   AlertTriggered AlertTriggered[]
 
   @@index([user_id])
@@ -151,15 +151,15 @@ model UserWatchlist {
 
 // NEW: Health analysis data storage
 model HealthData {
-  id                   String   @id @default(uuid())
+  id                   String    @id @default(uuid())
   watchlist_id         String
   commit_sha           String?
   commit_date          DateTime?
   scorecard_metrics    Json?
-  overall_health_score Decimal? @db.Decimal(5, 2)
-  analysis_date        DateTime @default(now())
-  source               String   @default("scorecard") // scorecard, local-analysis
-  created_at           DateTime @default(now())
+  overall_health_score Decimal?  @db.Decimal(5, 2)
+  analysis_date        DateTime  @default(now())
+  source               String    @default("scorecard") // scorecard, local-analysis
+  created_at           DateTime  @default(now())
 
   // Relations
   watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
@@ -171,15 +171,15 @@ model HealthData {
 
 // NEW: Bus factor analysis data storage
 model BusFactorData {
-  id              String   @id @default(uuid())
-  watchlist_id    String
-  bus_factor      Int
+  id                 String   @id @default(uuid())
+  watchlist_id       String
+  bus_factor         Int
   total_contributors Int
-  top_contributors Json    // Array of contributor objects
-  risk_level      String   // LOW, MEDIUM, HIGH, CRITICAL
-  risk_reason     String?
-  analysis_date   DateTime @default(now())
-  created_at      DateTime @default(now())
+  top_contributors   Json // Array of contributor objects
+  risk_level         String // LOW, MEDIUM, HIGH, CRITICAL
+  risk_reason        String?
+  analysis_date      DateTime @default(now())
+  created_at         DateTime @default(now())
 
   // Relations
   watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
@@ -190,17 +190,17 @@ model BusFactorData {
 
 // NEW: Activity analysis data storage
 model ActivityData {
-  id                    String   @id @default(uuid())
-  watchlist_id          String
-  activity_score        Int      // 0-100
-  activity_level        String   // LOW, MODERATE, HIGH, VERY_HIGH
-  weekly_commit_rate    Decimal  @db.Decimal(5, 2) // Average commits per week (e.g., 2.50)
-  total_files_analyzed  Int
-  file_churn_data       Json?    // Array of file churn objects
-  activity_heatmap      Json?    // Activity heatmap data
-  peak_activity         Json?    // Peak activity information
-  analysis_date         DateTime @default(now())
-  created_at            DateTime @default(now())
+  id                   String   @id @default(uuid())
+  watchlist_id         String
+  activity_score       Int // 0-100
+  activity_level       String // LOW, MODERATE, HIGH, VERY_HIGH
+  weekly_commit_rate   Decimal  @db.Decimal(5, 2) // Average commits per week (e.g., 2.50)
+  total_files_analyzed Int
+  file_churn_data      Json? // Array of file churn objects
+  activity_heatmap     Json? // Activity heatmap data
+  peak_activity        Json? // Peak activity information
+  analysis_date        DateTime @default(now())
+  created_at           DateTime @default(now())
 
   // Relations
   watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
@@ -211,15 +211,15 @@ model ActivityData {
 
 // NEW: AI summary data storage
 model AISummaryData {
-  id           String   @id @default(uuid())
-  watchlist_id String
-  summary      String   @db.Text
-  confidence   Float    @default(1.0)
-  model_used   String   @default("gemma2:2b")
-  prompt_length Int?
-  output_length Int?
+  id                 String   @id @default(uuid())
+  watchlist_id       String
+  summary            String   @db.Text
+  confidence         Float    @default(1.0)
+  model_used         String   @default("gemma2:2b")
+  prompt_length      Int?
+  output_length      Int?
   generation_time_ms Int?
-  created_at   DateTime @default(now())
+  created_at         DateTime @default(now())
 
   // Relations
   watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
@@ -230,15 +230,15 @@ model AISummaryData {
 
 // NEW: Weekly AI summary data storage
 model WeeklySummaryData {
-  id           String   @id @default(uuid())
-  watchlist_id String
-  week_start   DateTime
-  week_end     DateTime
-  summary      String   @db.Text
-  confidence   Float    @default(1.0)
-  model_used   String   @default("gemma2:2b")
+  id              String   @id @default(uuid())
+  watchlist_id    String
+  week_start      DateTime
+  week_end        DateTime
+  summary         String   @db.Text
+  confidence      Float    @default(1.0)
+  model_used      String   @default("gemma2:2b")
   metrics_summary Json? // Summary of weekly metrics
-  created_at   DateTime @default(now())
+  created_at      DateTime @default(now())
 
   // Relations
   watchlist Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
@@ -316,24 +316,24 @@ model Alert {
 }
 
 model AlertTriggered {
-  id              String    @id @default(uuid())
+  id                String    @id @default(uuid())
   user_watchlist_id String
-  watchlist_id    String
-  commit_sha      String
-  contributor     String
-  metric          String    // e.g., 'lines_added', 'lines_deleted', 'files_changed', 'commit_time'
-  value           Float
-  alert_level     String    // 'mild', 'moderate', 'critical'
-  threshold_type  String    // 'contributor_stddev', 'repo_average', 'absolute', 'user_defined'
-  threshold_value Float
-  description     String
-  details_json    Json?
-  created_at      DateTime  @default(now())
-  acknowledged_at DateTime?
-  resolved_at     DateTime?
+  watchlist_id      String
+  commit_sha        String
+  contributor       String
+  metric            String // e.g., 'lines_added', 'lines_deleted', 'files_changed', 'commit_time'
+  value             Float
+  alert_level       String // 'mild', 'moderate', 'critical'
+  threshold_type    String // 'contributor_stddev', 'repo_average', 'absolute', 'user_defined'
+  threshold_value   Float
+  description       String
+  details_json      Json?
+  created_at        DateTime  @default(now())
+  acknowledged_at   DateTime?
+  resolved_at       DateTime?
 
-  userWatchlist   UserWatchlist @relation(fields: [user_watchlist_id], references: [id], onDelete: Cascade)
-  watchlist       Watchlist     @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+  userWatchlist UserWatchlist @relation(fields: [user_watchlist_id], references: [id], onDelete: Cascade)
+  watchlist     Watchlist     @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
 
   @@index([user_watchlist_id])
   @@index([watchlist_id])
@@ -462,7 +462,7 @@ model Log {
 }
 
 model ContributorStats {
-  id                    String    @id @default(uuid())
+  id                    String   @id @default(uuid())
   watchlist_id          String
   author_email          String
   author_name           String?
@@ -476,10 +476,10 @@ model ContributorStats {
   stddev_lines_deleted  Float
   stddev_files_changed  Float
   typical_days_active   Json
-  created_at            DateTime  @default(now())
-  updated_at            DateTime  @updatedAt
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
 
-  repository            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+  repository Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
 
   @@unique([watchlist_id, author_email])
   @@index([watchlist_id])
@@ -487,7 +487,7 @@ model ContributorStats {
 }
 
 model RepoStats {
-  id                    String    @id @default(uuid())
+  id                    String   @id @default(uuid())
   watchlist_id          String
   total_commits         Int
   avg_lines_added       Float
@@ -498,10 +498,10 @@ model RepoStats {
   stddev_files_changed  Float
   commit_time_histogram Json
   typical_days_active   Json
-  last_updated          DateTime  @default(now())
-  created_at            DateTime  @default(now())
+  last_updated          DateTime @default(now())
+  created_at            DateTime @default(now())
 
-  repository            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+  repository Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
 
   @@unique([watchlist_id])
   @@index([watchlist_id])

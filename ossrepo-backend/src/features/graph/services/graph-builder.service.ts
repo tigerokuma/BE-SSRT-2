@@ -7,7 +7,7 @@ type PythonBuildResponse = {
 import {Injectable} from '@nestjs/common';
 import {HttpService} from '@nestjs/axios';
 import {firstValueFrom} from 'rxjs';
-import {CreateGraphSubtaskDto, GraphSubtaskDto, UpdateGraphSubtaskDto} from '../dto/graph-subtask.dto';
+import {CreateBuildSubtaskDto, BuildSubtaskDto, UpdateBuildSubtaskDto} from '../dto/build-subtask.dto';
 import { GraphRepository } from '../repositories/graph.repository';
 
 // Import DTOs as above
@@ -26,19 +26,19 @@ export class GraphBuilderService {
 
     // ----- SUBTASKS -----
 
-    async createSubtask(dto: CreateGraphSubtaskDto): Promise<GraphSubtaskDto> {
+    async createSubtask(dto: CreateBuildSubtaskDto): Promise<BuildSubtaskDto> {
         return this.repo.createGraphSubtask(dto);
     }
 
-    async getSubtask(subtaskId: string): Promise<GraphSubtaskDto | null> {
+    async getSubtask(subtaskId: string): Promise<BuildSubtaskDto | null> {
         return this.repo.getGraphSubtaskById(subtaskId);
     }
 
-    async getSubtasksByTask(taskId: string): Promise<GraphSubtaskDto[]> {
+    async getSubtasksByTask(taskId: string): Promise<BuildSubtaskDto[]> {
         return this.repo.getGraphSubtasksByTask(taskId);
     }
 
-    async updateSubtask(subtaskId: string, dto: UpdateGraphSubtaskDto): Promise<GraphSubtaskDto> {
+    async updateSubtask(subtaskId: string, dto: UpdateBuildSubtaskDto): Promise<BuildSubtaskDto> {
         return this.repo.updateGraphSubtask(subtaskId, dto);
     }
 

@@ -11,6 +11,18 @@ BATCH_SIZE = 50
 
 logging.basicConfig(level=logging.INFO)
 
+def update_task_status(task_id, status, message=""):
+    try:
+        resp = requests.patch(
+            f"{BACKEND_URL}/graph/build/{task_id}/status",
+            json={"status": status, "message": message},
+        )
+        resp.raise_for_status()
+        logging.info(f"✅ Task {task_id} updated to {status}")
+    except Exception as e:
+        logging.error(f"❌ Failed to update task status: {e}")
+
+
 def log_payload(title, data, sample_only=False, sample_count=1):
     logging.info(f"\n--- {title} ---")
     if sample_only and isinstance(data, list):

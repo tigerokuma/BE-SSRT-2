@@ -12,6 +12,8 @@ export class UpdateGraphSubtaskDto {
   status?: string;
   message?: string;
   step?: string;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
 }
 
 export class GraphSubtaskDto {
