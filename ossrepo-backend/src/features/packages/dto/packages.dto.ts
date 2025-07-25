@@ -11,8 +11,6 @@ export class PackageCardDto {
     last_updated: string;
     version: string;
     license: string;
-    // Only OSV.dev vulnerability fields
-    vulnerabilities?: { severity: string; title: string; url: string }[];
     osv_vulnerabilities?: OsvVulnerability[];
   }
   
