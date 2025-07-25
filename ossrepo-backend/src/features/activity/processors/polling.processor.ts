@@ -33,8 +33,8 @@ export class PollingProcessor {
     @InjectQueue('polling') private readonly pollingQueue: Queue,
     @InjectQueue('repository-setup') private readonly setupQueue: Queue,
   ) {
-    // Initialize daily polling schedule when the processor starts
-    this.initializeDailyPolling();
+    // Removed automatic daily polling initialization to prevent duplicate jobs on server restart
+    // Daily polling should be manually triggered or scheduled externally
   }
 
   // Daily job that queues individual repo polling jobs
@@ -294,7 +294,7 @@ export class PollingProcessor {
         this.logger.log(`🔍 Trying clone depth ${depth} for ${owner}/${repo}`);
         
         // Clone with current depth
-        const repoPath = await this.gitManager.cloneRepository(owner, repo, branch);
+        const repoPath = await this.gitManager.cloneRepository(owner, repo, branch, depth);
         
         // Check if we can find the target SHA
         const { exec } = require('child_process');

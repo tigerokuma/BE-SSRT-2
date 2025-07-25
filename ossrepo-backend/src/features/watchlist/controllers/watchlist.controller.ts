@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query } from '@nestjs/common';
 import { WatchlistService } from '../services/watchlist.service';
 import {
   AddToWatchlistRequest,
@@ -10,9 +10,8 @@ export class WatchlistController {
   constructor(private readonly watchlistService: WatchlistService) {}
 
   @Get()
-  async getWatchlist() {
-    // TODO: Implement watchlist retrieval
-    return this.watchlistService.getWatchlist();
+  async getWatchlist(@Query('userId') userId?: string) {
+    return this.watchlistService.getWatchlist(userId);
   }
 
   @Post()

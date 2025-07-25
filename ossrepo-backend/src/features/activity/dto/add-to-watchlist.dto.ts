@@ -146,6 +146,15 @@ export class UnusualAuthorActivityAlertDto {
   percentage_outside_range: number;
 }
 
+export class AIAnomalyDetectionAlertDto {
+  @ApiProperty({
+    example: true,
+    description: 'Enable/disable AI-powered anomaly detection alerts',
+  })
+  @IsBoolean()
+  enabled: boolean;
+}
+
 export class AlertSettingsDto {
   @ApiProperty({ type: LinesAddedDeletedAlertDto })
   @ValidateNested()
@@ -171,6 +180,11 @@ export class AlertSettingsDto {
   @ValidateNested()
   @Type(() => UnusualAuthorActivityAlertDto)
   unusual_author_activity: UnusualAuthorActivityAlertDto;
+
+  @ApiProperty({ type: AIAnomalyDetectionAlertDto })
+  @ValidateNested()
+  @Type(() => AIAnomalyDetectionAlertDto)
+  ai_powered_anomaly_detection: AIAnomalyDetectionAlertDto;
 }
 
 export class AddToWatchlistDto {

@@ -56,6 +56,7 @@ export class GitManagerService {
     owner: string,
     repo: string,
     branch: string = 'main',
+    depth: number = 1,
   ): Promise<string> {
     const repoPath = this.getRepoPath(owner, repo);
     const repoUrl = `https://github.com/${owner}/${repo}.git`;
@@ -68,7 +69,7 @@ export class GitManagerService {
 
       // Clone the repository with options to avoid post-clone scripts
       const { stdout, stderr } = await execAsync(
-        `git clone --branch ${branch} --single-branch --depth 1 --no-checkout --no-tags ${repoUrl} "${repoPath}"`,
+        `git clone --branch ${branch} --single-branch --depth ${depth} --no-checkout --no-tags ${repoUrl} "${repoPath}"`,
         { timeout: 300000 }, // 5 minute timeout
       );
 
