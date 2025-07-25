@@ -6,6 +6,7 @@ import { GitManagerService } from '../services/git-manager.service';
 import { AlertingService } from '../services/alerting.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import * as fs from 'fs';
 
 interface PollingJobData {
   type: 'daily-poll' | 'poll-repo';
@@ -25,6 +26,7 @@ interface PollRepoJobData {
 @Processor('polling')
 export class PollingProcessor {
   private readonly logger = new Logger(PollingProcessor.name);
+  private isProcessingDailyPoll = false; // Prevent concurrent daily polling
 
   constructor(
     private readonly prisma: PrismaService,
@@ -37,9 +39,16 @@ export class PollingProcessor {
     // Daily polling should be manually triggered or scheduled externally
   }
 
-  // Daily job that queues individual repo polling jobs
-  // This is triggered by a BullMQ job with delay, not cron
+  // Daily job that processes repositories sequentially
   async triggerDailyPolling() {
+    // Prevent concurrent daily polling
+    if (this.isProcessingDailyPoll) {
+      this.logger.log('⏳ Daily polling already in progress, skipping...');
+      return;
+    }
+
+    this.isProcessingDailyPoll = true;
+
     this.logger.log(
       `\n────────────────────────────────────────────────────────────\n🔍 DAILY POLLING TRIGGERED\n────────────────────────────────────────────────────────────`
     );
@@ -72,7 +81,8 @@ export class PollingProcessor {
 
       this.logger.log(`Found ${watchlistedRepos.length} ready repositories to poll`);
 
-      // Queue individual polling jobs for each repository
+      // Process repositories sequentially instead of queuing individual jobs
+      let processedCount = 0;
       for (const repo of watchlistedRepos) {
         const { repo_url, repo_name } = repo.package;
         const { default_branch } = repo;
@@ -92,40 +102,45 @@ export class PollingProcessor {
           continue;
         }
 
-        await this.pollingQueue.add(
-          'poll-repo',
-          {
+        try {
+          await this.pollSingleRepository({
             watchlistId: repo.watchlist_id,
             owner,
             repo: repoName,
             branch: default_branch,
-          },
-          {
-            attempts: 3,
-            backoff: {
-              type: 'exponential',
-              delay: 2000,
-            },
-            removeOnComplete: 10,
-            removeOnFail: 50,
-            priority: 1, // Lower priority than setup jobs
-          },
-        );
-
-        this.logger.log(`Queued polling job for ${owner}/${repoName}`);
+          });
+          processedCount++;
+          
+          // Small delay between repositories to make sequential processing obvious
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          this.logger.error(`Error polling repository ${owner}/${repoName}:`, error);
+          // Continue with next repository instead of failing entire process
+        }
       }
 
-      this.logger.log(`✅ Queued ${watchlistedRepos.length} polling jobs`);
+      this.logger.log(`✅ Completed polling for ${processedCount}/${watchlistedRepos.length} repositories`);
 
       // Schedule the next daily polling job for tomorrow at midnight
       await this.scheduleNextDailyPolling();
     } catch (error) {
       this.logger.error('Error during daily polling trigger:', error);
+    } finally {
+      this.isProcessingDailyPoll = false;
     }
   }
 
   private async scheduleNextDailyPolling(): Promise<void> {
     try {
+      // Check if there's already a daily polling job scheduled
+      const waitingJobs = await this.pollingQueue.getWaiting();
+      const existingDailyPollJob = waitingJobs.find(job => job.name === 'daily-poll');
+      
+      if (existingDailyPollJob) {
+        this.logger.log('📅 Daily polling job already scheduled, skipping duplicate');
+        return;
+      }
+
       // Calculate delay until next midnight
       const now = new Date();
       const tomorrow = new Date(now);
@@ -159,7 +174,15 @@ export class PollingProcessor {
 
   @Process('poll-repo')
   async handlePollRepo(job: Job<PollRepoJobData>) {
+    // This method is kept for backward compatibility but should not be used
+    // All polling should go through the daily polling process
+    this.logger.warn('Individual poll-repo jobs are deprecated. Use daily polling instead.');
     const { watchlistId, owner, repo, branch } = job.data;
+    await this.pollSingleRepository({ watchlistId, owner, repo, branch });
+  }
+
+  private async pollSingleRepository(data: PollRepoJobData): Promise<void> {
+    const { watchlistId, owner, repo, branch } = data;
     let repoPath: string | null = null;
 
     this.logger.log(
@@ -287,28 +310,56 @@ export class PollingProcessor {
     branch: string, 
     targetSha: string
   ): Promise<string | null> {
+    // Use the same approach as repository setup - clone with --no-checkout to avoid Windows filename issues
     const depths = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
+    const maxDepth = 100;
     
     for (const depth of depths) {
+      if (depth > maxDepth) {
+        this.logger.error(`Failed to find target SHA ${targetSha} even with maximum depth ${maxDepth}`);
+        return null;
+      }
+
       try {
         this.logger.log(`🔍 Trying clone depth ${depth} for ${owner}/${repo}`);
         
         // Clone with current depth
         const repoPath = await this.gitManager.cloneRepository(owner, repo, branch, depth);
         
-        // Check if we can find the target SHA
+        // Better SHA checking - try multiple approaches
         const { exec } = require('child_process');
         const { promisify } = require('util');
         const execAsync = promisify(exec);
         
-        const command = `cd ${repoPath} && git log --oneline ${targetSha} -1`;
-        await execAsync(command);
+        try {
+          // First try: git rev-parse (most reliable)
+          const revParseCommand = `cd ${repoPath} && git rev-parse --verify ${targetSha}`;
+          await execAsync(revParseCommand);
+          this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth} (rev-parse)`);
+          return repoPath;
+        } catch (revParseError) {
+          // Second try: git log (more flexible)
+          try {
+            const logCommand = `cd ${repoPath} && git log --oneline ${targetSha} -1`;
+            await execAsync(logCommand);
+            this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth} (git log)`);
+            return repoPath;
+          } catch (logError) {
+            // Third try: git show (most permissive)
+            try {
+              const showCommand = `cd ${repoPath} && git show ${targetSha} --format="%H" -s`;
+              await execAsync(showCommand);
+              this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth} (git show)`);
+              return repoPath;
+            } catch (showError) {
+              // SHA not found with this depth
+              this.logger.log(`❌ Target SHA not found with depth ${depth}, trying deeper...`);
+            }
+          }
+        }
         
-        this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth}`);
-        return repoPath;
-        
-      } catch (error) {
-        this.logger.log(`❌ Target SHA not found with depth ${depth}, trying deeper...`);
+      } catch (cloneError) {
+        this.logger.log(`❌ Clone failed with depth ${depth}, trying deeper...`);
         // Clean up failed clone
         await this.gitManager.cleanupRepository(owner, repo);
       }
@@ -316,6 +367,63 @@ export class PollingProcessor {
     
     this.logger.error(`Failed to find target SHA ${targetSha} even with maximum depth`);
     return null;
+  }
+
+  private async cloneWithNoCheckout(
+    owner: string,
+    repo: string,
+    branch: string,
+    depth: number
+  ): Promise<string> {
+    // Use the same path logic as GitManagerService
+    const baseDir = this.gitManager['baseDir'];
+    const combinedName = `${owner}-${repo}`;
+    const maxPathLength = 200;
+    
+    let repoPath: string;
+    if (combinedName.length > maxPathLength) {
+      const maxRepoLength = maxPathLength - owner.length - 1;
+      const truncatedRepo = repo.substring(0, maxRepoLength);
+      repoPath = `${baseDir}/${owner}-${truncatedRepo}`;
+    } else {
+      repoPath = `${baseDir}/${combinedName}`;
+    }
+    
+    const repoUrl = `https://github.com/${owner}/${repo}.git`;
+
+    try {
+      // Clean up any existing repository first
+      if (fs.existsSync(repoPath)) {
+        await this.gitManager.cleanupRepository(owner, repo);
+      }
+
+      // Clone the repository with --no-checkout to avoid Windows filename issues
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+
+      const { stdout, stderr } = await execAsync(
+        `git clone --branch ${branch} --single-branch --depth ${depth} --no-checkout --no-tags ${repoUrl} "${repoPath}"`,
+        { timeout: 300000 }, // 5 minute timeout
+      );
+
+      if (stderr && !stderr.includes('Cloning into')) {
+        this.logger.warn(`Git clone stderr: ${stderr}`);
+      }
+
+      return repoPath;
+    } catch (error) {
+      this.logger.error(`Error cloning repository ${owner}/${repo} with depth ${depth}:`, error);
+
+      // Clean up partial clone if it exists
+      if (fs.existsSync(repoPath)) {
+        await this.gitManager.cleanupRepository(owner, repo);
+      }
+
+      throw new Error(
+        `Failed to clone repository ${owner}/${repo} with depth ${depth}: ${error.message}`,
+      );
+    }
   }
 
   private async getCommitsSinceSha(repoPath: string, sinceSha: string): Promise<any[]> {
