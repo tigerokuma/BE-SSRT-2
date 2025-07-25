@@ -1,3 +1,4 @@
+import type { OsvVulnerability } from '../services/osv-vulnerability.service';
 
 // Clean DTOs for package responses
 // PackageCardDto: NPM data only - used for search results and summary view
@@ -10,6 +11,9 @@ export class PackageCardDto {
     last_updated: string;
     version: string;
     license: string;
+    // Only OSV.dev vulnerability fields
+    vulnerabilities?: { severity: string; title: string; url: string }[];
+    osv_vulnerabilities?: OsvVulnerability[];
   }
   
   // PackageDetailsDto: NPM + GitHub data - used for details view
