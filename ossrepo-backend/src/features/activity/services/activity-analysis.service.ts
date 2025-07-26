@@ -4,10 +4,10 @@ export interface ActivityScore {
   score: number; // 0-100
   level: 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH';
   factors: {
-    commitFrequency: number;
-    contributorDiversity: number;
-    codeChurn: number;
-    recency: number;
+    commitFrequency: number;      // Recent commit frequency (last 3 months)
+    contributorDiversity: number; // Recent contributor diversity (last 3 months)
+    codeChurn: number;           // Recent code churn (last 3 months)
+    developmentConsistency: number; // Development consistency (weekly patterns)
   };
 }
 
@@ -81,47 +81,53 @@ export class ActivityAnalysisService {
           commitFrequency: 0,
           contributorDiversity: 0,
           codeChurn: 0,
-          recency: 0,
+          developmentConsistency: 0,
         },
       };
     }
 
     // Calculate time span
     const now = new Date();
-    const dates = commits
-      .map((c) => c.date)
-      .sort((a, b) => a.getTime() - b.getTime());
-    const timeSpan =
-      (dates[dates.length - 1].getTime() - dates[0].getTime()) /
-      (1000 * 60 * 60 * 24); // days
-    const monthsSpan = timeSpan / 30;
+    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    
+    // Filter commits to last 3 months only
+    const recentCommits = commits.filter((c) => c.date >= threeMonthsAgo);
+    
+    if (recentCommits.length === 0) {
+      return {
+        score: 0,
+        level: 'LOW',
+        factors: {
+          commitFrequency: 0,
+          contributorDiversity: 0,
+          codeChurn: 0,
+          developmentConsistency: 0,
+        },
+      };
+    }
 
     // Factor 1: Recent Commit Frequency (0-25 points) - Focus on last 3 months
-    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-    const recentCommits = commits.filter((c) => c.date >= threeMonthsAgo);
     const recentCommitsPerMonth = recentCommits.length / 3; // 3 months
     const commitFrequency = Math.min(recentCommitsPerMonth / 15, 1) * 25; // 15 commits/month in last 3 months = max score
 
-    // Factor 2: Contributor Diversity (0-25 points)
-    const uniqueContributors = new Set(commits.map((c) => c.author)).size;
-    const contributorDiversity = Math.min(uniqueContributors / 5, 1) * 25; // 5+ contributors = max score
+    // Factor 2: Recent Contributor Diversity (0-25 points) - Focus on last 3 months
+    const recentContributors = new Set(recentCommits.map((c) => c.author)).size;
+    const contributorDiversity = Math.min(recentContributors / 5, 1) * 25; // 5+ contributors in last 3 months = max score
 
-    // Factor 3: Code Churn (0-25 points)
-    const totalLinesChanged = commits.reduce(
+    // Factor 3: Recent Code Churn (0-25 points) - Focus on last 3 months
+    const totalLinesChanged = recentCommits.reduce(
       (sum, c) => sum + c.linesAdded + c.linesDeleted,
       0,
     );
-    const avgLinesPerCommit = totalLinesChanged / commits.length;
-    const codeChurn = Math.min(avgLinesPerCommit / 50, 1) * 25; // 50+ lines/commit = max score
+    const avgLinesPerCommit = totalLinesChanged / recentCommits.length;
+    const codeChurn = Math.min(avgLinesPerCommit / 50, 1) * 25; // 50+ lines/commit in last 3 months = max score
 
-    // Factor 4: Recency (0-25 points)
-    const latestCommit = dates[dates.length - 1];
-    const daysSinceLastCommit =
-      (now.getTime() - latestCommit.getTime()) / (1000 * 60 * 60 * 24);
-    const recency = Math.max(0, (30 - daysSinceLastCommit) / 30) * 25; // 0 days = max, 30+ days = 0
+    // Factor 4: Development Consistency (0-25 points) - Weekly patterns
+    const weeklyCommitRate = this.calculateWeeklyCommitRate(recentCommits);
+    const developmentConsistency = Math.min(weeklyCommitRate / 3, 1) * 25; // 3+ commits/week = max score
 
     const totalScore =
-      commitFrequency + contributorDiversity + codeChurn + recency;
+      commitFrequency + contributorDiversity + codeChurn + developmentConsistency;
 
     let level: ActivityScore['level'];
     if (totalScore >= 80) level = 'VERY_HIGH';
@@ -136,7 +142,7 @@ export class ActivityAnalysisService {
         commitFrequency: Math.round(commitFrequency),
         contributorDiversity: Math.round(contributorDiversity),
         codeChurn: Math.round(codeChurn),
-        recency: Math.round(recency),
+        developmentConsistency: Math.round(developmentConsistency),
       },
     };
   }

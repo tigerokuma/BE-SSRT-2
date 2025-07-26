@@ -363,15 +363,7 @@ export class RepositorySetupProcessor {
               activity_score: activityScore.score,
               activity_level: activityScore.level,
               weekly_commit_rate: weeklyCommitRate,
-              total_files_analyzed: fileChurnData.length,
-              file_churn_data: JSON.parse(
-                JSON.stringify(
-                  this.activityAnalysisService.getTopActiveFiles(
-                    fileChurnData,
-                    10,
-                  ),
-                ),
-              ),
+              activity_factors: JSON.parse(JSON.stringify(activityScore.factors)),
               activity_heatmap: JSON.parse(JSON.stringify(activityHeatmap)),
               peak_activity: {
                 day: activityHeatmap.peakActivity.day,
