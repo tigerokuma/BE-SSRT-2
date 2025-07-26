@@ -4,10 +4,14 @@ import {
   AddToWatchlistRequest,
   UpdateWatchlistRequest,
 } from '../dto/watchlist.dto';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
 export class WatchlistService {
-  constructor(private readonly watchlistRepository: WatchlistRepository) {}
+  constructor(
+    private readonly watchlistRepository: WatchlistRepository,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async getWatchlist(userId?: string) {
     // Get user's watchlist items with package details and enriched data
@@ -57,6 +61,72 @@ export class WatchlistService {
     if (!item) {
       throw new Error('Watchlist item not found');
     }
+
+    // Get health history data with scorecard metrics
+    const healthHistory = await this.prisma.healthData.findMany({
+      where: {
+        watchlist_id: item.watchlist.watchlist_id
+      },
+      orderBy: {
+        analysis_date: 'asc'
+      },
+      select: {
+        overall_health_score: true,
+        analysis_date: true,
+        commit_sha: true,
+        commit_date: true,
+        scorecard_metrics: true
+      }
+    });
+
+    // Get latest scorecard data
+    const latestHealthData = await this.prisma.healthData.findFirst({
+      where: {
+        watchlist_id: item.watchlist.watchlist_id
+      },
+      orderBy: {
+        analysis_date: 'desc'
+      },
+      select: {
+        overall_health_score: true,
+        analysis_date: true,
+        commit_sha: true,
+        commit_date: true,
+        scorecard_metrics: true
+      }
+    });
+
+    // Transform health history to frontend format
+    const transformedHealthHistory = healthHistory.map(health => ({
+      date: health.commit_date ? health.commit_date.toISOString().split('T')[0] : health.analysis_date.toISOString().split('T')[0],
+      score: Number(health.overall_health_score),
+      commitSha: health.commit_sha
+    }));
+
+    // Transform scorecard data for each health history point
+    const transformedScorecardData = healthHistory
+      .filter(health => health.scorecard_metrics) // Only include entries with scorecard data
+      .map(health => {
+        const scorecardMetrics = health.scorecard_metrics as any;
+        return {
+          date: health.commit_date ? health.commit_date.toISOString().split('T')[0] : health.analysis_date.toISOString().split('T')[0],
+          score: Number(health.overall_health_score),
+          commitSha: health.commit_sha,
+          checks: scorecardMetrics.checks || []
+        };
+      });
+
+    // Transform scorecard data
+    let scorecardHealth: any = null;
+    if (latestHealthData && latestHealthData.scorecard_metrics) {
+      const scorecardMetrics = latestHealthData.scorecard_metrics as any;
+      scorecardHealth = {
+        date: latestHealthData.commit_date ? latestHealthData.commit_date.toISOString().split('T')[0] : latestHealthData.analysis_date.toISOString().split('T')[0],
+        score: Number(latestHealthData.overall_health_score),
+        commitSha: latestHealthData.commit_sha,
+        checks: scorecardMetrics.checks || []
+      };
+    }
     
     // Return the same structure as getWatchlist but for a single item
     return {
@@ -89,34 +159,33 @@ export class WatchlistService {
       ai_summary: item.aiSummary || null,
       ai_confidence: item.aiConfidence || null,
       ai_model_used: item.aiModelUsed || null,
-      ai_created_at: item.aiCreatedAt || null
+      ai_created_at: item.aiCreatedAt || null,
+      // Health data
+      health_history: transformedHealthHistory,
+      scorecard_health: transformedScorecardData.length > 0 ? transformedScorecardData : scorecardHealth
     };
   }
 
   async addToWatchlist(request: AddToWatchlistRequest) {
-    // TODO: Implement add to watchlist logic
-    // - Validate package exists
-    // - Check for duplicates
-    // - Create watchlist entry
-    // - Return success response
-    return this.watchlistRepository.addToWatchlist(request);
+    // TODO: Implement data access for adding to watchlist
+    // - Insert new watchlist item in database
+    // - Handle duplicate prevention
+    // - Return created item
+    throw new Error('Not implemented');
   }
 
   async updateWatchlistItem(id: string, request: UpdateWatchlistRequest) {
-    // TODO: Implement watchlist item update logic
-    // - Validate item exists
-    // - Update notes and alert preferences
+    // TODO: Implement data access for watchlist item update
+    // - Update existing watchlist item in database
     // - Return updated item
-    return this.watchlistRepository.updateWatchlistItem(id, request);
+    throw new Error('Not implemented');
   }
 
   async importFromGithub(repoUrl: string) {
-    // TODO: Implement GitHub import logic
-    // - Parse repository URL
-    // - Fetch dependency files (package.json, etc.)
-    // - Extract package names
-    // - Add to watchlist in bulk
-    // - Return import summary
-    return this.watchlistRepository.importFromGithub(repoUrl);
+    // TODO: Implement data access for GitHub import
+    // - Bulk insert watchlist items
+    // - Handle conflicts with existing items
+    // - Return import results
+    throw new Error('Not implemented');
   }
 }
