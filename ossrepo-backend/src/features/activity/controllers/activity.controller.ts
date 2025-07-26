@@ -13,7 +13,7 @@ import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { CommitSummaryDto, CommitSummaryResponseDto } from '../dto/commit-summary.dto';
 import { ActivityService } from '../services/activity.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
-import { ScorecardService } from '../services/scorecard.service';
+import { HealthAnalysisService } from '../services/health-analysis.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
 import { PollingProcessor } from '../processors/polling.processor';
@@ -32,7 +32,7 @@ export class ActivityController {
   constructor(
     private readonly activityService: ActivityService,
     private readonly repositorySummaryService: RepositorySummaryService,
-    private readonly scorecardService: ScorecardService,
+    private readonly healthAnalysisService: HealthAnalysisService,
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApiService: GitHubApiService,
     private readonly pollingProcessor: PollingProcessor,
@@ -66,43 +66,7 @@ export class ActivityController {
     return await this.activityService.getWatchlistStatus(watchlistId);
   }
 
-  @Get('scorecard/test')
-  @ApiOperation({
-    summary: 'Test Scorecard data availability for a repository',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Scorecard data summary retrieved successfully',
-  })
-  async testScorecardData(
-    @Query('owner') owner: string,
-    @Query('repo') repo: string,
-  ) {
-    this.logger.log(`🔍 Testing Scorecard data for ${owner}/${repo}`);
 
-    const summary = await this.scorecardService.getScorecardDataSummary(
-      owner,
-      repo,
-    );
-    const latestData = await this.scorecardService.getLatestScorecard(
-      owner,
-      repo,
-    );
-
-    return {
-      summary,
-      latestData: latestData
-        ? {
-            score: latestData.score,
-            date: latestData.date,
-            checksCount: latestData.checks?.length || 0,
-          }
-        : null,
-      message: summary.hasData
-        ? `✅ Scorecard data available for ${owner}/${repo}`
-        : `❌ No Scorecard data found for ${owner}/${repo}`,
-    };
-  }
 
   @Get('rate-limit/status')
   @ApiOperation({
@@ -698,6 +662,44 @@ export class ActivityController {
         `Failed to get alerts: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  @Get('scorecard/local-test')
+  @ApiOperation({
+    summary: 'Test local Scorecard CLI functionality',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Local Scorecard test completed',
+  })
+  async testLocalScorecard(
+    @Query('owner') owner: string,
+    @Query('repo') repo: string,
+  ) {
+    this.logger.log(`🔍 Testing local Scorecard CLI for ${owner}/${repo}`);
+
+    try {
+      // Test the health analysis service which uses local Scorecard CLI
+      const healthScore = await this.healthAnalysisService.analyzeRepository(
+        'test-watchlist-id',
+        owner,
+        repo,
+        'main',
+      );
+
+      return {
+        success: true,
+        healthScore,
+        message: `✅ Local Scorecard CLI working for ${owner}/${repo}`,
+      };
+    } catch (error) {
+      this.logger.error(`❌ Local Scorecard test failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        message: `❌ Local Scorecard CLI failed for ${owner}/${repo}`,
+      };
     }
   }
 

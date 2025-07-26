@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { ScorecardService, HistoricalScorecardData } from './scorecard.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -12,7 +11,13 @@ export interface ScorecardResult {
   commit: string;
   scorecard: string;
   date: string;
-  checks: {
+  score: number; // Add the overall score field
+  checks: Array<{
+    name: string;
+    score: number;
+    reason: string;
+    details: string[] | null;
+  }> | {
     [key: string]: {
       name: string;
       score: number;
@@ -39,7 +44,6 @@ export class HealthAnalysisService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
-    private readonly scorecardService: ScorecardService,
   ) {
     this.scorecardPath = this.configService.get<string>(
       'SCORECARD_PATH',
@@ -56,42 +60,9 @@ export class HealthAnalysisService {
     commitShaOverride?: string,
     skipScorecardQuery: boolean = false,
   ): Promise<number> {
-    // Skip Scorecard query if already attempted and failed
-    if (skipScorecardQuery) {
-      this.logger.log(
-        `🔄 Skipping Scorecard query (already attempted), running local analysis for ${owner}/${repo}`,
-      );
-      const result = await this.performAnalysis(
-        watchlistId,
-        owner,
-        repo,
-        branch,
-        commitShaOverride,
-      );
-      return result.overallHealthScore;
-    }
-
-    // Try to get Scorecard data first
-    try {
-      const scorecardData = await this.scorecardService.getLatestScorecard(
-        owner,
-        repo,
-      );
-      if (scorecardData) {
-        this.logger.log(
-          `✅ Using Scorecard public data for ${owner}/${repo} - Score: ${scorecardData.score}`,
-        );
-        return scorecardData.score;
-      }
-    } catch (error) {
-      this.logger.warn(
-        `⚠️ Failed to get Scorecard data for ${owner}/${repo}: ${error.message}`,
-      );
-    }
-
-    // Fallback to local analysis
+    // ALWAYS use local analysis to avoid BigQuery costs
     this.logger.log(
-      `🔄 No Scorecard data available, running local analysis for ${owner}/${repo}`,
+      `🔄 Using local Scorecard CLI analysis for ${owner}/${repo} (BigQuery disabled)`,
     );
     const result = await this.performAnalysis(
       watchlistId,
@@ -104,8 +75,8 @@ export class HealthAnalysisService {
   }
 
   /**
-   * Run historical health analysis using Scorecard public data
-   * This method uses the OpenSSF Scorecard public dataset instead of running local health checks
+   * Run historical health analysis using local Scorecard CLI
+   * BigQuery disabled to avoid costs
    */
   async runHistoricalHealthAnalysis(
     watchlistId: string,
@@ -127,98 +98,17 @@ export class HealthAnalysisService {
       return { current: 0, historical: [] };
     }
 
-    // Sort commits by date (oldest first)
-    const sortedCommits = commits
-      .map((commit) => ({
-        ...commit,
-        date: new Date(commit.date),
-      }))
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
-
-    // Skip Scorecard query if already attempted and failed
-    if (skipScorecardQuery) {
-      this.logger.log(
-        `🔄 Skipping Scorecard query (already attempted), using local analysis`,
-      );
-      return this.runLocalHistoricalAnalysis(
-        watchlistId,
-        owner,
-        repo,
-        commits,
-        branch,
-      );
-    }
-
-    const startDate = sortedCommits[0].date;
-    const endDate = sortedCommits[sortedCommits.length - 1].date;
-
+    // ALWAYS use local analysis to avoid BigQuery costs
     this.logger.log(
-      `📊 Querying Scorecard public data for ${owner}/${repo} from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`,
+      `🔄 Using local Scorecard CLI analysis for ${owner}/${repo} (BigQuery disabled)`,
     );
-
-    // Get historical Scorecard data from the public dataset
-    const historicalScorecardData =
-      await this.scorecardService.getHistoricalScorecardData(
-        owner,
-        repo,
-        startDate,
-        endDate,
-      );
-
-    if (historicalScorecardData.length === 0) {
-      this.logger.log(
-        `⚠️ No Scorecard data found for ${owner}/${repo}, falling back to local analysis`,
-      );
-      return this.runLocalHistoricalAnalysis(
-        watchlistId,
-        owner,
-        repo,
-        commits,
-        branch,
-      );
-    }
-
-    this.logger.log(
-      `✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`,
+    return this.runLocalHistoricalAnalysis(
+      watchlistId,
+      owner,
+      repo,
+      commits,
+      branch,
     );
-
-    // Use Scorecard data directly instead of mapping to commits
-    const historicalResults: Array<{
-      date: Date;
-      score: number;
-      commitSha: string | null;
-      scorecardMetrics?: any;
-    }> = historicalScorecardData.map((scorecardRecord) => ({
-      date: scorecardRecord.date,
-      score: scorecardRecord.score,
-      commitSha: null, // Scorecard data doesn't have commit SHAs
-      scorecardMetrics: scorecardRecord.checks || null, // This should contain the checks array
-    }));
-
-    // Get current health score (try Scorecard first, fallback to local)
-    let currentScore: number;
-    try {
-      const latestScorecard = await this.scorecardService.getLatestScorecard(
-        owner,
-        repo,
-      );
-      currentScore = latestScorecard?.score || 0;
-    } catch (error) {
-      this.logger.warn(
-        `⚠️ Failed to get current Scorecard data, using local analysis: ${error.message}`,
-      );
-      currentScore = await this.analyzeRepository(
-        watchlistId,
-        owner,
-        repo,
-        branch,
-      );
-    }
-
-    return {
-      current: currentScore,
-      historical: historicalResults,
-    };
   }
 
   /**
@@ -271,7 +161,7 @@ export class HealthAnalysisService {
           point.sha,
         );
         this.logger.log(
-          `   📈 ${point.date.toISOString().split('T')[0]}: ${(result.overallHealthScore / 10).toFixed(1)}/10`,
+          `   📈 ${point.date.toISOString().split('T')[0]}: ${result.overallHealthScore.toFixed(1)}/10`,
         );
         return {
           date: point.date,
@@ -320,8 +210,8 @@ export class HealthAnalysisService {
    */
   private findClosestScorecardData(
     targetDate: Date,
-    scorecardData: HistoricalScorecardData[],
-  ): HistoricalScorecardData | null {
+    scorecardData: any[], // Changed from HistoricalScorecardData to any[]
+  ): any | null { // Changed from HistoricalScorecardData to any
     if (scorecardData.length === 0) return null;
 
     let closest = scorecardData[0];
@@ -480,20 +370,16 @@ export class HealthAnalysisService {
     commitSha: string,
   ): Promise<ScorecardResult | null> {
     try {
+      const command = `${this.scorecardPath} --repo=github.com/${owner}/${repo} --commit=${commitSha} --format=json --show-details`;
+      
+      this.logger.log(`🔍 Running Scorecard on ${owner}/${repo}@${commitSha.substring(0, 8)}`);
+      
       let stdout: string;
       let stderr: string;
-
+      
       try {
-        const command = `${this.scorecardPath} --repo=github.com/${owner}/${repo} --commit=${commitSha} --format=json`;
-
         const result = await execAsync(command, {
-          timeout: 400000, // 5 minute timeout (increased for reliability)
-          env: {
-            ...process.env,
-            GITHUB_AUTH_TOKEN:
-              this.configService.get<string>('GITHUB_TOKEN') ||
-              process.env.GITHUB_AUTH_TOKEN,
-          },
+          timeout: 400000, // 5 minutes timeout
         });
         stdout = result.stdout;
         stderr = result.stderr;
@@ -528,11 +414,15 @@ export class HealthAnalysisService {
         return null;
       }
 
+      // Extract the overall score from the Scorecard output
+      const overallScore = scorecardData.score || 0;
+
       return {
         repo: `${owner}/${repo}`,
         commit: commitSha,
         scorecard: scorecardData.scorecard.version,
         date: scorecardData.date,
+        score: overallScore, // Add the overall score to the result
         checks: scorecardData.checks,
       };
     } catch (error) {
@@ -550,8 +440,24 @@ export class HealthAnalysisService {
       return 0;
     }
 
+    // If Scorecard provided an overall score, use it (this is the most accurate)
+    if (scorecard.score && scorecard.score > 0) {
+      return scorecard.score;
+    }
+
+    // Fallback: Calculate average from individual checks
+    // Handle both array format (new) and object format (old)
+    let checksArray: any[];
+    if (Array.isArray(scorecard.checks)) {
+      // New format: checks is an array
+      checksArray = scorecard.checks;
+    } else {
+      // Old format: checks is an object, convert to array
+      checksArray = Object.values(scorecard.checks);
+    }
+
     // Filter out checks with -1 scores (errors/failures) and only use valid scores
-    const validChecks = Object.values(scorecard.checks).filter(
+    const validChecks = checksArray.filter(
       (check) => check.score >= 0,
     );
 

@@ -22,7 +22,6 @@
   "dependencies": {
     "@bull-board/api": "^6.11.1",
     "@bull-board/express": "^6.11.1",
-    "@google-cloud/bigquery": "^8.1.0",
     "@nestjs/axios": "^4.0.0",
     "@nestjs/bull": "^11.0.2",
     "@nestjs/common": "^11.0.1",

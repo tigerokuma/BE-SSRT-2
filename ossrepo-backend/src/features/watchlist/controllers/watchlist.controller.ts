@@ -14,6 +14,11 @@ export class WatchlistController {
     return this.watchlistService.getWatchlist(userId);
   }
 
+  @Get(':id/details')
+  async getWatchlistItemDetails(@Param('id') id: string) {
+    return this.watchlistService.getWatchlistItemDetails(id);
+  }
+
   @Post()
   async addToWatchlist(@Body() request: AddToWatchlistRequest) {
     // TODO: Implement adding package to watchlist

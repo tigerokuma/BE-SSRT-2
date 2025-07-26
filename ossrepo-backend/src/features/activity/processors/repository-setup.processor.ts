@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { GitManagerService } from '../services/git-manager.service';
-import { ScorecardService } from '../services/scorecard.service';
+
 import { HealthAnalysisService } from '../services/health-analysis.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
@@ -33,7 +33,6 @@ export class RepositorySetupProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gitManager: GitManagerService,
-    private readonly scorecardService: ScorecardService,
     private readonly healthAnalysisService: HealthAnalysisService,
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApi: GitHubApiService,
@@ -111,16 +110,7 @@ export class RepositorySetupProcessor {
       //   );
       // }
 
-      // Start Scorecard API call in parallel (unless forced to local)
-      if (!forceLocalHealthAnalysis) {
-        this.logger.log(`🔍 Fetching Scorecard data for ${owner}/${repo}`);
-        parallelOperations.push(
-          this.scorecardService
-            .getHistoricalScorecardData(owner, repo, twoYearsAgo, now)
-            .then((data) => ({ type: 'scorecard', data }))
-            .catch((error) => ({ type: 'scorecard', error })),
-        );
-      }
+      // Scorecard API calls removed - using local analysis only
 
       // Start repository info fetch in parallel
       this.logger.log(`📊 Fetching repository info for ${owner}/${repo}`);
@@ -142,15 +132,7 @@ export class RepositorySetupProcessor {
       //   this.logger.warn(`⚠️ GitHub API failed, will fall back to local cloning: ${commitResult.error.message}`);
       // }
 
-      // Process Scorecard results
-      const scorecardResult = results.find((r) => r.type === 'scorecard');
-      if (scorecardResult && !scorecardResult.error) {
-        historicalScorecardData = scorecardResult.data;
-      } else if (scorecardResult?.error) {
-        this.logger.warn(
-          `⚠️ Scorecard API failed: ${scorecardResult.error.message}`,
-        );
-      }
+      // Scorecard processing removed - using local analysis only
 
       // Process repository info results
       const repoInfoResult = results.find((r) => r.type === 'repository');
@@ -191,100 +173,56 @@ export class RepositorySetupProcessor {
         this.logger.log(`📊 No commits found, skipping statistics calculation`);
       }
 
-      // Step 3: Handle health analysis results
-      if (forceLocalHealthAnalysis) {
-        // Force local health analysis - skip Scorecard API entirely
+      // Step 3: Always use local health analysis (BigQuery disabled)
+      this.logger.log(
+        `🧪 Using local health analysis (BigQuery disabled)`,
+      );
+
+      // Always run health analysis, even if no commits (to get current health metrics)
+      if (commitsForHealthAnalysis.length === 0) {
         this.logger.log(
-          `🧪 Forcing local health analysis (skipping Scorecard API)`,
+          `📊 No commits found, running health analysis on repository head`,
         );
+        const currentHealth =
+          await this.healthAnalysisService.analyzeRepository(
+            watchlistId,
+            owner,
+            repo,
+            branch,
+          );
+        this.logger.log(
+          `   📈 ${new Date().toISOString().split('T')[0]}: ${(currentHealth / 10).toFixed(1)}/10`,
+        );
+        historicalScorecardData = [
+          {
+            date: new Date().toISOString(),
+            score: currentHealth,
+            commitSha: 'HEAD',
+            source: 'local-analysis-current',
+          },
+        ];
+      } else {
         const transformedCommits = this.transformCommitsForHealthAnalysis(
           commitsForHealthAnalysis,
         );
-
-        try {
-          const localAnalysis =
-            await this.healthAnalysisService.runLocalHistoricalAnalysis(
-              watchlistId,
-              owner,
-              repo,
-              transformedCommits,
-              branch,
-            );
-          this.logger.log(
-            `✅ Local health analysis completed with ${localAnalysis.historical.length} historical results`,
+        const localAnalysis =
+          await this.healthAnalysisService.runHistoricalHealthAnalysis(
+            watchlistId,
+            owner,
+            repo,
+            transformedCommits,
+            branch,
           );
-          historicalScorecardData = localAnalysis.historical.map((result) => ({
-            date: result.date.toISOString(),
-            score: result.score,
-            commitSha: result.commitSha,
-            scorecardMetrics: result.scorecardMetrics,
-            source: 'local-analysis',
-          }));
-        } catch (error) {
-          this.logger.error(
-            `❌ Local health analysis failed: ${error.message}`,
-          );
-          historicalScorecardData = [];
-        }
-      } else if (historicalScorecardData.length === 0) {
-        // No Scorecard data available, fall back to local analysis
-        this.logger.log(
-          `❌ No Scorecard data found, using local health analysis instead`,
-        );
-
-        // Always run health analysis, even if no commits (to get current health metrics)
-        if (commitsForHealthAnalysis.length === 0) {
-          this.logger.log(
-            `📊 No commits found, running health analysis on repository head`,
-          );
-          const currentHealth =
-            await this.healthAnalysisService.analyzeRepository(
-              watchlistId,
-              owner,
-              repo,
-              branch,
-              undefined,
-              true,
-            ); // Skip Scorecard query
-          this.logger.log(
-            `   📈 ${new Date().toISOString().split('T')[0]}: ${(currentHealth / 10).toFixed(1)}/10`,
-          );
-          historicalScorecardData = [
-            {
-              date: new Date().toISOString(),
-              score: currentHealth,
-              commitSha: 'HEAD',
-              source: 'local-analysis-current',
-            },
-          ];
-        } else {
-          const transformedCommits = this.transformCommitsForHealthAnalysis(
-            commitsForHealthAnalysis,
-          );
-          const localAnalysis =
-            await this.healthAnalysisService.runHistoricalHealthAnalysis(
-              watchlistId,
-              owner,
-              repo,
-              transformedCommits,
-              branch,
-              true,
-            ); // Skip Scorecard query
-          historicalScorecardData = localAnalysis.historical.map((result) => ({
-            date: result.date.toISOString(),
-            score: result.score,
-            commitSha: result.commitSha,
-            scorecardMetrics: result.scorecardMetrics,
-            source: 'local-analysis',
-          }));
-        }
-      } else {
-        this.logger.log(
-          `✅ Found ${historicalScorecardData.length} Scorecard records for ${owner}/${repo}`,
-        );
+        historicalScorecardData = localAnalysis.historical.map((result) => ({
+          date: result.date.toISOString(),
+          score: result.score,
+          commitSha: result.commitSha,
+          scorecardMetrics: result.scorecardMetrics,
+          source: 'local-analysis',
+        }));
       }
 
-      // Store health data in new table (for both BigQuery and local analysis results)
+      // Store health data in new table (local analysis results only)
       if (historicalScorecardData.length > 0) {
         this.logger.log(
           `📊 Storing ${historicalScorecardData.length} health data records in database`,

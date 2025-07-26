@@ -76,27 +76,52 @@ export class WatchlistRepository {
           }
         });
 
+        // Get latest AI summary
+        const latestAISummary = await this.prisma.aISummaryData.findFirst({
+          where: {
+            watchlist_id: item.watchlist_id
+          },
+          orderBy: {
+            created_at: 'desc'
+          },
+          select: {
+            summary: true,
+            confidence: true,
+            model_used: true,
+            created_at: true
+          }
+        });
+
         // Calculate tracking duration
         const trackingDuration = this.calculateTrackingDuration(item.added_at);
 
-        // --- New: Fetch downloads from npm_packages and stars/contributors from github_repositories ---
+        // --- Enhanced: Fetch comprehensive data from npm_packages and github_repositories ---
         let downloads: number | null = null;
         let stars: number | null = null;
         let contributors: number | null = null;
         let forks: number | null = null;
+        let npmUrl: string | null = null;
+        let enhancedDescription: string | null = null;
         let repoUrl = item.watchlist.package?.repo_url;
+        
         if (repoUrl) {
           // Ensure repoUrl starts with 'https://'
           if (!repoUrl.startsWith('http://') && !repoUrl.startsWith('https://')) {
             repoUrl = 'https://' + repoUrl;
           }
 
-          // NPM downloads
+          // Enhanced NPM data fetch
           const npmPkg = await this.prisma.npmPackage.findFirst({
             where: { repo_url: repoUrl },
-            select: { downloads: true }
+            select: { 
+              downloads: true,
+              npm_url: true,
+              description: true
+            }
           });
           downloads = npmPkg?.downloads ?? null;
+          npmUrl = npmPkg?.npm_url ?? null;
+          enhancedDescription = npmPkg?.description ?? null;
 
           // GitHub stars, contributors, forks
           const ghRepo = await this.prisma.gitHubRepository.findUnique({
@@ -107,7 +132,7 @@ export class WatchlistRepository {
           contributors = ghRepo?.contributors ?? null;
           forks = ghRepo?.forks ?? null;
         }
-        // --- End new ---
+        // --- End enhanced ---
 
         return {
           ...item,
@@ -116,11 +141,18 @@ export class WatchlistRepository {
           busFactor: latestBusFactor?.bus_factor || null,
           healthScore: latestHealth?.overall_health_score || null,
           trackingDuration,
-          // Add new fields for frontend
+          // Enhanced data fields for frontend
           downloads,
           stars,
           contributors,
-          forks
+          forks,
+          npmUrl,
+          enhancedDescription,
+          // AI summary data
+          aiSummary: latestAISummary?.summary || null,
+          aiConfidence: latestAISummary?.confidence || null,
+          aiModelUsed: latestAISummary?.model_used || null,
+          aiCreatedAt: latestAISummary?.created_at || null
         };
       })
     );

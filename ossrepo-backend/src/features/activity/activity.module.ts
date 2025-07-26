@@ -3,7 +3,6 @@ import { ActivityController } from './controllers/activity.controller';
 import { ActivityService } from './services/activity.service';
 import { GitManagerService } from './services/git-manager.service';
 import { HealthAnalysisService } from './services/health-analysis.service';
-import { ScorecardService } from './services/scorecard.service';
 import { RepositorySetupProcessor } from './processors/repository-setup.processor';
 import { PollingProcessor } from './processors/polling.processor';
 import { RateLimitManagerService } from './services/rate-limit-manager.service';
@@ -32,7 +31,6 @@ import { ConfigModule } from '@nestjs/config';
     ActivityService,
     GitManagerService,
     HealthAnalysisService,
-    ScorecardService,
     RepositorySetupProcessor,
     PollingProcessor,
     RateLimitManagerService,
