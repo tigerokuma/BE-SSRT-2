@@ -195,8 +195,7 @@ model ActivityData {
   activity_score        Int      // 0-100
   activity_level        String   // LOW, MODERATE, HIGH, VERY_HIGH
   weekly_commit_rate    Decimal  @db.Decimal(5, 2) // Average commits per week (e.g., 2.50)
-  total_files_analyzed  Int
-  file_churn_data       Json?    // Array of file churn objects
+  activity_factors      Json     // JSON object with the 4 factor scores: { commitFrequency: number, contributorDiversity: number, codeChurn: number, developmentConsistency: number }
   activity_heatmap      Json?    // Activity heatmap data
   peak_activity         Json?    // Peak activity information
   analysis_date         DateTime @default(now())
