@@ -208,6 +208,17 @@ export class BusFactorService {
 
   /**
    * Calculate bus factor score based on contributor concentration
+   * 
+   * Bus Factor Definition: The minimum number of contributors who would need to be 
+   * "hit by a bus" (or leave the project) before the project would be unable to 
+   * continue due to knowledge loss. It's calculated as the number of contributors 
+   * needed to reach 50% of total commits.
+   * 
+   * Examples:
+   * - Bus factor of 1: One person has >50% of commits (critical risk)
+   * - Bus factor of 2: Two people together have >50% of commits (high risk)
+   * - Bus factor of 5: Five people together have >50% of commits (medium risk)
+   * - Bus factor of 8: Eight people together have >50% of commits (low risk)
    */
   private calculateBusFactorScore(contributors: ContributorStats[]): number {
     if (contributors.length === 0) return 0;
@@ -243,32 +254,27 @@ export class BusFactorService {
     totalContributors: number,
     contributors: ContributorStats[],
   ): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
-    // Critical: Only 1-2 contributors total, or bus factor of 1
-    if (totalContributors <= 2 || busFactor === 1) {
+    const totalCommits = contributors.reduce((sum, c) => sum + c.totalCommits, 0);
+    const topContributorPercentage = totalCommits > 0 
+      ? (contributors[0]?.totalCommits / totalCommits) 
+      : 0;
+
+    // Critical: Very few contributors OR extreme concentration (>80% by one person)
+    if (totalContributors <= 2 || busFactor === 1 || topContributorPercentage > 0.8) {
       return 'CRITICAL';
     }
 
-    // High: Bus factor of 2-3, or single contributor has >70% of commits
-    if (
-      busFactor <= 3 ||
-      contributors[0]?.totalCommits /
-        contributors.reduce((sum, c) => sum + c.totalCommits, 0) >
-        0.7
-    ) {
+    // High: Bus factor of 2-3 OR high concentration (60-80% by one person)
+    if (busFactor <= 3 || topContributorPercentage > 0.6) {
       return 'HIGH';
     }
 
-    // Medium: Bus factor of 4-6, or top contributor has >50% of commits
-    if (
-      busFactor <= 6 ||
-      contributors[0]?.totalCommits /
-        contributors.reduce((sum, c) => sum + c.totalCommits, 0) >
-        0.5
-    ) {
+    // Medium: Bus factor of 4-6 OR moderate concentration (40-60% by one person)
+    if (busFactor <= 6 || topContributorPercentage > 0.4) {
       return 'MEDIUM';
     }
 
-    // Low: Good distribution of contributors
+    // Low: Good distribution of contributors (bus factor > 6 and top contributor < 40%)
     return 'LOW';
   }
 
@@ -292,13 +298,19 @@ export class BusFactorService {
 
     switch (riskLevel) {
       case 'CRITICAL':
-        return `Critical risk: Only ${totalContributors} contributor(s) total. Bus factor of ${busFactor}.`;
+        if (totalContributors <= 2) {
+          return `Critical risk: Very few contributors (${totalContributors} total). Bus factor of ${busFactor}.`;
+        } else if (busFactor === 1) {
+          return `Critical risk: Bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits - extreme concentration of knowledge.`;
+        } else {
+          return `Critical risk: Bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits.`;
+        }
       case 'HIGH':
-        return `High risk: Bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits.`;
+        return `High risk: Bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits - significant knowledge concentration.`;
       case 'MEDIUM':
-        return `Medium risk: Bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits.`;
+        return `Medium risk: Bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits - moderate knowledge concentration.`;
       case 'LOW':
-        return `Low risk: Good contributor distribution with bus factor of ${busFactor}.`;
+        return `Low risk: Good contributor distribution with bus factor of ${busFactor}. Top contributor has ${topContributorPercentage}% of commits.`;
       default:
         return `Unknown risk level.`;
     }

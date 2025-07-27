@@ -156,6 +156,7 @@ export class WatchlistService {
       weekly_commit_rate: item.weeklyCommitRate || null,
       activity_heatmap: item.activityHeatmap || null,
       bus_factor: item.busFactor || null,
+      bus_factor_details: item.busFactorDetails || null,
       health_score: item.healthScore || null,
       tracking_duration: item.trackingDuration || '0 days',
       // AI summary data

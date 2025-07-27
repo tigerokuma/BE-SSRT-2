@@ -62,7 +62,12 @@ export class WatchlistRepository {
             analysis_date: 'desc'
           },
           select: {
-            bus_factor: true
+            bus_factor: true,
+            total_contributors: true,
+            top_contributors: true,
+            risk_level: true,
+            risk_reason: true,
+            analysis_date: true
           }
         });
 
@@ -145,6 +150,14 @@ export class WatchlistRepository {
           weeklyCommitRate: latestActivity?.weekly_commit_rate || null,
           activityHeatmap: latestActivity?.activity_heatmap || null,
           busFactor: latestBusFactor?.bus_factor || null,
+          busFactorDetails: latestBusFactor ? {
+            level: latestBusFactor.bus_factor,
+            risk: latestBusFactor.risk_level as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+            description: latestBusFactor.risk_reason || '',
+            topContributors: latestBusFactor.top_contributors as any[] || [],
+            totalContributors: latestBusFactor.total_contributors || 0,
+            analysisDate: latestBusFactor.analysis_date
+          } : null,
           healthScore: latestHealth?.overall_health_score || null,
           trackingDuration,
           // Enhanced data fields for frontend
