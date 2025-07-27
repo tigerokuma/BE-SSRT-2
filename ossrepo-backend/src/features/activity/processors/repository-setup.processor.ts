@@ -329,6 +329,38 @@ export class RepositorySetupProcessor {
               commitsForAnalysis,
             );
 
+          // Log detailed activity score breakdown
+          this.logger.log(`📊 Activity Score Breakdown for ${owner}/${repo}:`);
+          this.logger.log(`   Total Score: ${activityScore.score}/100 (${activityScore.level})`);
+          this.logger.log(`   Factors:`);
+          this.logger.log(`     - Commit Frequency: ${activityScore.factors.commitFrequency}/25`);
+          this.logger.log(`     - Contributor Diversity: ${activityScore.factors.contributorDiversity}/25`);
+          this.logger.log(`     - Code Churn: ${activityScore.factors.codeChurn}/25`);
+          this.logger.log(`     - Development Consistency: ${activityScore.factors.developmentConsistency}/25`);
+
+          // Log the raw data that led to these scores
+          const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+          const recentCommits = commitsForAnalysis.filter(c => c.date >= threeMonthsAgo);
+          const recentContributors = new Set(recentCommits.map(c => c.author));
+          const totalLinesChanged = recentCommits.reduce((sum, c) => sum + c.linesAdded + c.linesDeleted, 0);
+          const avgLinesPerCommit = recentCommits.length > 0 ? totalLinesChanged / recentCommits.length : 0;
+          const weeklyRateForLogging = this.activityAnalysisService.calculateWeeklyCommitRate(recentCommits);
+
+          this.logger.log(`   Raw Data (Last 3 Months):`);
+          this.logger.log(`     - Recent Commits: ${recentCommits.length} (${(recentCommits.length / 3).toFixed(1)}/month)`);
+          this.logger.log(`     - Unique Contributors: ${recentContributors.size}`);
+          this.logger.log(`     - Total Lines Changed: ${totalLinesChanged}`);
+          this.logger.log(`     - Avg Lines/Commit: ${avgLinesPerCommit.toFixed(1)}`);
+          this.logger.log(`     - Weekly Commit Rate: ${weeklyRateForLogging.toFixed(2)} commits/week`);
+          this.logger.log(`     - Date Range: ${threeMonthsAgo.toISOString().split('T')[0]} to ${new Date().toISOString().split('T')[0]}`);
+
+          // Log calculation explanations
+          this.logger.log(`   Factor Calculations:`);
+          this.logger.log(`     - Commit Frequency: ${(recentCommits.length / 3).toFixed(1)} commits/month → ${Math.min((recentCommits.length / 3) / 15, 1) * 25}/25 points (15+ commits/month = max)`);
+          this.logger.log(`     - Contributor Diversity: ${recentContributors.size} contributors → ${Math.min(recentContributors.size / 5, 1) * 25}/25 points (5+ contributors = max)`);
+          this.logger.log(`     - Code Churn: ${avgLinesPerCommit.toFixed(1)} lines/commit → ${Math.min(avgLinesPerCommit / 50, 1) * 25}/25 points (50+ lines/commit = max)`);
+          this.logger.log(`     - Development Consistency: ${weeklyRateForLogging.toFixed(2)} commits/week → ${Math.min(weeklyRateForLogging / 3, 1) * 25}/25 points (3+ commits/week = max)`);
+
           // Analyze file churn
           const fileChurnData =
             this.activityAnalysisService.analyzeFileChurn(commitsForAnalysis);

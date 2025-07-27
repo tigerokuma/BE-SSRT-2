@@ -46,7 +46,10 @@ export class WatchlistRepository {
             analysis_date: 'desc'
           },
           select: {
-            activity_score: true
+            activity_score: true,
+            activity_factors: true,
+            weekly_commit_rate: true,
+            activity_heatmap: true
           }
         });
 
@@ -138,6 +141,9 @@ export class WatchlistRepository {
           ...item,
           alertCount,
           activityScore: latestActivity?.activity_score || null,
+          activityFactors: latestActivity?.activity_factors || null,
+          weeklyCommitRate: latestActivity?.weekly_commit_rate || null,
+          activityHeatmap: latestActivity?.activity_heatmap || null,
           busFactor: latestBusFactor?.bus_factor || null,
           healthScore: latestHealth?.overall_health_score || null,
           trackingDuration,
