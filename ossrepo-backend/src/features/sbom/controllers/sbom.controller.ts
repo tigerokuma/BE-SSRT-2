@@ -8,6 +8,6 @@ export class SbomController {
   
   @Get('test-generate-SBOM')
   async testGenSbom(@Param() gitUrl: string) {
-    return await this.sbomService.addSbom("https://github.com/aboutcode-org/scancode-toolkit.git");//gitUrl);
+    return await this.sbomService.addSbom(gitUrl);
   }
 }

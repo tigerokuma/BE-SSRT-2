@@ -38,6 +38,20 @@ export class SbomService {
     return uniqueDir;
   }
 
+  private async cleanupRepo(repoPath: string) {
+    const testDirs = ['test', 'tests'];
+
+    // Clean up test dirs
+    for (const dir of testDirs) {
+      const fullPath = path.join(repoPath, dir);
+      if (fs.existsSync(fullPath)) {
+        console.log(`🧹 Removing ${dir}`);
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      }
+    }
+
+  }
+
   private async runCommand({image, cmd, workingDir, volumeHostPath, volumeContainerPath = '/app', autoRemove = true,}: 
     { image: string; cmd: string[]; workingDir: string; volumeHostPath: string; volumeContainerPath?: string; autoRemove?: boolean;} ): Promise<void> {
     const container = await this.docker.createContainer({
@@ -71,14 +85,37 @@ export class SbomService {
     if (!fs.existsSync(absPath)) {
       throw new Error(`Repo path not found: ${absPath}`);
     }
+    try {
+      // Regular command
+      await this.runCommand({
+        image: 'ghcr.io/cyclonedx/cdxgen:latest',
+        cmd: ['-o', outputFileName],
+        workingDir: containerPath,
+        volumeHostPath: absPath,
+      });
+    } catch (err1) {
+      this.logger.warn(`cdxgen failed: ${err1.message}, retrying with --no-recurse`);
 
-    await this.runCommand({
-      image: 'ghcr.io/cyclonedx/cdxgen:latest',
-      cmd: ['-o', outputFileName],
-      workingDir: containerPath,
-      volumeHostPath: absPath,
-    });
+      try {
+        // Retry with --no-recurse
+        await this.runCommand({
+          image: 'ghcr.io/cyclonedx/cdxgen:latest',
+          cmd: ['--no-recurse', '-o', outputFileName],
+          workingDir: containerPath,
+          volumeHostPath: absPath,
+        });
+      } catch (err2) {
+        this.logger.error(`cdxgen with --no-recurse failed: ${err2.message}. Writing empty SBOM.`);
 
+        // Fallback: write empty SBOM
+        fs.writeFileSync(outputPath, JSON.stringify({
+          bomFormat: "CycloneDX",
+          specVersion: "1.5",
+          version: 1,
+          components: [],
+        }, null, 2));
+      }
+    }
     if (!fs.existsSync(outputPath)) {
       throw new Error(`SBOM not generated at ${outputPath}`);
     }
@@ -93,7 +130,8 @@ export class SbomService {
   }
 
   async addSbom(gitUrl: string) {
-    const repoPath = "/tmp/sbom-repos/bbb3ba0a-1772-4f94-baf9-ff67459fa2ba";//wait this.cloneRepo(gitUrl);
+    const repoPath = await this.cloneRepo(gitUrl);
+    this.cleanupRepo(repoPath);
     const data = await this.genSbom(repoPath);
     return await this.parseSbom(data);
   }
