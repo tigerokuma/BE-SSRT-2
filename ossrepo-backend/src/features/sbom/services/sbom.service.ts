@@ -1,17 +1,24 @@
-import { Injectable, Body } from '@nestjs/common';
+import { Injectable, Logger, Body } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
 import { NotFoundException } from '@nestjs/common';
 import { CreateSbomDto } from '../dto/sbom.dto';
 import { simpleGit } from 'simple-git';
 import { randomUUID } from 'crypto';
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import * as os from 'os';
+import * as Docker from 'dockerode';
+
 
 
 @Injectable()
 export class SbomService {
+
+  private readonly logger = new Logger(SbomService.name);
+  private readonly docker = new Docker.default();
+
+
   constructor(private readonly sbomRepo: SbomRepository) {}
 
   async cloneRepo(gitUrl: string, targetDir = '/tmp/sbom-repos'): Promise<string> {
@@ -28,41 +35,56 @@ export class SbomService {
       console.error('Error cloning repo:', err);
       throw err;
     }
-    return targetDir;
+    return uniqueDir;
   }
 
-  runCommand(cmd: string, args: string[]): Promise<void> {
-    console.log('Generating SBOM.');
-    return new Promise((resolve, reject) => {
-      const proc = spawn(cmd, args, { stdio: 'inherit' });
-
-      proc.on('error', reject);
-
-      proc.on('close', (code) => {
-        if (code !== 0) {
-          return reject(new Error(`${cmd} exited with code ${code}`));
-        }
-        resolve();
-      });
+  private async runCommand({image, cmd, workingDir, volumeHostPath, volumeContainerPath = '/app', autoRemove = true,}: 
+    { image: string; cmd: string[]; workingDir: string; volumeHostPath: string; volumeContainerPath?: string; autoRemove?: boolean;} ): Promise<void> {
+    const container = await this.docker.createContainer({
+      Image: image, Cmd: cmd, WorkingDir: workingDir,
+      HostConfig: {
+        Binds: [`${volumeHostPath}:${volumeContainerPath}`],
+        AutoRemove: autoRemove,
+      },
     });
+
+    this.logger.log(`Running container with command: ${cmd.join(' ')}`);
+    await container.start();
+
+    const stream = await container.logs({ stdout: true, stderr: true, follow: true });
+    stream.on('data', (chunk) => this.logger.debug(chunk.toString()));
+
+    const result = await container.wait();
+    if (result.StatusCode !== 0) {
+      throw new Error(`Container exited with code ${result.StatusCode}`);
+    }
   }
+
 
 
   async genSbom(repoPath: string): Promise<string> {
-    const outputPath = path.resolve(repoPath, 'sbom.json');
+    const absPath = path.resolve(repoPath);
+    const outputFileName = 'sbom-output1.json';
+    const containerPath = '/app';
+    const outputPath = path.join(absPath, outputFileName);
 
-    await this.runCommand('npx', ['cdxgen', repoPath, '-o', outputPath]);
-    console.log('Generated SBOM.');
-    try {
-      console.log('Reading output');
-      const bomJson = await fs.readFile(outputPath, 'utf-8');
-      console.log('Finished reading output.');
-      return bomJson;
-    } catch (err) {
-      console.log('New Error');
-      throw new Error(`Failed to read generated SBOM at ${outputPath}`);
+    if (!fs.existsSync(absPath)) {
+      throw new Error(`Repo path not found: ${absPath}`);
     }
 
+    await this.runCommand({
+      image: 'ghcr.io/cyclonedx/cdxgen:latest',
+      cmd: ['-o', outputFileName],
+      workingDir: containerPath,
+      volumeHostPath: absPath,
+    });
+
+    if (!fs.existsSync(outputPath)) {
+      throw new Error(`SBOM not generated at ${outputPath}`);
+    }
+
+    this.logger.log('SBOM generation successful');
+    return fs.readFileSync(outputPath, 'utf-8');
   }
 
   async parseSbom(data: string) {
@@ -71,7 +93,7 @@ export class SbomService {
   }
 
   async addSbom(gitUrl: string) {
-    const repoPath = await this.cloneRepo(gitUrl);
+    const repoPath = "/tmp/sbom-repos/bbb3ba0a-1772-4f94-baf9-ff67459fa2ba";//wait this.cloneRepo(gitUrl);
     const data = await this.genSbom(repoPath);
     return await this.parseSbom(data);
   }

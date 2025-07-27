@@ -6,8 +6,8 @@ import { CreateSbomDto } from '../dto/sbom.dto';
 export class SbomController {
   constructor(private readonly sbomService: SbomService) {}
   
-  @Get('test-generateSBOM')
+  @Get('test-generate-SBOM')
   async testGenSbom(@Param() gitUrl: string) {
-    return await this.sbomService.addSbom(gitUrl);
+    return await this.sbomService.addSbom("https://github.com/aboutcode-org/scancode-toolkit.git");//gitUrl);
   }
 }
