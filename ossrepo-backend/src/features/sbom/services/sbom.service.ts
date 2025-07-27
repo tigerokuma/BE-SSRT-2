@@ -116,15 +116,26 @@ export class SbomService {
         }, null, 2));
       }
     }
+    
     if (!fs.existsSync(outputPath)) {
-      throw new Error(`SBOM not generated at ${outputPath}`);
+      this.logger.log('SBOM generation was unsuccessful');
     }
 
     this.logger.log('SBOM generation successful');
     return fs.readFileSync(outputPath, 'utf-8');
   }
 
-  async parseSbom(data: string) {
+
+  private async cleanupTempFolder(repoPath: string) {
+    try {
+      await fs.promises.rm(repoPath, { recursive: true, force: true });
+      this.logger.log(`✅ Cleaned up temporary folder: ${path}`);
+    } catch (err) {
+      this.logger.error(`⚠️ Failed to clean up temp folder: ${err.message}`);
+    }
+
+  }
+  private parseSbom(data: string) {
     console.log('Parsing data.');
     return JSON.parse(data);
   }
@@ -133,7 +144,10 @@ export class SbomService {
     const repoPath = await this.cloneRepo(gitUrl);
     this.cleanupRepo(repoPath);
     const data = await this.genSbom(repoPath);
-    return await this.parseSbom(data);
+    const jsonData = await this.parseSbom(data);
+    this.cleanupTempFolder(repoPath);
+    
+    return jsonData;
   }
 
 
