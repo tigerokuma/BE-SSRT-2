@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -435,5 +435,96 @@ export class ActivityService {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  async updateUserWatchlistAlerts(userWatchlistId: string, alerts: any): Promise<void> {
+    await this.prisma.userWatchlist.update({
+      where: { id: userWatchlistId },
+      data: { alerts: JSON.stringify(alerts) }
+    })
+  }
+
+  async removeFromWatchlist(userWatchlistId: string): Promise<void> {
+    // First, get the user watchlist to check if it's the only one for this user
+    const userWatchlist = await this.prisma.userWatchlist.findUnique({
+      where: { id: userWatchlistId },
+      include: {
+        user: true,
+        watchlist: {
+          include: {
+            package: true
+          }
+        }
+      }
+    })
+
+    if (!userWatchlist) {
+      throw new NotFoundException('User watchlist not found')
+    }
+
+    const userId = userWatchlist.user_id
+    const watchlistId = userWatchlist.watchlist_id
+
+    // Check if this is the only repository being watched by this user
+    const userWatchlistCount = await this.prisma.userWatchlist.count({
+      where: { user_id: userId }
+    })
+
+    // Delete the specific user watchlist entry
+    await this.prisma.userWatchlist.delete({
+      where: { id: userWatchlistId }
+    })
+
+    // If this was the only repository being watched, clean up all related data
+    if (userWatchlistCount === 1) {
+      console.log(`🧹 Cleaning up all data for user ${userId} as this was their only watched repository`)
+
+      // Delete all logs for this watchlist
+      await this.prisma.log.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all health data for this watchlist
+      await this.prisma.healthData.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all contributor stats for this watchlist
+      await this.prisma.contributorStats.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all repository stats for this watchlist
+      await this.prisma.repoStats.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all graph snapshots for this watchlist (using repo_id which should match package_id)
+      await this.prisma.graphSnapshot.deleteMany({
+        where: { repo_id: userWatchlist.watchlist.package_id }
+      })
+
+      // Delete all alerts for this user watchlist
+      await this.prisma.alert.deleteMany({
+        where: { id: userWatchlistId }
+      })
+
+      // Delete all alert triggers for this user watchlist
+      await this.prisma.alertTriggered.deleteMany({
+        where: { user_watchlist_id: userWatchlistId }
+      })
+
+      // Delete the watchlist itself
+      await this.prisma.watchlist.delete({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete the user itself
+      await this.prisma.user.delete({
+        where: { user_id: userId }
+      })
+    }
+
+    console.log(`✅ Successfully removed repository ${userWatchlist.watchlist.package.repo_name} from watchlist for user ${userId}`)
   }
 }

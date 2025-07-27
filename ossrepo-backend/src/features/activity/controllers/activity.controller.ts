@@ -3,11 +3,15 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Param,
   Logger,
   Query,
   HttpException,
   HttpStatus,
+  Delete,
+  NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { CommitSummaryDto, CommitSummaryResponseDto } from '../dto/commit-summary.dto';
@@ -365,9 +369,29 @@ export class ActivityController {
     this.logger.log(`🤖 Generating commit summary for watchlist ${watchlistId} (${dto.commitCount || 10} commits)`);
 
     try {
+      // First, try to find the UserWatchlist record to get the actual watchlist_id
+      let actualWatchlistId = watchlistId;
+      
+      // Check if this is a user watchlist ID
+      if (watchlistId.includes('user_watchlist_')) {
+        const userWatchlist = await this.prisma.userWatchlist.findUnique({
+          where: { id: watchlistId },
+          select: { watchlist_id: true },
+        });
+
+        if (userWatchlist) {
+          actualWatchlistId = userWatchlist.watchlist_id;
+          this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
+        } else {
+          this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
+        }
+      }
+
+      this.logger.log(`🔍 Looking for watchlist with ID: ${actualWatchlistId}`);
+
       // Verify the watchlist exists and get repository info
       const watchlist = await this.prisma.watchlist.findUnique({
-        where: { watchlist_id: watchlistId },
+        where: { watchlist_id: actualWatchlistId },
         include: {
           package: true,
         },
@@ -383,7 +407,7 @@ export class ActivityController {
       // Get recent commits from the database
       const commits = await this.prisma.log.findMany({
         where: {
-          watchlist_id: watchlistId,
+          watchlist_id: actualWatchlistId,
           event_type: 'COMMIT',
         },
         orderBy: { timestamp: 'desc' },
@@ -505,8 +529,28 @@ export class ActivityController {
   async getContributorStats(@Param('watchlistId') watchlistId: string) {
     this.logger.log(`📊 Getting contributor stats for watchlist ${watchlistId}`);
 
+    // First, try to find the UserWatchlist record to get the actual watchlist_id
+    let actualWatchlistId = watchlistId;
+    
+    // Check if this is a user watchlist ID
+    if (watchlistId.includes('user_watchlist_')) {
+      const userWatchlist = await this.prisma.userWatchlist.findUnique({
+        where: { id: watchlistId },
+        select: { watchlist_id: true },
+      });
+
+      if (userWatchlist) {
+        actualWatchlistId = userWatchlist.watchlist_id;
+        this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
+      } else {
+        this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
+      }
+    }
+
+    this.logger.log(`🔍 Looking for contributor stats with watchlist ID: ${actualWatchlistId}`);
+
     const contributorStats = await this.prisma.contributorStats.findMany({
-      where: { watchlist_id: watchlistId },
+      where: { watchlist_id: actualWatchlistId },
       orderBy: { total_commits: 'desc' },
     });
 
@@ -537,8 +581,28 @@ export class ActivityController {
   async getRepoStats(@Param('watchlistId') watchlistId: string) {
     this.logger.log(`📊 Getting repo stats for watchlist ${watchlistId}`);
 
+    // First, try to find the UserWatchlist record to get the actual watchlist_id
+    let actualWatchlistId = watchlistId;
+    
+    // Check if this is a user watchlist ID
+    if (watchlistId.includes('user_watchlist_')) {
+      const userWatchlist = await this.prisma.userWatchlist.findUnique({
+        where: { id: watchlistId },
+        select: { watchlist_id: true },
+      });
+
+      if (userWatchlist) {
+        actualWatchlistId = userWatchlist.watchlist_id;
+        this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
+      } else {
+        this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
+      }
+    }
+
+    this.logger.log(`🔍 Looking for repo stats with watchlist ID: ${actualWatchlistId}`);
+
     const repoStats = await this.prisma.repoStats.findUnique({
-      where: { watchlist_id: watchlistId },
+      where: { watchlist_id: actualWatchlistId },
     });
 
     if (!repoStats) {
@@ -558,6 +622,141 @@ export class ActivityController {
       typical_days_active: repoStats.typical_days_active,
       last_updated: repoStats.last_updated,
     };
+  }
+
+  @Get('watchlist/:watchlistId/commits')
+  @ApiOperation({
+    summary: 'Get recent commits for a watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Recent commits retrieved successfully',
+  })
+  async getRecentCommits(
+    @Param('watchlistId') watchlistId: string,
+    @Query('limit') limit?: number,
+  ) {
+    this.logger.log(`📝 Getting recent commits for watchlist ${watchlistId} (limit: ${limit || 50})`);
+
+    try {
+      // First, try to find the UserWatchlist record to get the actual watchlist_id
+      let actualWatchlistId = watchlistId;
+      
+      // Check if this is a user watchlist ID
+      if (watchlistId.includes('user_watchlist_')) {
+        const userWatchlist = await this.prisma.userWatchlist.findUnique({
+          where: { id: watchlistId },
+          select: { watchlist_id: true },
+        });
+
+        if (userWatchlist) {
+          actualWatchlistId = userWatchlist.watchlist_id;
+          this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
+        } else {
+          this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
+        }
+      }
+
+      this.logger.log(`🔍 Looking for watchlist with ID: ${actualWatchlistId}`);
+
+      // Verify the watchlist exists
+      const watchlist = await this.prisma.watchlist.findUnique({
+        where: { watchlist_id: actualWatchlistId },
+        include: {
+          package: true,
+        },
+      });
+
+      if (!watchlist) {
+        throw new HttpException(
+          `Watchlist ${watchlistId} not found`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Get recent commits from the database
+      const commits = await this.prisma.log.findMany({
+        where: {
+          watchlist_id: actualWatchlistId,
+          event_type: 'COMMIT',
+        },
+        orderBy: { timestamp: 'desc' },
+        take: limit || 50,
+        select: {
+          event_id: true,
+          actor: true,
+          timestamp: true,
+          payload: true,
+          lines_added: true,
+          lines_deleted: true,
+          files_changed: true,
+        },
+      });
+
+      // Get AI-detected alerts for this watchlist
+      const aiAlerts = await this.prisma.alertTriggered.findMany({
+        where: {
+          watchlist_id: actualWatchlistId,
+          metric: 'ai_powered_anomaly_detection', // Filter for AI detection alerts
+        },
+        select: {
+          commit_sha: true,
+          description: true,
+          alert_level: true,
+          details_json: true,
+        },
+      });
+
+      // Create a map of commit SHA to AI alert details
+      const aiAlertMap = new Map();
+      aiAlerts.forEach(alert => {
+        aiAlertMap.set(alert.commit_sha, {
+          description: alert.description,
+          alertLevel: alert.alert_level,
+          details: alert.details_json,
+        });
+      });
+
+      // Transform commits to frontend format
+      const transformedCommits = commits.map((commit) => {
+        const payload = commit.payload as any;
+        const timeAgo = this.getTimeAgo(commit.timestamp);
+        const commitSha = payload?.sha || commit.event_id.replace('commit_', '');
+        
+        // Check if this commit has an AI alert
+        const aiAlert = aiAlertMap.get(commitSha);
+        const isSuspicious = !!aiAlert;
+        const suspiciousReason = aiAlert?.description || '';
+        
+        return {
+          id: commit.event_id,
+          message: payload?.message || 'No message',
+          author: commit.actor,
+          time: timeAgo,
+          avatar: '/placeholder-user.jpg', // Default avatar
+          initials: this.getInitials(commit.actor),
+          linesAdded: payload?.lines_added || commit.lines_added || 0,
+          linesDeleted: payload?.lines_deleted || commit.lines_deleted || 0,
+          filesChanged: payload?.files_changed?.length || commit.files_changed || 0,
+          isSuspicious,
+          suspiciousReason,
+          sha: commitSha,
+        };
+      });
+
+      return {
+        watchlist_id: actualWatchlistId,
+        commits: transformedCommits,
+        total_count: transformedCommits.length,
+        repository_name: watchlist.package.package_name,
+      };
+    } catch (error) {
+      this.logger.error(`❌ Failed to get recent commits: ${error.message}`);
+      throw new HttpException(
+        `Failed to get recent commits: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   @Post('watchlist/:watchlistId/calculate-stats')
@@ -631,7 +830,6 @@ export class ActivityController {
     description: 'Alerts retrieved successfully',
   })
   async getAlerts(@Param('userWatchlistId') userWatchlistId: string) {
-    this.logger.log(`📊 Getting alerts for user watchlist ${userWatchlistId}`);
 
     try {
       const alerts = await this.prisma.alertTriggered.findMany({
@@ -660,6 +858,130 @@ export class ActivityController {
       this.logger.error(`Error getting alerts: ${error.message}`);
       throw new HttpException(
         `Failed to get alerts: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Patch('user-watchlist/:userWatchlistId/alerts')
+  @ApiOperation({
+    summary: 'Update alert settings for a user watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Alert settings updated successfully',
+  })
+  async updateAlertSettings(
+    @Param('userWatchlistId') userWatchlistId: string,
+    @Body() dto: { alerts: any }
+  ) {
+    this.logger.log(`📝 Updating alert settings for user watchlist ${userWatchlistId}`);
+
+    try {
+      // Find the user watchlist entry
+      const userWatchlist = await this.prisma.userWatchlist.findUnique({
+        where: { id: userWatchlistId },
+      });
+
+      if (!userWatchlist) {
+        throw new HttpException(
+          'User watchlist not found',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Update the alerts field
+      const updatedUserWatchlist = await this.prisma.userWatchlist.update({
+        where: { id: userWatchlistId },
+        data: {
+          alerts: JSON.stringify(dto.alerts),
+        },
+      });
+
+      this.logger.log(`✅ Alert settings updated for user watchlist ${userWatchlistId}`);
+
+      return {
+        message: 'Alert settings updated successfully',
+        userWatchlistId,
+        alerts: dto.alerts,
+      };
+    } catch (error) {
+      this.logger.error(`Error updating alert settings: ${error.message}`);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to update alert settings: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Delete('user-watchlist/:userWatchlistId')
+  async removeFromWatchlist(
+    @Param('userWatchlistId') userWatchlistId: string
+  ) {
+    this.logger.log(`📝 Removing user watchlist ${userWatchlistId}`);
+    try {
+      await this.activityService.removeFromWatchlist(userWatchlistId);
+      return { message: 'Repository removed from watchlist successfully' };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to remove repository from watchlist');
+    }
+  }
+
+  @Patch('alerts/:alertId/acknowledge')
+  @ApiOperation({
+    summary: 'Acknowledge an alert',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Alert acknowledged successfully',
+  })
+  async acknowledgeAlert(@Param('alertId') alertId: string) {
+    this.logger.log(`📝 Acknowledging alert ${alertId}`);
+
+    try {
+      await this.prisma.alertTriggered.update({
+        where: { id: alertId },
+        data: { acknowledged_at: new Date() },
+      });
+
+      return { success: true, message: 'Alert acknowledged successfully' };
+    } catch (error) {
+      this.logger.error(`Error acknowledging alert: ${error.message}`);
+      throw new HttpException(
+        `Failed to acknowledge alert: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Patch('alerts/:alertId/resolve')
+  @ApiOperation({
+    summary: 'Resolve an alert',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Alert resolved successfully',
+  })
+  async resolveAlert(@Param('alertId') alertId: string) {
+    this.logger.log(`✅ Resolving alert ${alertId}`);
+
+    try {
+      await this.prisma.alertTriggered.update({
+        where: { id: alertId },
+        data: { resolved_at: new Date() },
+      });
+
+      return { success: true, message: 'Alert resolved successfully' };
+    } catch (error) {
+      this.logger.error(`Error resolving alert: ${error.message}`);
+      throw new HttpException(
+        `Failed to resolve alert: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -799,5 +1121,55 @@ export class ActivityController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  private getTimeAgo(date: Date): string {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) {
+      return `${diffInSeconds} seconds ago`;
+    }
+
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    if (diffInMinutes < 60) {
+      return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+    }
+
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) {
+      return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+    }
+
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 7) {
+      return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+    }
+
+    const diffInWeeks = Math.floor(diffInDays / 7);
+    if (diffInWeeks < 4) {
+      return `${diffInWeeks} week${diffInWeeks > 1 ? 's' : ''} ago`;
+    }
+
+    const diffInMonths = Math.floor(diffInDays / 30);
+    if (diffInMonths < 12) {
+      return `${diffInMonths} month${diffInMonths > 1 ? 's' : ''} ago`;
+    }
+
+    const diffInYears = Math.floor(diffInDays / 365);
+    return `${diffInYears} year${diffInYears > 1 ? 's' : ''} ago`;
+  }
+
+  private getInitials(name: string): string {
+    if (!name) return 'U';
+    
+    const parts = name.split(' ').filter(part => part.length > 0);
+    if (parts.length === 0) return 'U';
+    
+    if (parts.length === 1) {
+      return parts[0].substring(0, 2).toUpperCase();
+    }
+    
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 }
