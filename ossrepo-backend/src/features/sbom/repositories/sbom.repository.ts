@@ -14,7 +14,8 @@ export class SbomRepository {
     return true; //this.prisma.sbom.findUnique({ where: { id } });
   }
 
-  async getAllSboms(uwlId: string) {
+  async getFollowSboms(uwlId: string) {
     return true; //this.prisma.
   }
+
 }

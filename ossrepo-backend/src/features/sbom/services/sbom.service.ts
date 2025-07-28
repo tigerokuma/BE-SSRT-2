@@ -6,8 +6,6 @@ import { simpleGit } from 'simple-git';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import * as os from 'os';
 import * as Docker from 'dockerode';
 
 
@@ -73,8 +71,6 @@ export class SbomService {
       throw new Error(`Container exited with code ${result.StatusCode}`);
     }
   }
-
-
 
   async genSbom(repoPath: string): Promise<string> {
     const absPath = path.resolve(repoPath);
@@ -155,6 +151,30 @@ export class SbomService {
     const sbom = await this.sbomRepo.findById(id);
     if (!sbom) throw new NotFoundException('SBOM not found');
     return sbom;
+  }
+
+  async mergeSbom(uwlId: string) {
+    const sboms = [
+      "sbom0.json",
+      "sbom1.json"
+    ] //await this.sbomRepo.getFollowSboms(uwlId);
+
+    const absPath = "/tmp/sbom-repos"
+    const containerPath = '/app';
+
+    const data = await this.runCommand({
+      image: 'cyclonedx-cli',
+      cmd: ['merge','--input-files', ...sboms.map(f => `${containerPath}/${f}`), '--output-file', `merged.json`],
+      workingDir: containerPath,
+      volumeHostPath: absPath,
+    });
+
+    const mergedPath = path.join(absPath, 'merged.json');
+    const mergedData = await fs.promises.readFile(mergedPath, 'utf-8');
+
+    // Now mergedData contains the merged SBOM JSON as a string
+    return await mergedData;
+
   }
 
 

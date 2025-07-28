@@ -1,6 +1,5 @@
 import { Body, Controller, Get, Post, Param, Query } from '@nestjs/common';
 import { SbomService } from  '../services/sbom.service';
-import { CreateSbomDto } from '../dto/sbom.dto';
 
 @Controller('sbom')
 export class SbomController {
@@ -9,5 +8,10 @@ export class SbomController {
   @Get('test-generate-SBOM')
   async testGenSbom(@Param() gitUrl: string) {
     return await this.sbomService.addSbom(gitUrl);
+  }
+
+  @Get('test-merge-SBOM')
+  async testMerSbom(@Param() uwlId: string) {
+    return await this.sbomService.mergeSbom(uwlId);
   }
 }
