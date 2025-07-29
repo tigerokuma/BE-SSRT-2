@@ -22,6 +22,7 @@ model User {
   userWatchlists    UserWatchlist[]
   email_confirmed   Boolean            @default(false)
   EmailConfirmation EmailConfirmation?
+  sbom              UserWatchlistSbom?
 
   @@map("users")
 }
@@ -127,6 +128,7 @@ model Watchlist {
   contributorStats                 ContributorStats[]
   repoStats                        RepoStats?
   alertTriggered                   AlertTriggered[]
+  sbom                             WatchlistSbom?
 }
 
 model UserWatchlist {
@@ -195,7 +197,7 @@ model ActivityData {
   activity_score        Int      // 0-100
   activity_level        String   // LOW, MODERATE, HIGH, VERY_HIGH
   weekly_commit_rate    Decimal  @db.Decimal(5, 2) // Average commits per week (e.g., 2.50)
-  total_files_analyzed  Int
+  total_files_analyzed  Int      @default(0)
   file_churn_data       Json?    // Array of file churn objects
   activity_heatmap      Json?    // Activity heatmap data
   peak_activity         Json?    // Peak activity information
@@ -515,4 +517,26 @@ model TempJira {
   expires_at      DateTime
 
   @@unique([webtrigger_url, project_key])
+}
+
+model WatchlistSbom {
+  id                   String    @id @default(uuid())
+  watchlist_id         String    @unique
+  sbom                 Json
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now())
+
+  watchlist            Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+  @@index([watchlist_id])
+}
+
+model UserWatchlistSbom {
+  id                   String    @id @default(uuid())
+  user_id              String    @unique
+  sbom                 Json
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now())
+
+  user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  @@index([user_id])
 }

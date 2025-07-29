@@ -1,14 +1,20 @@
-import { IsString, IsOptional } from "class-validator";
+import { IsString, IsOptional, IsJSON, IsDate } from "class-validator";
 
 
 export class CreateSbomDto {
   @IsString()
-  name: string;
+  id: string;
 
-  @IsString()
-  repositoryUrl: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
+  sbom: any;
 }
+
+export class UpdateSbomDto {
+  @IsString()
+  id: string;
+
+  sbom: any;
+
+  @IsDate()
+  updated_at: Date;
+}
+

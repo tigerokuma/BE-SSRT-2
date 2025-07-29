@@ -5,13 +5,23 @@ import { SbomService } from  '../services/sbom.service';
 export class SbomController {
   constructor(private readonly sbomService: SbomService) {}
   
-  @Get('test-generate-SBOM')
-  async testGenSbom(@Param() gitUrl: string) {
-    return await this.sbomService.addSbom(gitUrl);
+  @Post('generate-SBOM')
+  async genSbom(@Param() watchlist_id: string) {
+    return await this.sbomService.addSbom(watchlist_id);
   }
 
-  @Get('test-merge-SBOM')
-  async testMerSbom(@Param() uwlId: string) {
-    return await this.sbomService.mergeSbom(uwlId);
+  @Get('watchlist/:watchlist_id')
+  async getWatchlistSbom(@Param('watchlist_id') watchlist_id: string) {
+    return this.sbomService.getWatchSbom(watchlist_id);
+  }
+
+  @Post('merge-SBOM')
+  async mergeSbom(@Param() user_id: string) {
+    return await this.sbomService.mergeSbom(user_id);
+  }
+
+  @Get('user/:user_id')
+  async getUserSbom(@Param('user_id') user_id: string) {
+    return this.sbomService.getUserSbom(user_id);
   }
 }
