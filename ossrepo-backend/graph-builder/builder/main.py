@@ -47,7 +47,6 @@ def run_build_task(req: BuildRequest):
             req.taskId,
             req.commitId,
         )
-        update_task_status(req.taskId, "completed", "Build completed successfully")
 
     except subprocess.CalledProcessError as e:
         logging.error(f"Git error: {e}")

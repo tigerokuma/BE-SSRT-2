@@ -12,3 +12,4 @@ tree_sitter_cpp
 tree_sitter_go
 tree_sitter_rust
 tree_sitter_scala
+neo4j
