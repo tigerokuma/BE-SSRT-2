@@ -4,6 +4,8 @@ import { GitHubRepositoriesRepository } from '../repositories/github-repositorie
 import { NPMService } from './npm.service';
 import { GitHubService } from './github.service';
 import { GitHubRepository } from 'generated/prisma';
+import axios from 'axios';
+import { OsvVulnerabilityService } from './osv-vulnerability.service';
 
 @Injectable()
 export class PackageSearchService {
@@ -11,8 +13,26 @@ export class PackageSearchService {
     private readonly npmRepo: NpmPackagesRepository,
     private readonly githubRepo: GitHubRepositoriesRepository,
     private readonly npmService: NPMService,
-    private readonly githubService: GitHubService
+    private readonly githubService: GitHubService,
+    private readonly osvVulnerabilityService: OsvVulnerabilityService
   ) {}
+
+  // --- Vulnerability and Provenance helpers ---
+  private async fetchNpmAdvisories(packageName: string) {
+    try {
+      const res = await axios.get(
+        `https://registry.npmjs.org/-/npm/v1/security/advisories?module_name=${encodeURIComponent(packageName)}`
+      );
+      // API returns { objects: [ ... ] }
+      return (res.data.objects || []).map((a: any) => ({
+        severity: a.severity,
+        title: a.title,
+        url: a.url
+      }));
+    } catch {
+      return [];
+    }
+  }
 
   async searchPackages(name: string) {
     console.log(`================== PARALLEL SEARCH: Searching for packages: ${name} ==================`);
@@ -82,7 +102,17 @@ export class PackageSearchService {
       });
       
       console.log(`Returning ${sorted.length} NPM packages (GitHub data will be fetched separately)`);
-      return sorted.slice(0, 10);
+      // Fetch vulnerabilities and provenance for each package (in parallel)
+      const withSecurity = await Promise.all(sorted.slice(0, 10).map(async pkg => {
+        const vulnerabilities = await this.fetchNpmAdvisories(pkg.package_name || '');
+        const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
+        return {
+          ...pkg,
+          vulnerabilities,
+          osv_vulnerabilities
+        };
+      }));
+      return withSecurity;
       
     } catch (error) {
       console.warn('NPM search failed:', error.message);
@@ -141,9 +171,13 @@ export class PackageSearchService {
     }
     
     // 3. Manually combine NPM + GitHub data
+    // Add vulnerabilities and provenance
+    const vulnerabilities = await this.fetchNpmAdvisories(npmPackage.package_name || '');
     return {
       ...npmPackage,
-      githubRepo: githubData
+      githubRepo: githubData,
+      vulnerabilities,
+      // No oss_verified, oss_attestation_url
     };
   }
 

@@ -35,7 +35,9 @@ export class PackagesService {
       maintainers: pkg.maintainers || [],
       last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
       version: pkg.version || '',
-      license: pkg.license || ''
+      license: pkg.license || '',
+      vulnerabilities: pkg.vulnerabilities || [],
+      osv_vulnerabilities: pkg.osv_vulnerabilities || []
     };
   }
 
@@ -51,14 +53,13 @@ export class PackagesService {
       last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
       version: pkg.version || '',
       license: pkg.license || '',
-      
-      // Additional detail fields
+      vulnerabilities: pkg.vulnerabilities || [],
+      osv_vulnerabilities: pkg.osv_vulnerabilities || [],
       package_id: pkg.package_id || '',
       published: pkg.published_at ? new Date(pkg.published_at).toISOString().split('T')[0] : '',
       published_at: pkg.published_at,
       risk_score: pkg.risk_score || 0,
       npm_url: pkg.npm_url || '',
-      
       // Optional GitHub fields (only included if available)
       ...(pkg.repo_url && { repo_url: pkg.repo_url }),
       ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),

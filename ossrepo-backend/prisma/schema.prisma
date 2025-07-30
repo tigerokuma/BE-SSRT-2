@@ -43,6 +43,8 @@ model NpmPackage {
   risk_score   Float?
   repo_url     String? // Link to GitHub repo (no foreign key constraint)
   fetched_at   DateTime  @default(now())
+  osv_vulnerabilities Json?
+  has_osvvulnerabilities Boolean @default(false)
 
   @@map("npm_packages")
 }
