@@ -27,11 +27,6 @@ export class JiraService {
     this.jiraRepository.insertTempInfo(dataWithExpiry);
   }
 
-
-  async getUserWatchlists(uwlId: any) {
-    return await this.jiraRepository.getUserWatchlist(uwlId);
-  }
-
   async checkTempJiraInfo(code: string) {
     return await this.jiraRepository.checkCode(code);
   }
@@ -44,7 +39,7 @@ export class JiraService {
     }
 
     this.jiraRepository.insertJiraInfo({
-        userId: insertJira.uwlId,
+        userId: insertJira.user_id,
         webtriggerUrl: jiraInfo.webtrigger_url,
         projectKey: jiraInfo.project_key!,
     })

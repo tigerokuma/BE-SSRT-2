@@ -1,41 +1,32 @@
 import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
 import { JiraService } from  '../services/jira.service';
 import { Response } from 'express';
+import { JiraIssue } from '../dto/jira.dto';
 
 @Controller('jira')
 export class JiraController {
-  private readonly id: string; // change this when a user login system has been implemented
+  private readonly user: string; // change this when a user login system has been implemented
   constructor(private readonly jiraService: JiraService) {
-    this.id = 'user_watchlist_henry_watchlist_clerk_javascript_1752958451379';
+    this.user = 'user-123';
   }
 
   @Get('oAuth')
-  async jiraAuth(
-    @Query('code') code: string,
-    @Res() res: Response 
+  async jiraAuth( 
+    @Query('code') code: string, @Res() res: Response
   ) {
-
     const record = await this.jiraService.checkTempJiraInfo(code);
     if (!record) {
       return res.status(410).send('Code expired.');
     }
     
-    const uwlId = this.id;
+    const user = this.user;
 
-    if (!uwlId) {
+    if (!user) {
       // Not logged in: Redirect to login page
       return res.redirect(`/auth/login?code=${code}`);
     }
 
     return res.redirect(`/jira/user-watchlist?code=${code}`);
-  }
-
-  @Get('user-watchlist')
-  async selectUWL(
-    @Query('code') code: string,
-  ) {
-    const uwlId = 'henry';
-    return await this.jiraService.getUserWatchlists(uwlId);
   }
 
   @Get('gen-code')
@@ -45,7 +36,7 @@ export class JiraController {
 
   @Post('link')
   async linkJira(
-    @Body('insertJira') insertJira: { uwlId: string, code: string}
+    @Body('insertJira') insertJira: { user_id: string, code: string}
   ) {
     return this.jiraService.linkProject(insertJira)
   }
@@ -62,10 +53,10 @@ export class JiraController {
   }
 
   @Post('issue')
-  createJiraIssue(body: any) 
+  createJiraIssue(jiraIssue: {userID: string, summary: string, description: string}) 
   {
     try{
-      return this.jiraService.createIssue(body);
+      return this.jiraService.createIssue(jiraIssue);
     } catch(err) {
       console.error('createJiraIssue error: ', err);
     }

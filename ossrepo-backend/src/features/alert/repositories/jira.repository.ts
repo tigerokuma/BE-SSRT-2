@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { JiraInsert } from '../dto/jira.dto';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 
 
 @Injectable()
@@ -60,7 +60,7 @@ constructor(private readonly prisma: PrismaService) {}
             webtrigger_url: dto.webtrigger_url,
             project_key: dto.project_key
             },
-            select: { userWatchlist: true }
+            select: { user: true }
         });
     }
 
