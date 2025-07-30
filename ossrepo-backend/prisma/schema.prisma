@@ -143,7 +143,6 @@ model UserWatchlist {
   user         User       @relation(fields: [user_id], references: [user_id])
   watchlist    Watchlist  @relation(fields: [watchlist_id], references: [watchlist_id])
   
-  Alert        Alert[]
   AlertTriggered AlertTriggered[]
 
   @@index([user_id])
@@ -288,32 +287,6 @@ model GraphExport {
   status     String
   actor      String?
   created_at DateTime  @default(now())
-}
-
-enum Risk {
-  LOW
-  MODERATE
-  HIGH
-  CRITICAL
-}
-
-enum Status {
-  OPEN
-  REVIEWED
-  CLOSED
-}
-
-model Alert {
-  alert_id      String
-  id            String
-  risk          Risk
-  status        Status
-  created_at    DateTime      @default(now())
-  title         String
-  description   String
-  userWatchlist UserWatchlist @relation(fields: [id], references: [id])
-
-  @@id([id, alert_id])
 }
 
 model AlertTriggered {
