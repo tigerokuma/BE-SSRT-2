@@ -51,7 +51,7 @@ export interface AISummaryResult {
 export class AISummaryService {
   private readonly logger = new Logger(AISummaryService.name);
   private readonly modelName = 'gemma2:2b'; // Fast, efficient 2B parameter model
-  private readonly maxSummaryLength = 200; // Characters
+  private readonly maxSummaryLength = 800; // Characters - increased for more comprehensive summaries
 
   constructor() {
     this.initializeModel();
@@ -150,7 +150,7 @@ Language: ${repoData.language || 'Unknown'}
 Bus Factor: ${repoData.busFactor || 'Unknown'}
 Recent Activity: ${cleanRecentCommits}
 
-Generate a 2-3 sentence summary of this repository highlighting what it does, its activity level, and notable characteristics. Keep under 200 characters.`;
+Generate a comprehensive 3-4 sentence summary of this repository highlighting what it does, its activity level, community health, and notable characteristics. Focus on practical insights for developers considering using this package. Keep under 800 characters.`;
 
     return context;
   }
@@ -367,7 +367,7 @@ Generate a 2-3 sentence summary of this repository highlighting what it does, it
     const uniqueAuthors = [...new Set(commits.map(c => c.author))];
     const dateRange = `${commits[commits.length - 1].timestamp.toISOString().split('T')[0]} to ${commits[0].timestamp.toISOString().split('T')[0]}`;
 
-    return `Analyze the following recent commits from the ${repoName} repository and provide a concise, informative summary (max 200 characters) that highlights:
+    return `Analyze the following recent commits from the ${repoName} repository and provide a comprehensive, informative summary (max 800 characters) that highlights:
 
 1. The main themes or areas of development
 2. Key changes or improvements made
