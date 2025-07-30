@@ -8,8 +8,8 @@ export class EmailController {
 
 
   @Post('send-confirmation')
-  sendConfirmation() {
-    return this.service.sendConfirmation();
+  sendConfirmation(@Body() user_id: string) {
+    return this.service.sendConfirmation(user_id);
   }
 
   @Get('confirm-email')

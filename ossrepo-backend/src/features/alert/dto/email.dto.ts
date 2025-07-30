@@ -1,11 +1,3 @@
-export class SendEmailParams {
-    rec_add: string;
-    rec_name: string;
-    subject: string;
-    html: string;
-    message: string;
-}
-
 export class ConfirmTokenInsert {
     user_id: string;
     token: string;
@@ -22,6 +14,7 @@ enum WaitValue {
 export class EmailTime {
     id: string;
     last_email_time: Date;
+    next_email_time: Date;
     wait_value: WaitValue;
     wait_unit: number;
 }

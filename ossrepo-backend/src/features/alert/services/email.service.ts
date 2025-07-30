@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
-import { SendEmailParams, ConfirmTokenInsert, EmailTime, EmailTimeInput } from '../dto/email.dto';
+import { ConfirmTokenInsert, EmailTime, EmailTimeInput } from '../dto/email.dto';
 import { randomUUID } from 'crypto';
 import { EmailRepository } from '../repositories/email.repository';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class EmailService{
@@ -28,26 +29,7 @@ export class EmailService{
     );
   }
 
-  async sendEmail(sendEmailParams: SendEmailParams) {
-    try {
-      const recipients = [ new Recipient(sendEmailParams.rec_add, sendEmailParams.rec_name) ];
-      const emailParams = new EmailParams()
-      .setFrom(this.sentFrom)
-      .setTo(recipients)
-      .setReplyTo(this.sentFrom)
-      .setSubject(sendEmailParams.subject)
-      .setHtml(sendEmailParams.html)
-      .setText(sendEmailParams.message);
-      await this.mailerSend.email.send(emailParams);
-    }
-    catch (error) {
-      console.error('Failed to send email.', error);
-      throw error;
-    }
-  }
-
-  async sendConfirmation() {
-    const user_id = 'henry';
+  async sendConfirmation(user_id) {
     const newToken = randomUUID();
     const confirmTokenInsert = new ConfirmTokenInsert();
     confirmTokenInsert.user_id = user_id;
@@ -56,7 +38,8 @@ export class EmailService{
 
     this.emailRepository.InsertToken(confirmTokenInsert);
 
-    const confirmUrl = process.env.EMAIL_CONFIRM_URL;
+    const confirmUrlBase = process.env.EMAIL_CONFIRM_URL;
+    const confirmUrl = `${confirmUrlBase}?token=${encodeURIComponent(newToken)}`;
     const email = await this.emailRepository.GetEmail(user_id);
     if(!email){
       throw new Error("Recipient email not defined");
@@ -73,7 +56,12 @@ export class EmailService{
       <p>Click <a href="${confirmUrl}">here</a> to confirm your email.</p>
     `)                                       
     .setText(`Hi ${user_id},\nConfirm your email: ${confirmUrl}`);
-    await this.mailerSend.email.send(emailParams);
+    try{
+      await this.mailerSend.email.send(emailParams);
+    }
+    catch{
+      console.log('email sent');
+    }
 
   }
 
@@ -86,33 +74,77 @@ export class EmailService{
     await this.emailRepository.DeleteFromToken(token);
   }
 
-  async addEmailTime(emailTimeInput: EmailTimeInput) {
-    const emailTime = new EmailTime();
-    emailTime.id = emailTimeInput.id;
-    emailTime.wait_unit = emailTimeInput.wait_unit;
-    emailTime.wait_value = emailTimeInput.wait_value;
+  @Cron('*/3 * * * *')
+  private async checkEmailTime() {
+    const emailTimes = await this.emailRepository.getEmailTimes();
+    for (const emailTime of emailTimes) {
+      const alerts = await this.emailRepository.getAlerts(
+        emailTime.id,
+        emailTime.last_email_time
+      );
 
-    const result = new Date(emailTimeInput.first_email_time);
+      const severityRank = { critical: 3, moderate: 2, mild: 1 };
+
+      const topAlerts = alerts.sort((a, b) => severityRank[b.alert_level] - severityRank[a.alert_level]).slice(0, 10);
+
+      // Format alerts into HTML
+      const alertHtml = topAlerts.map( (alert, index) => `<li><strong>Level ${alert.alert_level}</strong>: ${alert.description}</li>` ).join('');
+
+      const alertSectionHtml = `
+        <p>You have new security alerts since your last email:</p>
+        <ul>${alertHtml}</ul>`;
+
+      // Text fallback
+      const alertText = topAlerts.map((alert, index) => `• Level ${alert.alert_level}: ${alert.description}`).join('\n');
+
+      
+      const recipients = (await this.emailRepository.GetEmail(emailTime.id))
+      const emailParams = new EmailParams()
+      .setFrom(this.sentFrom)                  
+      .setTo(recipients ? [recipients] : [])                    
+      .setReplyTo(this.sentFrom)              
+      .setSubject(`Top 10 Security Alerts from ${emailTime.last_email_time} `)        
+      .setHtml(alertSectionHtml)                                       
+      .setText(`Top 10 Alerts:\n\n${alertText}`);
+      await this.mailerSend.email.send(emailParams);
+      
+      this.emailRepository.updateEmailTime(emailTime.id, this.updateEmailTime(emailTime))
+    }
+
+  }
+
+  private updateEmailTime(emailTime){
+    
+    const result = new Date(emailTime.last_email_time);
 
     switch (emailTime.wait_value) {
       case 'DAY':
-        result.setDate(result.getDate() - emailTime.wait_unit);
+        result.setDate(result.getDate() + emailTime.wait_unit);
         break;
       case 'WEEK':
-        result.setDate(result.getDate() - (emailTime.wait_unit * 7));
+        result.setDate(result.getDate() + (emailTime.wait_unit * 7));
         break;
       case 'MONTH':
-        result.setMonth(result.getMonth() - emailTime.wait_unit);
+        result.setMonth(result.getMonth() + emailTime.wait_unit);
         break;
       case 'YEAR':
-        result.setFullYear(result.getFullYear() - emailTime.wait_unit);
+        result.setFullYear(result.getFullYear() + emailTime.wait_unit);
       break;
 
       default:
         throw new Error(`Unsupported unit: ${emailTime.wait_value}`);
     }
 
-    emailTime.last_email_time = result;
+    return result;
+  }
+
+  async addEmailTime(emailTimeInput: EmailTimeInput) {
+    const emailTime = new EmailTime();
+    emailTime.id = emailTimeInput.id;
+    emailTime.wait_unit = emailTimeInput.wait_unit;
+    emailTime.wait_value = emailTimeInput.wait_value;
+    emailTime.next_email_time = emailTimeInput.first_email_time;
+    emailTime.last_email_time = new Date();
 
     
     await this.emailRepository.InsertEmailTime(emailTime);
