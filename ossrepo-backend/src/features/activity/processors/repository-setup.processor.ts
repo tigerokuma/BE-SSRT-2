@@ -318,10 +318,8 @@ export class RepositorySetupProcessor {
         try {
           this.logger.log(`📈 Running activity analysis for ${owner}/${repo}`);
 
-          // Transform commits to the format expected by activity analysis
-          const commitsForAnalysis = this.transformCommitsForActivityAnalysis(
-            commitsForHealthAnalysis,
-          );
+          // Fetch commits from database for activity analysis (more efficient)
+          const commitsForAnalysis = await this.getCommitsFromDatabaseForActivityAnalysis(watchlistId);
 
           // Calculate activity score
           const activityScore =
@@ -783,26 +781,46 @@ export class RepositorySetupProcessor {
   }
 
   /**
+   * Fetch commits from database for activity analysis
+   * This is more efficient than re-processing commits
+   */
+  private async getCommitsFromDatabaseForActivityAnalysis(watchlistId: string): Promise<CommitData[]> {
+    const commits = await this.prisma.log.findMany({
+      where: {
+        watchlist_id: watchlistId,
+        event_type: 'COMMIT',
+      },
+      orderBy: { timestamp: 'desc' },
+      select: {
+        actor: true,
+        timestamp: true,
+        payload: true,
+      },
+    });
+
+    return commits.map((log) => {
+      const payload = log.payload as any;
+      return {
+        sha: payload.sha,
+        author: log.actor,
+        email: payload.email || '',
+        date: new Date(log.timestamp + 'Z'), // Ensure UTC interpretation
+        message: payload.message,
+        filesChanged: payload.filesChanged || [],
+        linesAdded: payload.linesAdded || 0,
+        linesDeleted: payload.linesDeleted || 0,
+      };
+    });
+  }
+
+  /**
    * Transform commits to the format expected by activity analysis
-   * Handles both GitHub API format and local git format
+   * Uses local git format which includes line change information
    */
   private transformCommitsForActivityAnalysis(commits: any[]): CommitData[] {
     return commits.map((commit) => {
-      // Handle GitHub API format (nested commit structure)
-      if (commit.commit && commit.commit.author) {
-        return {
-          sha: commit.sha,
-          author: commit.commit.author.name,
-          email: commit.commit.author.email,
-          date: new Date(commit.commit.author.date),
-          message: commit.commit.message,
-          filesChanged: [], // We don't have file change data from API in this format
-          linesAdded: 0, // We don't have line change data from API in this format
-          linesDeleted: 0,
-        };
-      }
-
-      // Handle local git format (flat structure)
+      // Handle local git format (from gitManager.getCommitsForRepo)
+      // This format includes linesAdded, linesDeleted, and filesChanged
       return {
         sha: commit.sha,
         author: commit.author,

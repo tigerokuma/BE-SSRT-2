@@ -4,6 +4,7 @@ import { Job } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { GitManagerService } from '../services/git-manager.service';
 import { AlertingService } from '../services/alerting.service';
+import { ActivityAnalysisService } from '../services/activity-analysis.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as fs from 'fs';
@@ -32,6 +33,7 @@ export class PollingProcessor {
     private readonly prisma: PrismaService,
     private readonly gitManager: GitManagerService,
     private readonly alertingService: AlertingService,
+    private readonly activityAnalysisService: ActivityAnalysisService,
     @InjectQueue('polling') private readonly pollingQueue: Queue,
     @InjectQueue('repository-setup') private readonly setupQueue: Queue,
   ) {
@@ -209,11 +211,22 @@ export class PollingProcessor {
       if (!storedLatestSha) {
         this.logger.log(`📝 No previous commit SHA stored for ${owner}/${repo}, storing current: ${latestRemoteSha}`);
         await this.updateLatestCommitSha(watchlistId, latestRemoteSha);
+        
+        // Update activity score for first-time setup
+        await this.updateActivityScore(watchlistId);
+        this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
+        
         return;
       }
 
       if (latestRemoteSha === storedLatestSha) {
         this.logger.log(`✅ ${owner}/${repo}: No new commits found`);
+        
+        // Still update activity score even when no new commits are found
+        // This ensures activity scores reflect the passage of time
+        await this.updateActivityScore(watchlistId);
+        this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
+        
         return;
       }
 
@@ -262,6 +275,11 @@ export class PollingProcessor {
 
       // Update contributor and repository statistics
       await this.updateStatistics(watchlistId);
+
+      // Update activity score with latest 3 months of commits
+      this.logger.log(`🔄 About to update activity score for ${watchlistId}`);
+      await this.updateActivityScore(watchlistId);
+      this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
 
       // Update the latest commit SHA and commits since last health update
       await this.updateLatestCommitSha(watchlistId, latestRemoteSha);
@@ -695,5 +713,88 @@ export class PollingProcessor {
   private createEventHash(data: string): string {
     const crypto = require('crypto');
     return crypto.createHash('sha256').update(data).digest('hex');
+  }
+
+  private async updateActivityScore(watchlistId: string): Promise<void> {
+    try {
+      this.logger.log(`📈 Updating activity score for watchlist ${watchlistId}`);
+
+      // Get commits from database for activity analysis - use the same method as repository setup
+      const commits = await this.prisma.log.findMany({
+        where: {
+          watchlist_id: watchlistId,
+          event_type: 'COMMIT',
+        },
+        orderBy: { timestamp: 'desc' },
+        select: {
+          actor: true,
+          timestamp: true,
+          payload: true,
+        },
+      });
+
+      this.logger.log(`📝 Found ${commits.length} commits for activity analysis`);
+
+      if (commits.length === 0) {
+        this.logger.log(`No commits found for activity analysis`);
+        return;
+      }
+
+             // Transform commits for activity analysis - use the same logic as repository setup
+       const commitsForAnalysis = commits.map((log) => {
+         const payload = log.payload as any;
+         
+         // Handle both camelCase and snake_case field names
+         const linesAdded = payload.linesAdded || payload.lines_added || 0;
+         const linesDeleted = payload.linesDeleted || payload.lines_deleted || 0;
+         const filesChanged = payload.filesChanged || payload.files_changed || [];
+         
+         return {
+           sha: payload.sha,
+           author: log.actor,
+           email: payload.email || '',
+           date: new Date(log.timestamp + 'Z'), // Ensure UTC interpretation
+           message: payload.message,
+           filesChanged,
+           linesAdded,
+           linesDeleted,
+         };
+       });
+
+             // Calculate new activity score
+       const activityScore = this.activityAnalysisService.calculateActivityScore(commitsForAnalysis);
+       const weeklyCommitRate = this.activityAnalysisService.calculateWeeklyCommitRate(commitsForAnalysis);
+       const activityHeatmap = this.activityAnalysisService.generateActivityHeatmap(commitsForAnalysis);
+
+      // Store or update activity data - use createMany with skipDuplicates for simplicity
+      // First, delete any existing activity data for this watchlist
+      await this.prisma.activityData.deleteMany({
+        where: {
+          watchlist_id: watchlistId,
+        },
+      });
+
+      // Then create new activity data
+      await this.prisma.activityData.create({
+        data: {
+          watchlist_id: watchlistId,
+          activity_score: activityScore.score,
+          activity_level: activityScore.level,
+          weekly_commit_rate: weeklyCommitRate,
+          activity_factors: JSON.parse(JSON.stringify(activityScore.factors)),
+          activity_heatmap: JSON.parse(JSON.stringify(activityHeatmap)),
+          peak_activity: {
+            day: activityHeatmap.peakActivity.day,
+            hour: activityHeatmap.peakActivity.hour,
+            count: activityHeatmap.peakActivity.count,
+          },
+          analysis_date: new Date(),
+        },
+      });
+
+             this.logger.log(`Activity score updated for ${watchlistId}`);
+    } catch (error) {
+      this.logger.error(`Error updating activity score: ${error.message}`);
+    }
   }
 } 

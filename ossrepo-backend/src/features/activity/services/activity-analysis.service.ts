@@ -247,12 +247,28 @@ export class ActivityAnalysisService {
       dayHourMatrix[dayHourKey] = (dayHourMatrix[dayHourKey] || 0) + 1;
     }
 
-    // Find peak activity
+    // Convert day mapping: 0=Sunday becomes 6, 1=Monday becomes 0, etc.
+    const dayMapping = { 0: 6, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 };
+    const convertedDayOfWeek: { [key: number]: number } = {};
+    for (let i = 0; i < 7; i++) {
+      convertedDayOfWeek[dayMapping[i]] = dayOfWeek[i];
+    }
+
+    // Convert dayHourMatrix to use Monday-first mapping
+    const convertedDayHourMatrix: { [key: string]: number } = {};
+    for (const [key, count] of Object.entries(dayHourMatrix)) {
+      const [day, hour] = key.split('_').map(Number);
+      const convertedDay = dayMapping[day];
+      const convertedKey = `${convertedDay}_${hour}`;
+      convertedDayHourMatrix[convertedKey] = count;
+    }
+
+    // Find peak activity using converted dayHourMatrix
     let peakCount = 0;
     let peakDay = 0;
     let peakHour = 0;
 
-    for (const [key, count] of Object.entries(dayHourMatrix)) {
+    for (const [key, count] of Object.entries(convertedDayHourMatrix)) {
       if (count > peakCount) {
         peakCount = count;
         const [day, hour] = key.split('_').map(Number);
@@ -262,21 +278,21 @@ export class ActivityAnalysisService {
     }
 
     const dayNames = [
-      'Sunday',
       'Monday',
       'Tuesday',
       'Wednesday',
       'Thursday',
       'Friday',
       'Saturday',
+      'Sunday',
     ];
 
     return {
-      dayOfWeek,
+      dayOfWeek: convertedDayOfWeek,
       hourOfDay,
-      dayHourMatrix,
+      dayHourMatrix: convertedDayHourMatrix,
       peakActivity: {
-        day: dayNames[peakDay],
+        day: dayNames[dayMapping[peakDay]],
         hour: peakHour,
         count: peakCount,
       },
