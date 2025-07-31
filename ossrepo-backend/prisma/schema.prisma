@@ -22,6 +22,9 @@ model User {
   userWatchlists    UserWatchlist[]
   email_confirmed   Boolean            @default(false)
   EmailConfirmation EmailConfirmation?
+  slack        Slack?
+  jira         Jira?
+  emailTime    EmailTime?
   sbom              UserWatchlistSbom?
 
   @@map("users")
@@ -143,10 +146,7 @@ model UserWatchlist {
   created_at   DateTime   @default(now())
   user         User       @relation(fields: [user_id], references: [user_id])
   watchlist    Watchlist  @relation(fields: [watchlist_id], references: [watchlist_id])
-  slack        Slack?
-  jira         Jira?
-  emailTime    EmailTime?
-  Alert        Alert[]
+  
   AlertTriggered AlertTriggered[]
 
   @@index([user_id])
@@ -292,32 +292,6 @@ model GraphExport {
   created_at DateTime  @default(now())
 }
 
-enum Risk {
-  LOW
-  MODERATE
-  HIGH
-  CRITICAL
-}
-
-enum Status {
-  OPEN
-  REVIEWED
-  CLOSED
-}
-
-model Alert {
-  alert_id      String
-  id            String
-  risk          Risk
-  status        Status
-  created_at    DateTime      @default(now())
-  title         String
-  description   String
-  userWatchlist UserWatchlist @relation(fields: [id], references: [id])
-
-  @@id([id, alert_id])
-}
-
 model AlertTriggered {
   id              String    @id @default(uuid())
   user_watchlist_id String
@@ -355,10 +329,10 @@ enum WaitValue {
 model EmailTime {
   id              String        @id @default(uuid())
   last_email_time DateTime
-  job_id          String
+  next_email_time DateTime
   wait_value      WaitValue
   wait_unit       Int
-  userWatchlist   UserWatchlist @relation(fields: [id], references: [id])
+  user   User @relation(fields: [id], references: [user_id])
 }
 
 model EmailConfirmation {
@@ -375,14 +349,14 @@ model Slack {
   id            String        @id @default(uuid())
   slack_token   String
   slack_channel String?
-  userWatchlist UserWatchlist @relation(fields: [id], references: [id])
+  user   User @relation(fields: [id], references: [user_id])
 }
 
 model Jira {
   id             String        @id @default(uuid())
   webtrigger_url String
   project_key    String?
-  userWatchlist  UserWatchlist @relation(fields: [id], references: [id])
+  user   User @relation(fields: [id], references: [user_id])
 }
 
 model GraphSnapshot {
