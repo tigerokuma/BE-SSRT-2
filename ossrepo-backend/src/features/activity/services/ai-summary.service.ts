@@ -190,9 +190,18 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
         this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
       }
 
+      // Validate stdout before processing
+      if (!stdout || typeof stdout !== 'string') {
+        this.logger.error('❌ Ollama returned empty or invalid stdout');
+        throw new Error('AI model returned empty response');
+      }
+
+      this.logger.log(`📝 Raw AI output length: ${stdout.length} characters`);
+      this.logger.log(`📝 Raw AI output preview: ${stdout.substring(0, 100)}...`);
+
       const cleanOutput = this.cleanMistralOutput(stdout);
       this.logger.log(
-        `✅ Ollama execution successful, output length: ${cleanOutput.length}`,
+        `✅ Ollama execution successful, cleaned output length: ${cleanOutput.length}`,
       );
 
       // Clean up temp file
@@ -205,11 +214,26 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       return cleanOutput;
     } catch (error) {
       this.logger.error(`❌ Ollama execution failed: ${error.message}`);
+      
+      // Provide more context for debugging
+      if (error.message.includes('timeout')) {
+        this.logger.error('❌ AI model timed out - consider increasing timeout or using a faster model');
+      } else if (error.message.includes('ENOENT')) {
+        this.logger.error('❌ Ollama not found - check if Ollama is installed and in PATH');
+      } else if (error.message.includes('empty response')) {
+        this.logger.error('❌ AI model returned empty response - check model availability');
+      }
+      
       throw error;
     }
   }
 
   private cleanMistralOutput(output: string): string {
+    if (!output || typeof output !== 'string') {
+      this.logger.warn('Received empty or invalid output from AI model');
+      return 'No summary available.';
+    }
+
     // Remove common prefixes and clean up the output
     let cleaned = output
       .replace(/^[^a-zA-Z]*/, '') // Remove leading non-letters
@@ -217,11 +241,18 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       .replace(/\s+/g, ' ') // Replace multiple spaces with single space
       .trim();
 
+    // If the output is empty after cleaning, return a fallback
+    if (!cleaned || cleaned.length === 0) {
+      this.logger.warn('Output was empty after cleaning');
+      return 'No summary available.';
+    }
+
     // If the output is too long, truncate it
     if (cleaned.length > this.maxSummaryLength) {
       cleaned = cleaned.substring(0, this.maxSummaryLength - 3) + '...';
     }
 
+    this.logger.log(`Cleaned AI output: ${cleaned.length} characters`);
     return cleaned;
   }
 

@@ -193,6 +193,9 @@ Respond with JSON format:
       const os = require('os');
       const path = require('path');
 
+      this.logger.log(`🔍 Executing Ollama for anomaly detection: ${ollamaPath} run ${this.modelName}`);
+      this.logger.log(`🔍 Prompt length: ${prompt.length} characters`);
+
       const tempFile = path.join(
         os.tmpdir(),
         `ollama-anomaly-${Date.now()}.txt`,
@@ -210,7 +213,17 @@ Respond with JSON format:
         this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
       }
 
+      // Validate stdout before processing
+      if (!stdout || typeof stdout !== 'string') {
+        this.logger.error('❌ Ollama returned empty or invalid stdout for anomaly detection');
+        throw new Error('AI model returned empty response for anomaly detection');
+      }
+
+      this.logger.log(`📝 Raw AI anomaly response length: ${stdout.length} characters`);
+      this.logger.log(`📝 Raw AI anomaly response preview: ${stdout.substring(0, 100)}...`);
+
       const cleanOutput = this.cleanGemmaOutput(stdout);
+      this.logger.log(`✅ Ollama anomaly detection successful, cleaned output length: ${cleanOutput.length}`);
 
       // Clean up temp file
       try {
@@ -221,7 +234,17 @@ Respond with JSON format:
 
       return cleanOutput;
     } catch (error) {
-      this.logger.error(`❌ Ollama execution failed: ${error.message}`);
+      this.logger.error(`❌ Ollama anomaly detection failed: ${error.message}`);
+      
+      // Provide more context for debugging
+      if (error.message.includes('timeout')) {
+        this.logger.error('❌ AI model timed out for anomaly detection - consider increasing timeout');
+      } else if (error.message.includes('ENOENT')) {
+        this.logger.error('❌ Ollama not found for anomaly detection - check if Ollama is installed');
+      } else if (error.message.includes('empty response')) {
+        this.logger.error('❌ AI model returned empty response for anomaly detection');
+      }
+      
       throw error;
     }
   }
@@ -238,31 +261,50 @@ Respond with JSON format:
 
   private parseAnomalyResponse(response: string): AnomalyDetectionResult {
     try {
+      if (!response || typeof response !== 'string') {
+        this.logger.warn('Received empty or invalid response from AI model');
+        return this.fallbackAnomalyDetection({} as CommitAnalysisData);
+      }
+
+      this.logger.log(`📝 Raw AI response length: ${response.length} characters`);
+      this.logger.log(`📝 Raw AI response preview: ${response.substring(0, 100)}...`);
+
       // Try to extract JSON from the response
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          isAnomalous: parsed.isAnomalous || false,
-          confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
-          reasoning: parsed.reasoning || 'No reasoning provided',
-          riskLevel: this.validateRiskLevel(parsed.riskLevel),
-          suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
-        };
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const result = {
+            isAnomalous: parsed.isAnomalous || false,
+            confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
+            reasoning: parsed.reasoning || 'No reasoning provided',
+            riskLevel: this.validateRiskLevel(parsed.riskLevel),
+            suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
+          };
+          
+          this.logger.log(`✅ Successfully parsed JSON response: ${result.isAnomalous ? 'ANOMALOUS' : 'Normal'}`);
+          return result;
+        } catch (jsonError) {
+          this.logger.warn(`Failed to parse JSON from response: ${jsonError.message}`);
+        }
       }
 
       // Fallback parsing for non-JSON responses
       const isAnomalous = response.toLowerCase().includes('anomalous') || 
                          response.toLowerCase().includes('suspicious') ||
-                         response.toLowerCase().includes('unusual');
+                         response.toLowerCase().includes('unusual') ||
+                         response.toLowerCase().includes('concerning');
       
-      return {
+      const result: AnomalyDetectionResult = {
         isAnomalous,
         confidence: 0.6,
         reasoning: response.substring(0, 200),
         riskLevel: isAnomalous ? 'moderate' : 'low',
         suspiciousFactors: isAnomalous ? ['AI detected suspicious patterns'] : [],
       };
+      
+      this.logger.log(`📝 Using fallback parsing: ${result.isAnomalous ? 'ANOMALOUS' : 'Normal'}`);
+      return result;
     } catch (error) {
       this.logger.error('Failed to parse AI response:', error);
       return this.fallbackAnomalyDetection({} as CommitAnalysisData);

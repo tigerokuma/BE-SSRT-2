@@ -224,11 +224,11 @@ export class PollingProcessor {
         `   Beginning extraction process...`
       );
 
-      // Clone repository with smart depth adjustment
-      repoPath = await this.cloneWithSmartDepth(owner, repo, branch, storedLatestSha);
+      // Clone repository with smart depth adjustment and fallback deepening
+      repoPath = await this.ensureRepositoryWithSha(owner, repo, branch, storedLatestSha);
       
       if (!repoPath) {
-        this.logger.error(`Failed to clone repository ${owner}/${repo} with required depth`);
+        this.logger.error(`Failed to clone repository ${owner}/${repo} with required depth for SHA ${storedLatestSha}`);
         return;
       }
 
@@ -312,7 +312,7 @@ export class PollingProcessor {
   ): Promise<string | null> {
     // Use the same approach as repository setup - clone with --no-checkout to avoid Windows filename issues
     const depths = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
-    const maxDepth = 100;
+    const maxDepth = 1000; // Increased from 100 to allow deeper history
     
     for (const depth of depths) {
       if (depth > maxDepth) {
@@ -326,36 +326,16 @@ export class PollingProcessor {
         // Clone with current depth
         const repoPath = await this.gitManager.cloneRepository(owner, repo, branch, depth);
         
-        // Better SHA checking - try multiple approaches
-        const { exec } = require('child_process');
-        const { promisify } = require('util');
-        const execAsync = promisify(exec);
+        // Check if SHA exists in the repository
+        const shaExists = await this.checkShaExists(repoPath, targetSha);
         
-        try {
-          // First try: git rev-parse (most reliable)
-          const revParseCommand = `cd ${repoPath} && git rev-parse --verify ${targetSha}`;
-          await execAsync(revParseCommand);
-          this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth} (rev-parse)`);
+        if (shaExists) {
+          this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth}`);
           return repoPath;
-        } catch (revParseError) {
-          // Second try: git log (more flexible)
-          try {
-            const logCommand = `cd ${repoPath} && git log --oneline ${targetSha} -1`;
-            await execAsync(logCommand);
-            this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth} (git log)`);
-            return repoPath;
-          } catch (logError) {
-            // Third try: git show (most permissive)
-            try {
-              const showCommand = `cd ${repoPath} && git show ${targetSha} --format="%H" -s`;
-              await execAsync(showCommand);
-              this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth} (git show)`);
-              return repoPath;
-            } catch (showError) {
-              // SHA not found with this depth
-              this.logger.log(`❌ Target SHA not found with depth ${depth}, trying deeper...`);
-            }
-          }
+        } else {
+          this.logger.log(`❌ Target SHA ${targetSha} not found with depth ${depth}, trying deeper...`);
+          // Clean up this clone and try deeper
+          await this.gitManager.cleanupRepository(owner, repo);
         }
         
       } catch (cloneError) {
@@ -365,8 +345,113 @@ export class PollingProcessor {
       }
     }
     
-    this.logger.error(`Failed to find target SHA ${targetSha} even with maximum depth`);
-    return null;
+    // If iterative deepening failed, try the git manager's deepenRepository method as fallback
+    this.logger.log(`🔄 Iterative deepening failed, trying git manager's deepenRepository method...`);
+    try {
+      const repoPath = await this.gitManager.cloneRepository(owner, repo, branch, 1);
+      await this.gitManager.deepenRepository(owner, repo, branch, 2000);
+      
+      // Check if SHA exists after deepening
+      const shaExists = await this.checkShaExists(repoPath, targetSha);
+      if (shaExists) {
+        this.logger.log(`✅ Found target SHA ${targetSha} after deepening repository`);
+        return repoPath;
+      } else {
+        this.logger.error(`❌ Target SHA ${targetSha} still not found after deepening`);
+        await this.gitManager.cleanupRepository(owner, repo);
+        return null;
+      }
+    } catch (deepenError) {
+      this.logger.error(`❌ Failed to deepen repository: ${deepenError.message}`);
+      await this.gitManager.cleanupRepository(owner, repo);
+      return null;
+    }
+  }
+
+  private async checkShaExists(repoPath: string, targetSha: string): Promise<boolean> {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    try {
+      // First try: git rev-parse (most reliable)
+      const revParseCommand = `cd "${repoPath}" && git rev-parse --verify ${targetSha}`;
+      await execAsync(revParseCommand);
+      return true;
+    } catch (revParseError) {
+      try {
+        // Second try: git log (more flexible)
+        const logCommand = `cd "${repoPath}" && git log --oneline ${targetSha} -1`;
+        await execAsync(logCommand);
+        return true;
+      } catch (logError) {
+        try {
+          // Third try: git show (most permissive)
+          const showCommand = `cd "${repoPath}" && git show ${targetSha} --format="%H" -s`;
+          await execAsync(showCommand);
+          return true;
+        } catch (showError) {
+          // SHA not found with this depth
+          return false;
+        }
+      }
+    }
+  }
+
+  private async ensureRepositoryWithSha(
+    owner: string, 
+    repo: string, 
+    branch: string, 
+    targetSha: string
+  ): Promise<string | null> {
+    // First try to clone with smart depth
+    const repoPath = await this.cloneWithSmartDepth(owner, repo, branch, targetSha);
+    
+    if (repoPath) {
+      return repoPath;
+    }
+    
+    // If that fails, try to clone shallow and then deepen
+    this.logger.log(`🔄 Trying shallow clone + deepen for ${owner}/${repo}`);
+    try {
+      const shallowRepoPath = await this.gitManager.cloneRepository(owner, repo, branch, 1);
+      
+      // Try to deepen the repository
+      await this.gitManager.deepenRepository(owner, repo, branch, 2000);
+      
+      // Check if SHA exists after deepening
+      const shaExists = await this.checkShaExists(shallowRepoPath, targetSha);
+      if (shaExists) {
+        this.logger.log(`✅ Found target SHA ${targetSha} after deepening`);
+        return shallowRepoPath;
+      } else {
+        this.logger.error(`❌ Target SHA ${targetSha} still not found after deepening`);
+        await this.gitManager.cleanupRepository(owner, repo);
+        return null;
+      }
+    } catch (error) {
+      this.logger.error(`❌ Failed to clone and deepen repository: ${error.message}`);
+      await this.gitManager.cleanupRepository(owner, repo);
+      return null;
+    }
+  }
+
+  private async logRepositoryState(repoPath: string, targetSha: string): Promise<void> {
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      
+      // Get repository info
+      const { stdout: logOutput } = await execAsync(`cd "${repoPath}" && git log --oneline -10`);
+      const { stdout: revListOutput } = await execAsync(`cd "${repoPath}" && git rev-list --count HEAD`);
+      
+      this.logger.log(`📊 Repository state for ${targetSha}:`);
+      this.logger.log(`   Total commits: ${revListOutput.trim()}`);
+      this.logger.log(`   Recent commits: ${logOutput.split('\n').slice(0, 3).join(', ')}`);
+    } catch (error) {
+      this.logger.warn(`Could not log repository state: ${error.message}`);
+    }
   }
 
   private async cloneWithNoCheckout(

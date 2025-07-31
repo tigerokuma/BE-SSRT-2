@@ -458,8 +458,15 @@ export class ActivityController {
       const uniqueAuthors = [...new Set(commitData.map(c => c.author))];
       const dateRange = `${commitData[commitData.length - 1].timestamp.toISOString().split('T')[0]} to ${commitData[0].timestamp.toISOString().split('T')[0]}`;
 
+      // Validate AI result
+      let summary = aiResult.summary;
+      if (!summary || summary.trim() === '' || summary === 'No summary available.') {
+        this.logger.warn(`AI summary generation failed for ${watchlist.package.repo_name}, using fallback`);
+        summary = `Recent activity in ${watchlist.package.repo_name} shows ${commitData.length} commits from ${uniqueAuthors.length} authors. Total changes: +${totalStats.linesAdded} -${totalStats.linesDeleted} lines across ${totalStats.filesChanged} files.`;
+      }
+
       return {
-        summary: aiResult.summary,
+        summary,
         commitCount: commitData.length,
         dateRange,
         totalLinesAdded: totalStats.linesAdded,
@@ -473,8 +480,19 @@ export class ActivityController {
         `Error generating commit summary for watchlist ${watchlistId}:`,
         error,
       );
+      
+      // Provide a more helpful error message
+      let errorMessage = 'Failed to generate commit summary';
+      if (error.message.includes('AI model')) {
+        errorMessage = 'AI model is unavailable, please try again later';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Request timed out, please try again';
+      } else if (error.message.includes('not found')) {
+        errorMessage = 'Repository not found or no commits available';
+      }
+      
       throw new HttpException(
-        `Failed to generate commit summary: ${error.message}`,
+        errorMessage,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

@@ -145,7 +145,7 @@ export class WatchlistRepository {
         return {
           ...item,
           alertCount,
-          activityScore: latestActivity?.activity_score || null,
+          activityScore: latestActivity?.activity_score !== undefined && latestActivity?.activity_score !== null ? latestActivity.activity_score : null,
           activityFactors: latestActivity?.activity_factors || null,
           weeklyCommitRate: latestActivity?.weekly_commit_rate || null,
           activityHeatmap: latestActivity?.activity_heatmap || null,

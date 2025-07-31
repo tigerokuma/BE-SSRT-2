@@ -41,7 +41,7 @@ export class WatchlistService {
       last_error: item.watchlist.last_error,
       // New enriched data fields
       notification_count: item.alertCount || 0, // Number of alerts triggered
-      activity_score: item.activityScore || null, // Activity score from ActivityData
+      activity_score: item.activityScore !== undefined && item.activityScore !== null ? item.activityScore : null, // Activity score from ActivityData
       bus_factor: item.busFactor || null, // Bus factor from BusFactorData
       health_score: item.healthScore || null, // Health score from HealthData
       tracking_duration: item.trackingDuration || '0 days', // How long tracking
@@ -151,7 +151,7 @@ export class WatchlistService {
       processing_completed_at: item.watchlist.processing_completed_at,
       last_error: item.watchlist.last_error,
       notification_count: item.alertCount || 0,
-      activity_score: item.activityScore || null,
+      activity_score: item.activityScore !== undefined && item.activityScore !== null ? item.activityScore : null,
       activity_factors: item.activityFactors || null,
       weekly_commit_rate: item.weeklyCommitRate || null,
       activity_heatmap: item.activityHeatmap || null,
