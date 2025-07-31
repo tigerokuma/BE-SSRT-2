@@ -8,7 +8,7 @@ from datetime import datetime
 from .parser_loader import load_parsers
 from .language_config import LANGUAGE_CONFIGS
 from .memgraph_db import get_memgraph_driver, close_memgraph_driver
-from .export_graph import export_graphml
+from .export_graph import export_graphml, export_json, export_csv
 
 BACKEND_URL = "http://localhost:3000"
 BATCH_SIZE = 50
@@ -293,10 +293,20 @@ def run_ast_extraction(repo_path, repo_id, task_id, commit_id):
 
         # --- EXPORT GRAPHML ---
         graphml_path = export_graphml(snapshot_id)
-        downloadable_url = f"/static/exports/graph_snapshot_{snapshot_id}.graphml"
+        json_path = export_json(snapshot_id)
+        nodes_csv_path, edges_csv_path = export_csv(snapshot_id)
+        base_url = f"/static/exports/graph_snapshot_{snapshot_id}"
+        download_urls = {
+            "graphml": f"{base_url}.graphml",
+            "json": f"{base_url}.json",
+            "nodes_csv": f"{base_url}_nodes.csv",
+            "edges_csv": f"{base_url}_edges.csv"
+        }
+        # Option 1: Store as JSON string
+        urls_str = json.dumps(download_urls)
 
         # --- UPDATE SNAPSHOT w/ URL ---
-        update_graph_snapshot(snapshot_id, len(all_nodes), len(edges_to_upload), s3_url=downloadable_url)
+        update_graph_snapshot(snapshot_id, len(all_nodes), len(edges_to_upload), s3_url=urls_str)
         update_subtask_status(subtask_id, message="AST extraction done. GraphML ready.")
 
     task_end = datetime.utcnow().isoformat()

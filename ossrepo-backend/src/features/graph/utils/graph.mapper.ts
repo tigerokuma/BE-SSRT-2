@@ -52,3 +52,14 @@ export function mapPrismaNodeToDto(n: any): GraphNodeDto {
     metadata: n.metadata ?? undefined,
   };
 }
+
+export function mapPrismaBuildTaskToDto(row: any): BuildTaskDto {
+  if (!row) return row;
+  return {
+    ...row,
+    commit_id: row.commit_id ?? undefined,
+    assigned_to: row.assigned_to ?? undefined,
+    started_at: row.started_at ?? undefined,
+    finished_at: row.finished_at ?? undefined,
+  };
+}

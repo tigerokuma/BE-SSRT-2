@@ -57,6 +57,20 @@ export class GraphController {
         return this.graphService.updateBuildTaskStatus(taskId, body.status, body.message);
     }
 
+    // GET /graph/build
+    @Get('build')
+    async getBuildTasks(
+        @Query('repo_id') repoId?: string, // make repo_id optional
+    ): Promise<BuildTaskDto[]> {
+        if (repoId) {
+            // If repo_id is provided, filter by repo_id
+            return this.graphService.getBuildTasksByRepoId(repoId);
+        } else {
+            // Otherwise, return all build tasks
+            return this.graphService.getAllBuildTasks();
+        }
+    }
+
     // --------- SUBTASKS (BUILDER) -----------------
     @Post('subtasks')
     async createSubtask(@Body() dto: CreateBuildSubtaskDto): Promise<BuildSubtaskDto> {

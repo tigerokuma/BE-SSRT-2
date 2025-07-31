@@ -1,7 +1,17 @@
 import {Injectable} from '@nestjs/common';
 import {PrismaService} from "../../../common/prisma/prisma.service";
-import {BatchCreateGraphNodeDto, DeleteNodesBySnapshotDto, CreateGraphNodeDto, UpdateGraphNodeDto} from '../dto/graph-node.dto';
-import {BatchCreateGraphEdgeDto, DeleteEdgesBySnapshotDto, CreateGraphEdgeDto, UpdateGraphEdgeDto} from '../dto/graph-edge.dto';
+import {
+    BatchCreateGraphNodeDto,
+    DeleteNodesBySnapshotDto,
+    CreateGraphNodeDto,
+    UpdateGraphNodeDto
+} from '../dto/graph-node.dto';
+import {
+    BatchCreateGraphEdgeDto,
+    DeleteEdgesBySnapshotDto,
+    CreateGraphEdgeDto,
+    UpdateGraphEdgeDto
+} from '../dto/graph-edge.dto';
 import {CreateGraphSnapshotDto, UpdateGraphSnapshotDto} from '../dto/graph-snapshot.dto';
 import {mapPrismaSubtaskToDto} from '../utils/graph.mapper';
 import {Logger} from '@nestjs/common';
@@ -94,6 +104,18 @@ export class GraphRepository {
             where: {repo_id: repoId},
             orderBy: {created_at: 'desc'},
         });
+    }
+
+    async findAllBuildTasks() {
+        return this.prisma.buildTask.findMany();
+    }
+
+    async findBuildTasksByRepoId(repoId: string) {
+        return this.prisma.buildTask.findMany({where: {repo_id: repoId}});
+    }
+
+    async findBuildTaskById(taskId: string) {
+        return this.prisma.buildTask.findUnique({where: {task_id: taskId}});
     }
 
     async getLatestExportByRepoId(repoId: string, format: string = 'graphml') {

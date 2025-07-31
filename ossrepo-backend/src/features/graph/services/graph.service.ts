@@ -3,7 +3,7 @@ import {GraphRepository} from '../repositories/graph.repository';
 import {GraphExportDto} from '../dto/graph-export.dto';
 import {BuildTaskDto, TriggerBuildDto} from '../dto/build-task.dto';
 import {GraphBuilderService} from './graph-builder.service';
-import {mapTaskToDto} from '../utils/graph.mapper'
+import {mapPrismaBuildTaskToDto, mapTaskToDto} from '../utils/graph.mapper'
 import * as path from 'path';
 
 @Injectable()
@@ -90,5 +90,15 @@ export class GraphService {
             actor: exportRow.actor ?? undefined,
             created_at: exportRow.created_at ?? undefined,
         };
+    }
+
+    async getAllBuildTasks(): Promise<BuildTaskDto[]> {
+        const rows = await this.repo.findAllBuildTasks();
+        return rows.map(mapPrismaBuildTaskToDto);
+    }
+
+    async getBuildTasksByRepoId(repoId: string) {
+        const rows = await this.repo.findBuildTasksByRepoId(repoId);
+        return rows.map(mapPrismaBuildTaskToDto);
     }
 }
