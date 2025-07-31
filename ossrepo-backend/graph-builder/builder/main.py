@@ -28,6 +28,7 @@ def run_build_task(req: BuildRequest):
     logging.info(f"🚀 Starting build task: {req.taskId} for repo {req.repoId}")
     update_task_status(req.taskId, "in_progress", "Task started by builder")
 
+    # Clean up old repoPath if exists
     if os.path.exists(req.repoPath):
         try:
             shutil.rmtree(req.repoPath)
@@ -37,15 +38,30 @@ def run_build_task(req: BuildRequest):
             return
 
     try:
+        # Clone the repo
         subprocess.run(["gh", "repo", "clone", req.repoId, req.repoPath], check=True)
+
+        # If commitId is provided, checkout that commit
         if req.commitId:
             subprocess.run(["git", "checkout", req.commitId], cwd=req.repoPath, check=True)
+            commit_id = req.commitId
+        else:
+            # Otherwise, get current HEAD commit hash
+            completed = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=req.repoPath,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            commit_id = completed.stdout.strip()
+            logging.info(f"No commitId provided. Using current HEAD: {commit_id}")
 
         run_ast_extraction(
             req.repoPath,
             req.repoId,
             req.taskId,
-            req.commitId,
+            commit_id,
         )
 
     except subprocess.CalledProcessError as e:

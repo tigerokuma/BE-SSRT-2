@@ -15,12 +15,14 @@ BATCH_SIZE = 50
 
 logging.basicConfig(level=logging.INFO)
 
-def update_task_status(task_id, status, message="", started_at=None, finished_at=None):
+def update_task_status(task_id, status, message="", started_at=None, finished_at=None, commit_id=None):
     payload = {"status": status, "message": message}
     if started_at:
         payload["started_at"] = started_at
     if finished_at:
         payload["finished_at"] = finished_at
+    if commit_id:
+        payload["commit_id"] = commit_id
 
     try:
         resp = requests.patch(f"{BACKEND_URL}/graph/build/{task_id}/status", json=payload)
@@ -208,7 +210,7 @@ def run_ast_extraction(repo_path, repo_id, task_id, commit_id):
         update_task_status(task_id, "skipped", "Snapshot already exists, skipping extraction.")
         return
     task_start = datetime.utcnow().isoformat()
-    update_task_status(task_id, "in_progress", "Starting build task", started_at=task_start)
+    update_task_status(task_id, "in_progress", "Starting build task", started_at=task_start, commit_id=commit_id)
 
     parsers, _ = load_parsers()
     for lang, config in LANGUAGE_CONFIGS.items():
@@ -310,5 +312,5 @@ def run_ast_extraction(repo_path, repo_id, task_id, commit_id):
         update_subtask_status(subtask_id, message="AST extraction done. GraphML ready.")
 
     task_end = datetime.utcnow().isoformat()
-    update_task_status(task_id, "completed", "Build task finished", finished_at=task_end)
+    update_task_status(task_id, "completed", "Build task finished", finished_at=task_end, commit_id=commit_id)
     close_memgraph_driver()
