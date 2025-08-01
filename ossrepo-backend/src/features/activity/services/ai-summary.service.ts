@@ -51,7 +51,7 @@ export interface AISummaryResult {
 export class AISummaryService {
   private readonly logger = new Logger(AISummaryService.name);
   private readonly modelName = 'gemma2:2b'; // Fast, efficient 2B parameter model
-  private readonly maxSummaryLength = 800; // Characters - increased for more comprehensive summaries
+  private readonly maxSummaryLength = 300; // Characters - very concise summaries
 
   constructor() {
     this.initializeModel();
@@ -247,11 +247,7 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       return 'No summary available.';
     }
 
-    // If the output is too long, truncate it
-    if (cleaned.length > this.maxSummaryLength) {
-      cleaned = cleaned.substring(0, this.maxSummaryLength - 3) + '...';
-    }
-
+    // Don't truncate - show the full cleaned output even if it's slightly over the limit
     this.logger.log(`Cleaned AI output: ${cleaned.length} characters`);
     return cleaned;
   }
@@ -398,11 +394,11 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
     const uniqueAuthors = [...new Set(commits.map(c => c.author))];
     const dateRange = `${commits[commits.length - 1].timestamp.toISOString().split('T')[0]} to ${commits[0].timestamp.toISOString().split('T')[0]}`;
 
-    return `Analyze the following recent commits from the ${repoName} repository and provide a comprehensive, informative summary (max 800 characters) that highlights:
+    return `Analyze the following recent commits from the ${repoName} repository and provide a very concise summary (max 300 characters) that focuses on:
 
-1. The main themes or areas of development
-2. Key changes or improvements made
-3. Overall development activity level
+1. Main development focus (e.g., "documentation updates", "bug fixes")
+2. Key patterns (e.g., "80% docs, 20% features")
+3. Overall activity level
 
 Repository: ${repoName}
 Period: ${dateRange}

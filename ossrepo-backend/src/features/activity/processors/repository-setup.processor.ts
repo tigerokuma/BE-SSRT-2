@@ -488,6 +488,9 @@ export class RepositorySetupProcessor {
               }
             : null,
 
+          // Add activity score for AI summary
+          activityScore: activityAnalysisResult?.activityScore.score,
+
           recentCommits: commitsForHealthAnalysis.slice(0, 5).map((commit) => ({
             message: commit.message,
             author: commit.author,
