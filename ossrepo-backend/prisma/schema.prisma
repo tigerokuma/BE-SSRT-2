@@ -134,6 +134,7 @@ model Watchlist {
   repoStats                        RepoStats?
   alertTriggered                   AlertTriggered[]
   sbom                             WatchlistSbom?
+  aiAnomaliesDetected             AIAnomaliesDetected[]
 }
 
 model UserWatchlist {
@@ -515,4 +516,19 @@ model UserWatchlistSbom {
 
   user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   @@index([user_id])
+}
+
+model AIAnomaliesDetected {
+  id                String    @id @default(uuid())
+  watchlist_id      String
+  commit_sha        String
+  anomaly_details   Json
+  detected_at       DateTime  @default(now())
+
+  repository        Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id, commit_sha])
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@map("ai_anomalies_detected")
 }
