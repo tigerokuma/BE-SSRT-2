@@ -179,6 +179,7 @@ model BusFactorData {
   watchlist_id    String
   bus_factor      Int
   total_contributors Int
+  total_commits   Int     // Total commits from all human contributors
   top_contributors Json    // Array of contributor objects
   risk_level      String   // LOW, MEDIUM, HIGH, CRITICAL
   risk_reason     String?
