@@ -831,26 +831,26 @@ export class PollingProcessor {
         return;
       }
 
-             // Transform commits for activity analysis - use the same logic as repository setup
-       const commitsForAnalysis = commits.map((log) => {
-         const payload = log.payload as any;
-         
-         // Handle both camelCase and snake_case field names
-         const linesAdded = payload.linesAdded || payload.lines_added || 0;
-         const linesDeleted = payload.linesDeleted || payload.lines_deleted || 0;
-         const filesChanged = payload.filesChanged || payload.files_changed || [];
-         
-         return {
-           sha: payload.sha,
-           author: log.actor,
-           email: payload.email || '',
-           date: new Date(log.timestamp + 'Z'), // Ensure UTC interpretation
-           message: payload.message,
-           filesChanged,
-           linesAdded,
-           linesDeleted,
-         };
-       });
+                     // Transform commits for activity analysis - use the same logic as repository setup
+        const commitsForAnalysis = commits.map((log) => {
+          const payload = log.payload as any;
+          
+          // The logs table stores snake_case, so use those field names
+          const linesAdded = payload.lines_added || 0;
+          const linesDeleted = payload.lines_deleted || 0;
+          const filesChanged = payload.files_changed || [];
+          
+          return {
+            sha: payload.sha,
+            author: log.actor,
+            email: payload.email || '',
+            date: new Date(log.timestamp + 'Z'), // Ensure UTC interpretation
+            message: payload.message,
+            filesChanged,
+            linesAdded,
+            linesDeleted,
+          };
+        });
 
              // Calculate new activity score
        const activityScore = this.activityAnalysisService.calculateActivityScore(commitsForAnalysis);

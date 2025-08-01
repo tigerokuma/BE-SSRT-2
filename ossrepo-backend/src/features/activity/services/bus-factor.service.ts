@@ -189,6 +189,25 @@ export class BusFactorService {
           contributor.totalFilesChanged = Math.round(contributorStats.avg_files_changed * contributorStats.total_commits);
           
           this.logger.log(`📊 ${contributor.author}: ${contributor.totalLinesAdded} added, ${contributor.totalLinesDeleted} deleted`);
+        } else {
+          // Fallback: calculate lines changed from logs table for this contributor
+          const contributorCommits = commits.filter(c => c.actor === contributor.author);
+          let totalLinesAdded = 0;
+          let totalLinesDeleted = 0;
+          let totalFilesChanged = 0;
+          
+          for (const commit of contributorCommits) {
+            const payload = commit.payload as any;
+            totalLinesAdded += payload.lines_added || 0;
+            totalLinesDeleted += payload.lines_deleted || 0;
+            totalFilesChanged += (payload.files_changed || []).length;
+          }
+          
+          contributor.totalLinesAdded = totalLinesAdded;
+          contributor.totalLinesDeleted = totalLinesDeleted;
+          contributor.totalFilesChanged = totalFilesChanged;
+          
+          this.logger.log(`📊 ${contributor.author}: ${totalLinesAdded} added, ${totalLinesDeleted} deleted (from logs fallback)`);
         }
       } catch (error) {
         this.logger.warn(`Could not get contributor stats for ${contributor.author}: ${error.message}`);

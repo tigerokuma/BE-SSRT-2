@@ -807,9 +807,9 @@ export class RepositorySetupProcessor {
         email: payload.email || '',
         date: new Date(log.timestamp + 'Z'), // Ensure UTC interpretation
         message: payload.message,
-        filesChanged: payload.filesChanged || [],
-        linesAdded: payload.linesAdded || 0,
-        linesDeleted: payload.linesDeleted || 0,
+        filesChanged: payload.files_changed || [],
+        linesAdded: payload.lines_added || 0,
+        linesDeleted: payload.lines_deleted || 0,
       };
     });
   }
