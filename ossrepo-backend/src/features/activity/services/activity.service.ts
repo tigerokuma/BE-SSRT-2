@@ -504,9 +504,9 @@ export class ActivityService {
         where: { repo_id: userWatchlist.watchlist.package_id }
       })
 
-      // Delete all alerts for this user watchlist
-      await this.prisma.alert.deleteMany({
-        where: { id: userWatchlistId }
+      // Delete all alert triggers for this user watchlist (Alert model doesn't exist, only AlertTriggered)
+      await this.prisma.alertTriggered.deleteMany({
+        where: { user_watchlist_id: userWatchlistId }
       })
 
       // Delete all alert triggers for this user watchlist

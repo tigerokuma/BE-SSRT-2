@@ -27,6 +27,7 @@ import { AISummaryService } from '../services/ai-summary.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { BusFactorService } from '../services/bus-factor.service';
 
 @ApiTags('Activity')
 @Controller('activity')
@@ -45,6 +46,7 @@ export class ActivityController {
     private readonly aiSummaryService: AISummaryService,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly busFactorService: BusFactorService,
   ) {}
 
   @Post('user-watchlist-added')
@@ -839,97 +841,30 @@ export class ActivityController {
     }
   }
 
-  @Get('alerts/:userWatchlistId')
-  @ApiOperation({
-    summary: 'Get triggered alerts for a user watchlist',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Alerts retrieved successfully',
-  })
-  async getAlerts(@Param('userWatchlistId') userWatchlistId: string) {
-
+  @Post('test-bus-factor/:watchlistId')
+  async testBusFactor(@Param('watchlistId') watchlistId: string) {
     try {
-      const alerts = await this.prisma.alertTriggered.findMany({
-        where: { user_watchlist_id: userWatchlistId },
-        orderBy: { created_at: 'desc' },
-        include: {
-          watchlist: {
-            include: {
-              package: {
-                select: {
-                  repo_name: true,
-                  repo_url: true,
-                },
-              },
-            },
-          },
-        },
-      });
-
+      const result = await this.busFactorService.calculateBusFactor(watchlistId);
       return {
-        alerts,
-        count: alerts.length,
-        userWatchlistId,
+        message: 'Bus factor calculation test',
+        result: {
+          busFactor: result.busFactor,
+          totalContributors: result.totalContributors,
+          topContributors: result.topContributors.map(c => ({
+            author: c.author,
+            totalCommits: c.totalCommits,
+            totalLinesAdded: c.totalLinesAdded,
+            totalLinesDeleted: c.totalLinesDeleted,
+            totalFilesChanged: c.totalFilesChanged,
+          })),
+          riskLevel: result.riskLevel,
+          riskReason: result.riskReason,
+        }
       };
     } catch (error) {
-      this.logger.error(`Error getting alerts: ${error.message}`);
+      this.logger.error('Error testing bus factor:', error);
       throw new HttpException(
-        `Failed to get alerts: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Patch('user-watchlist/:userWatchlistId/alerts')
-  @ApiOperation({
-    summary: 'Update alert settings for a user watchlist',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Alert settings updated successfully',
-  })
-  async updateAlertSettings(
-    @Param('userWatchlistId') userWatchlistId: string,
-    @Body() dto: { alerts: any }
-  ) {
-    this.logger.log(`📝 Updating alert settings for user watchlist ${userWatchlistId}`);
-
-    try {
-      // Find the user watchlist entry
-      const userWatchlist = await this.prisma.userWatchlist.findUnique({
-        where: { id: userWatchlistId },
-      });
-
-      if (!userWatchlist) {
-        throw new HttpException(
-          'User watchlist not found',
-          HttpStatus.NOT_FOUND,
-        );
-      }
-
-      // Update the alerts field
-      const updatedUserWatchlist = await this.prisma.userWatchlist.update({
-        where: { id: userWatchlistId },
-        data: {
-          alerts: JSON.stringify(dto.alerts),
-        },
-      });
-
-      this.logger.log(`✅ Alert settings updated for user watchlist ${userWatchlistId}`);
-
-      return {
-        message: 'Alert settings updated successfully',
-        userWatchlistId,
-        alerts: dto.alerts,
-      };
-    } catch (error) {
-      this.logger.error(`Error updating alert settings: ${error.message}`);
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        `Failed to update alert settings: ${error.message}`,
+        `Failed to test bus factor calculation: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

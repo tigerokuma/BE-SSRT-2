@@ -293,6 +293,7 @@ export class RepositorySetupProcessor {
               watchlist_id: watchlistId,
               bus_factor: busFactorResult.busFactor,
               total_contributors: busFactorResult.totalContributors,
+              total_commits: busFactorResult.totalCommits,
               top_contributors: busFactorResult.topContributors,
               risk_level: busFactorResult.riskLevel,
               risk_reason: busFactorResult.riskReason,

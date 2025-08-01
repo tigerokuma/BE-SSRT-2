@@ -5,6 +5,7 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { GitManagerService } from '../services/git-manager.service';
 import { AlertingService } from '../services/alerting.service';
 import { ActivityAnalysisService } from '../services/activity-analysis.service';
+import { BusFactorService } from '../services/bus-factor.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as fs from 'fs';
@@ -34,6 +35,7 @@ export class PollingProcessor {
     private readonly gitManager: GitManagerService,
     private readonly alertingService: AlertingService,
     private readonly activityAnalysisService: ActivityAnalysisService,
+    private readonly busFactorService: BusFactorService,
     @InjectQueue('polling') private readonly pollingQueue: Queue,
     @InjectQueue('repository-setup') private readonly setupQueue: Queue,
   ) {
@@ -222,8 +224,8 @@ export class PollingProcessor {
       if (latestRemoteSha === storedLatestSha) {
         this.logger.log(`✅ ${owner}/${repo}: No new commits found`);
         
-        // Still update activity score even when no new commits are found
-        // This ensures activity scores reflect the passage of time
+        // Only update activity score when no new commits are found
+        // Don't recalculate bus factor unnecessarily
         await this.updateActivityScore(watchlistId);
         this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
         
@@ -251,6 +253,7 @@ export class PollingProcessor {
       if (newCommits.length === 0) {
         this.logger.warn(`No commits found since ${storedLatestSha} for ${owner}/${repo}`);
         await this.updateLatestCommitSha(watchlistId, latestRemoteSha);
+        this.logger.log(`✅ Polling completed for ${owner}/${repo} (no new commits)`);
         return;
       }
 
@@ -273,7 +276,7 @@ export class PollingProcessor {
         });
       }
 
-      // Update contributor and repository statistics
+      // Update contributor and repository statistics (only when there are new commits)
       await this.updateStatistics(watchlistId);
 
       // Update activity score with latest 3 months of commits
@@ -535,9 +538,52 @@ export class PollingProcessor {
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
-      // Get basic commit information
-      const command = `cd ${repoPath} && git log ${sinceSha}..HEAD --pretty=format:"%H|%an|%ae|%ad|%s" --date=iso`;
-      const { stdout } = await execAsync(command);
+      // First, verify the SHA exists and get its full SHA
+      let verifiedSha = sinceSha;
+      try {
+        const verifyCommand = `cd "${repoPath}" && git rev-parse --verify ${sinceSha}`;
+        const { stdout: verifiedShaOutput } = await execAsync(verifyCommand);
+        verifiedSha = verifiedShaOutput.trim();
+      } catch (verifyError) {
+        this.logger.error(`❌ SHA ${sinceSha} not found in repository, trying alternative approaches...`);
+        
+        // Try to find the SHA in all branches
+        try {
+          const findCommand = `cd "${repoPath}" && git log --all --grep="${sinceSha}" --format="%H" -1`;
+          const { stdout: foundSha } = await execAsync(findCommand);
+          if (foundSha.trim()) {
+            verifiedSha = foundSha.trim();
+            this.logger.log(`✅ Found SHA ${sinceSha} as ${verifiedSha} in repository history`);
+          } else {
+            this.logger.error(`❌ Could not find SHA ${sinceSha} in any branch`);
+            return [];
+          }
+        } catch (findError) {
+          this.logger.error(`❌ Failed to find SHA ${sinceSha} in repository: ${findError.message}`);
+          return [];
+        }
+      }
+
+      // Get basic commit information with verified SHA
+      let command = `cd "${repoPath}" && git log ${verifiedSha}..HEAD --pretty=format:"%H|%an|%ae|%ad|%s" --date=iso`;
+      let stdout: string;
+      
+      try {
+        const result = await execAsync(command);
+        stdout = result.stdout;
+      } catch (rangeError) {
+        this.logger.warn(`❌ Range ${verifiedSha}..HEAD failed, trying alternative approach...`);
+        
+        // Try getting commits since the SHA without using range syntax
+        try {
+          command = `cd "${repoPath}" && git log --since="${verifiedSha}" --pretty=format:"%H|%an|%ae|%ad|%s" --date=iso`;
+          const result = await execAsync(command);
+          stdout = result.stdout;
+        } catch (sinceError) {
+          this.logger.error(`❌ Both range and since approaches failed for SHA ${verifiedSha}`);
+          return [];
+        }
+      }
 
       if (!stdout.trim()) {
         return [];
@@ -550,7 +596,7 @@ export class PollingProcessor {
         const [sha, author, email, date, message] = line.split('|');
         
         // Get detailed commit statistics
-        const statsCommand = `cd ${repoPath} && git show --stat --format="" ${sha}`;
+        const statsCommand = `cd "${repoPath}" && git show --stat --format="" ${sha}`;
         let linesAdded = 0;
         let linesDeleted = 0;
         let filesChanged: string[] = [];
@@ -558,13 +604,20 @@ export class PollingProcessor {
         try {
           const { stdout: statsOutput } = await execAsync(statsCommand);
           
+          // Debug: Log the stats output for the first few commits
+          if (commits.length < 3) {
+            this.logger.log(`📊 Git stats output for ${sha}:`);
+            this.logger.log(statsOutput);
+          }
+          
           // Parse the stats output
           const statsLines = statsOutput.split('\n');
           for (const statLine of statsLines) {
             // Look for lines like " 5 files changed, 123 insertions(+), 45 deletions(-)"
+            // Also handle variations like "123 insertions, 45 deletions" or "123 insertions(+), 45 deletions(-)"
             const fileMatch = statLine.match(/(\d+) files? changed/);
-            const insertionMatch = statLine.match(/(\d+) insertions?\(\+\)/);
-            const deletionMatch = statLine.match(/(\d+) deletions?\(-\)/);
+            const insertionMatch = statLine.match(/(\d+) insertions?/);
+            const deletionMatch = statLine.match(/(\d+) deletions?/);
             
             if (insertionMatch) {
               linesAdded = parseInt(insertionMatch[1], 10);
@@ -575,7 +628,7 @@ export class PollingProcessor {
           }
           
           // Get list of changed files
-          const filesCommand = `cd ${repoPath} && git show --name-only --format="" ${sha}`;
+          const filesCommand = `cd "${repoPath}" && git show --name-only --format="" ${sha}`;
           const { stdout: filesOutput } = await execAsync(filesCommand);
           filesChanged = filesOutput.trim().split('\n').filter(file => file.trim() !== '');
           
@@ -635,11 +688,49 @@ export class PollingProcessor {
 
   private async updateStatistics(watchlistId: string): Promise<void> {
     try {
-      this.logger.log(`📊 Updating contributor and repository statistics...`);
-      await this.gitManager.updateContributorStats(watchlistId);
-      // Note: updateRepoStats is private, so we'll use ensureStatsExist instead
-      await this.gitManager.ensureStatsExist(watchlistId);
-      this.logger.log(`✅ Statistics updated successfully`);
+      // Calculate and store bus factor (this is the main thing we care about)
+      try {
+        const busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
+        
+        // Delete existing bus factor data for this watchlist and create new record
+        await this.prisma.busFactorData.deleteMany({
+          where: {
+            watchlist_id: watchlistId,
+          },
+        });
+        
+        // Create new bus factor data
+        await this.prisma.busFactorData.create({
+          data: {
+            watchlist_id: watchlistId,
+            bus_factor: busFactorResult.busFactor,
+            total_contributors: busFactorResult.totalContributors,
+            total_commits: busFactorResult.totalCommits,
+            top_contributors: JSON.parse(JSON.stringify(busFactorResult.topContributors)),
+            risk_level: busFactorResult.riskLevel,
+            risk_reason: busFactorResult.riskReason,
+            analysis_date: new Date(),
+          },
+        });
+        this.logger.log(`✅ Bus factor updated: ${busFactorResult.busFactor} (${busFactorResult.riskLevel}) - ${busFactorResult.totalContributors} contributors`);
+      } catch (error) {
+        this.logger.error(`❌ Bus factor calculation failed for ${watchlistId}: ${error.message}`);
+      }
+      
+      // Do a minimal contributor stats update (only if needed)
+      try {
+        const existingStats = await this.prisma.contributorStats.findFirst({
+          where: { watchlist_id: watchlistId }
+        });
+        
+        if (!existingStats) {
+          // Only update if no stats exist - this is much faster
+          await this.gitManager.updateContributorStats(watchlistId);
+        }
+      } catch (error) {
+        // Don't fail the entire process if contributor stats fail
+        this.logger.warn(`⚠️ Contributor stats update skipped for ${watchlistId}: ${error.message}`);
+      }
     } catch (error) {
       this.logger.error(`Error updating statistics:`, error);
       // Don't fail the entire process if stats update fails

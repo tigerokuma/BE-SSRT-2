@@ -64,6 +64,7 @@ export class WatchlistRepository {
           select: {
             bus_factor: true,
             total_contributors: true,
+            total_commits: true,
             top_contributors: true,
             risk_level: true,
             risk_reason: true,
@@ -156,6 +157,7 @@ export class WatchlistRepository {
             description: latestBusFactor.risk_reason || '',
             topContributors: latestBusFactor.top_contributors as any[] || [],
             totalContributors: latestBusFactor.total_contributors || 0,
+            totalCommits: latestBusFactor.total_commits || 0,
             analysisDate: latestBusFactor.analysis_date
           } : null,
           healthScore: latestHealth?.overall_health_score || null,
