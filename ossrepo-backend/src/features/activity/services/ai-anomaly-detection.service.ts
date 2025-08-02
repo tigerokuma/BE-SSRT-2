@@ -50,6 +50,7 @@ export class AIAnomalyDetectionService {
   // Bot patterns to filter out
   private readonly botPatterns = [
     /dependabot/i,
+    /dependabot\[bot\]/i,
     /github-actions/i,
     /github-actions\[bot\]/i,
     /renovate/i,
@@ -62,6 +63,7 @@ export class AIAnomalyDetectionService {
     /bot@/i,
     /noreply@github\.com/i,
     /actions@github\.com/i,
+    /\[bot\]/i, // Catch any bot with [bot] suffix
   ];
 
   constructor(private readonly prisma: PrismaService) {
@@ -140,9 +142,39 @@ export class AIAnomalyDetectionService {
       /^chore: upgrade/i,
       /^chore: renovate/i,
       /^chore: dependabot/i,
+      /^build\(deps\):/i,
+      /^build\(dependencies\):/i,
+      /^fix\(deps\):/i,
+      /^fix\(dependencies\):/i,
+      /^deps:/i,
+      /^dependencies:/i,
     ];
 
     for (const pattern of botMessagePatterns) {
+      if (pattern.test(message)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a commit is a merge commit
+   */
+  private isMergeCommit(data: CommitAnalysisData): boolean {
+    const message = data.message || '';
+    
+    // Common merge commit patterns
+    const mergePatterns = [
+      /^merge/i,
+      /^merge branch/i,
+      /^merge pull request/i,
+      /^merge.*into/i,
+      /^merge.*from/i,
+    ];
+
+    for (const pattern of mergePatterns) {
       if (pattern.test(message)) {
         return true;
       }
@@ -168,11 +200,23 @@ export class AIAnomalyDetectionService {
         };
       }
 
+      // Skip merge commits
+      if (this.isMergeCommit(data)) {
+        this.logger.log(`🔄 Skipping merge commit: ${data.sha.substring(0, 8)}`);
+        return {
+          isAnomalous: false,
+          confidence: 0.9,
+          reasoning: 'Merge commit - automatically excluded',
+          riskLevel: 'low',
+          suspiciousFactors: [],
+        };
+      }
+
       // Pre-filter: Skip obviously normal commits to reduce false positives
       const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
       
-      // Skip very small commits (less than 10 lines total)
-      if (totalLines < 10) {
+      // Skip very small commits (less than 5 lines total) - lowered from 10
+      if (totalLines < 5) {
         this.logger.log(`📝 Skipping small commit (${totalLines} lines): ${data.sha.substring(0, 8)}`);
         return {
           isAnomalous: false,
@@ -205,8 +249,8 @@ export class AIAnomalyDetectionService {
       if (data.repoStats) {
         const repoAvgLines = data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
         
-        // If commit is within 3x repo average, skip AI analysis
-        if (totalLines <= repoAvgLines * 3) {
+        // If commit is within 2x repo average, skip AI analysis (lowered from 3x)
+        if (totalLines <= repoAvgLines) {
           this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs repo avg ${repoAvgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
           return {
             isAnomalous: false,
@@ -335,6 +379,26 @@ export class AIAnomalyDetectionService {
     const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
     const filesChanged = data.filesChanged?.length || 0;
     
+    // Analyze file patterns for suspicious indicators
+    const suspiciousFilePatterns: string[] = [];
+    if (data.filesChanged && data.filesChanged.length > 0) {
+      const files = data.filesChanged as string[];
+      const configFiles = files.filter(f => 
+        f.includes('config') || f.includes('.env') || f.includes('secret') || 
+        f.includes('key') || f.includes('.pem') || f.includes('password')
+      );
+      const lockFiles = files.filter(f => 
+        f.includes('package-lock.json') || f.includes('yarn.lock') || f.includes('pnpm-lock.yaml')
+      );
+      const unusualExtensions = files.filter(f => 
+        f.includes('.exe') || f.includes('.dll') || f.includes('.so') || f.includes('.dylib')
+      );
+      
+      if (configFiles.length > 0) suspiciousFilePatterns.push(`Config files: ${configFiles.join(', ')}`);
+      if (lockFiles.length > 0) suspiciousFilePatterns.push(`Lock files: ${lockFiles.join(', ')}`);
+      if (unusualExtensions.length > 0) suspiciousFilePatterns.push(`Unusual extensions: ${unusualExtensions.join(', ')}`);
+    }
+    
     // Format timestamp as human readable
     const commitTime = new Date(data.date);
     const timeString = commitTime.toLocaleString('en-US', {
@@ -351,7 +415,7 @@ export class AIAnomalyDetectionService {
 Author: ${data.author}
 Message: "${cleanMessage}"
 Lines: +${data.linesAdded || 0} -${data.linesDeleted || 0} (total: ${totalLines})
-Files: ${filesChanged}
+Files: ${filesChanged}${suspiciousFilePatterns.length > 0 ? '\nSuspicious file patterns: ' + suspiciousFilePatterns.join('; ') : ''}
 Time: ${timeString}`;
 
     if (data.contributorStats) {
@@ -369,14 +433,16 @@ Author History:
       // Add commit time histogram if available
       if (data.contributorStats.commitTimeHistogram) {
         const timeHistogram = data.contributorStats.commitTimeHistogram;
-        const sortedHours = Object.entries(timeHistogram)
-          .sort(([,a], [,b]) => b - a)
-          .slice(0, 3)
-          .map(([hour, count]) => `${hour}:00 (${count} commits)`)
-          .join(', ');
+        const typicalHours = this.getTypicalCommitHours(timeHistogram);
+        const isUnusual = this.isUnusualCommitTime(commitTime, timeHistogram);
         
         prompt += `
-- Typical commit hours: ${sortedHours}`;
+- Typical commit hours: ${typicalHours}`;
+        
+        if (isUnusual) {
+          prompt += `
+- ⚠️ UNUSUAL TIMING: Commit at ${timeString} is outside typical hours`;
+        }
       }
     }
 
@@ -389,23 +455,28 @@ Repository Average: ${repoAvgLines.toFixed(0)} lines per commit`;
 
     prompt += `
 
-CRITICAL: Only flag as suspicious if EXTREMELY concerning:
-- Lines changed > 50x author average OR > 100x repo average
-- Suspicious file patterns (many config files, sensitive files, unusual extensions)
-- Clearly suspicious messages (security-related, "deleting", "removing", etc.)
-- Very unusual timing (commits at 3 AM when author never commits at night)
+ANALYZE THIS COMMIT FOR SUSPICIOUS ACTIVITY:
 
-Small commits are NORMAL. Commits smaller than average are NORMAL.
-Only flag if there's a clear combination of multiple suspicious factors.
-Default to normal unless clearly suspicious.
+SUSPICIOUS PATTERNS TO DETECT:
+- Lines changed > 10x author average OR > 20x repo average
+- Suspicious file patterns (config files, sensitive files, unusual extensions)
+- Suspicious messages (security-related, "deleting", "removing", "fix", "update" with large changes)
+- Unusual timing (commits outside author's typical hours - check if marked as UNUSUAL TIMING)
+- Generic messages with large changes ("update dependencies", "fix", "cleanup")
+
+BE DECISIVE: Either flag as suspicious with specific reasons OR mark as normal.
+Keep reasoning concise and factual. Do not speculate about intent or mention "further investigation".
+Focus on specific patterns, not percentages of codebase.
+IMPORTANT: The reasoning field should contain ONLY plain text, no JSON formatting.
+For timing analysis, be specific: instead of "unusual timing", say "committed at 3:00 AM while normally contributes at 6:00-9:00 PM".
 
 JSON response:
 {
   "isAnomalous": [true if suspicious, false if normal],
-  "confidence": [AI determines confidence 0.0-1.0],
-  "reasoning": "Brief explanation of why suspicious or normal",
-  "riskLevel": "low",
-  "suspiciousFactors": []
+  "confidence": [0.0-1.0],
+  "reasoning": "Brief specific reason in plain text only (absolutely no json formatting) (ideally less than 200 characters)",
+  "riskLevel": "low|moderate|high|critical",
+  "suspiciousFactors": ["factor1", "factor2"]
 }`;
 
     return prompt;
@@ -505,13 +576,28 @@ JSON response:
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
-                     const result = {
-             isAnomalous: parsed.isAnomalous || false,
-             confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
-             reasoning: parsed.reasoning || 'No reasoning provided',
-             riskLevel: this.validateRiskLevel(parsed.riskLevel),
-             suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
-           };
+          
+          // Clean up the reasoning field - remove any JSON artifacts
+          let cleanReasoning = parsed.reasoning || 'No reasoning provided';
+          cleanReasoning = cleanReasoning
+            .replace(/^\{[\s\S]*\}/, '') // Remove any JSON at the start
+            .replace(/\{[\s\S]*\}$/, '') // Remove any JSON at the end
+            .replace(/^"|"$/g, '') // Remove quotes
+            .replace(/\\n/g, ' ') // Replace newlines with spaces
+            .replace(/\\"/g, '"') // Fix escaped quotes
+            .replace(/\{[^}]*\}/g, '') // Remove any remaining JSON objects
+            .replace(/"[^"]*":\s*"[^"]*"/g, '') // Remove key-value pairs
+            .replace(/"[^"]*":\s*[^,}]+/g, '') // Remove key-value pairs with non-string values
+            .trim();
+          
+          // Don't limit reasoning length - show full explanation
+          const result = {
+            isAnomalous: parsed.isAnomalous || false,
+            confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
+            reasoning: cleanReasoning,
+            riskLevel: this.validateRiskLevel(parsed.riskLevel),
+            suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
+          };
           
           this.logger.log(`✅ Successfully parsed JSON response: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`);
           return result;
@@ -535,11 +621,15 @@ JSON response:
        .replace(/here's a breakdown:/i, '')
        .replace(/the json/i, '')
        .replace(/json/i, '')
+       .replace(/\{[\s\S]*\}/g, '') // Remove any JSON objects
+       .replace(/^"|"$/g, '') // Remove quotes
+       .replace(/\\n/g, ' ') // Replace newlines with spaces
        .trim();
      
-     if (!cleanReasoning) {
-       cleanReasoning = isAnomalous ? 'Unusual patterns detected' : 'Normal commit';
-     }
+      // Don't limit reasoning length - show full explanation
+      if (!cleanReasoning) {
+        cleanReasoning = isAnomalous ? 'Unusual patterns detected' : 'Normal commit';
+      }
      
      const result: AnomalyDetectionResult = {
        isAnomalous,
@@ -568,6 +658,44 @@ JSON response:
     return validLevels.includes(level?.toLowerCase()) ? level.toLowerCase() as any : 'low';
   }
 
+  /**
+   * Get typical commit hours for an author
+   */
+  private getTypicalCommitHours(commitTimeHistogram: Record<string, number>): string {
+    if (!commitTimeHistogram || Object.keys(commitTimeHistogram).length === 0) {
+      return 'No timing data available';
+    }
+
+    const sortedHours = Object.entries(commitTimeHistogram)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 3)
+      .map(([hour, count]) => {
+        const hourNum = parseInt(hour);
+        const timeStr = hourNum < 12 ? `${hourNum}:00 AM` : 
+                       hourNum === 12 ? '12:00 PM' : 
+                       `${hourNum - 12}:00 PM`;
+        return `${timeStr} (${count} commits)`;
+      })
+      .join(', ');
+
+    return sortedHours;
+  }
+
+  /**
+   * Check if commit time is unusual for the author
+   */
+  private isUnusualCommitTime(commitTime: Date, commitTimeHistogram?: Record<string, number>): boolean {
+    if (!commitTimeHistogram) return false;
+
+    const commitHour = commitTime.getHours().toString();
+    const topHours = Object.entries(commitTimeHistogram)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 3)
+      .map(([hour]) => hour);
+
+    // Check if commit hour is not in top 3 typical hours
+    return !topHours.includes(commitHour);
+  }
 
 
   async testModelConnection(): Promise<boolean> {
