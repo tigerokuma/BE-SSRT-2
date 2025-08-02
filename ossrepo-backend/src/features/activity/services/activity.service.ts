@@ -445,7 +445,7 @@ export class ActivityService {
   }
 
   async removeFromWatchlist(userWatchlistId: string): Promise<void> {
-    // First, get the user watchlist to check if it's the only one for this user
+    // First, get the user watchlist to check if it's the only one for this watchlist
     const userWatchlist = await this.prisma.userWatchlist.findUnique({
       where: { id: userWatchlistId },
       include: {
@@ -464,10 +464,11 @@ export class ActivityService {
 
     const userId = userWatchlist.user_id
     const watchlistId = userWatchlist.watchlist_id
+    const packageId = userWatchlist.watchlist.package_id
 
-    // Check if this is the only repository being watched by this user
-    const userWatchlistCount = await this.prisma.userWatchlist.count({
-      where: { user_id: userId }
+    // Check if this is the only user watching this specific watchlist
+    const watchlistUserCount = await this.prisma.userWatchlist.count({
+      where: { watchlist_id: watchlistId }
     })
 
     // Delete the specific user watchlist entry
@@ -475,9 +476,24 @@ export class ActivityService {
       where: { id: userWatchlistId }
     })
 
-    // If this was the only repository being watched, clean up all related data
-    if (userWatchlistCount === 1) {
-      console.log(`🧹 Cleaning up all data for user ${userId} as this was their only watched repository`)
+    // If this was the only user watching this watchlist, clean up all related data
+    if (watchlistUserCount === 1) {
+      console.log(`🧹 Cleaning up all data for watchlist ${watchlistId} as this was the only user watching it`)
+
+      // Delete all vulnerabilities for this watchlist
+      await this.prisma.vulnerability.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete vulnerability summaries for this watchlist
+      await this.prisma.vulnerabilitySummary.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all repository stats for this watchlist
+      await this.prisma.repoStats.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
 
       // Delete all logs for this watchlist
       await this.prisma.log.deleteMany({
@@ -494,34 +510,91 @@ export class ActivityService {
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all repository stats for this watchlist
-      await this.prisma.repoStats.deleteMany({
+      // Delete all bus factor data for this watchlist
+      await this.prisma.busFactorData.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all graph snapshots for this watchlist (using repo_id which should match package_id)
+      // Delete all alert triggers for this watchlist
+      await this.prisma.alertTriggered.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all AI summary data for this watchlist
+      await this.prisma.aISummaryData.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all AI anomalies detected for this watchlist
+      await this.prisma.aIAnomaliesDetected.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all activity data for this watchlist
+      await this.prisma.activityData.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all graph snapshots for this package
       await this.prisma.graphSnapshot.deleteMany({
-        where: { repo_id: userWatchlist.watchlist.package_id }
+        where: { repo_id: packageId }
       })
 
-      // Delete all alert triggers for this user watchlist (Alert model doesn't exist, only AlertTriggered)
-      await this.prisma.alertTriggered.deleteMany({
-        where: { user_watchlist_id: userWatchlistId }
+      // Delete all graph nodes for this package (via snapshot_id)
+      const snapshotIds = await this.prisma.graphSnapshot.findMany({
+        where: { repo_id: packageId },
+        select: { snapshot_id: true }
+      })
+      
+      if (snapshotIds.length > 0) {
+        const snapshotIdList = snapshotIds.map(s => s.snapshot_id)
+        await this.prisma.graphNode.deleteMany({
+          where: { snapshot_id: { in: snapshotIdList } }
+        })
+        await this.prisma.graphEdge.deleteMany({
+          where: { snapshot_id: { in: snapshotIdList } }
+        })
+      }
+
+      // Delete all build tasks for this package
+      await this.prisma.buildTask.deleteMany({
+        where: { repo_id: packageId }
       })
 
-      // Delete all alert triggers for this user watchlist
-      await this.prisma.alertTriggered.deleteMany({
-        where: { user_watchlist_id: userWatchlistId }
+      // Delete all build subtasks for this package (via task_id)
+      const buildTaskIds = await this.prisma.buildTask.findMany({
+        where: { repo_id: packageId },
+        select: { task_id: true }
       })
+      
+      if (buildTaskIds.length > 0) {
+        const taskIdList = buildTaskIds.map(t => t.task_id)
+        await this.prisma.buildSubtask.deleteMany({
+          where: { task_id: { in: taskIdList } }
+        })
+      }
+
+      // Delete all graph exports for this package
+      await this.prisma.graphExport.deleteMany({
+        where: { repo_id: packageId }
+      })
+
+      // Delete all weekly summary data for this watchlist
+      await this.prisma.weeklySummaryData.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Delete all watchlist SBOM data for this watchlist
+      await this.prisma.watchlistSbom.deleteMany({
+        where: { watchlist_id: watchlistId }
+      })
+
+      // Note: UserWatchlistSbom is user-specific and should persist
+      // so we don't delete it here
 
       // Delete the watchlist itself
       await this.prisma.watchlist.delete({
         where: { watchlist_id: watchlistId }
-      })
-
-      // Delete the user itself
-      await this.prisma.user.delete({
-        where: { user_id: userId }
       })
     }
 
