@@ -531,6 +531,23 @@ export class RepositorySetupProcessor {
         this.logger.error(`❌ AI summary generation failed: ${error.message}`);
       }
 
+      // Step 7: Run AI anomaly detection on the previous 50 commits
+      try {
+        await this.runAIAnomalyDetection(watchlistId);
+      } catch (error) {
+        this.logger.error('Failed to run AI anomaly detection:', error);
+        // Don't fail the entire setup if AI detection fails
+      }
+
+      // Step 8: Fetch and store vulnerability data
+      try {
+        await this.fetchAndStoreVulnerabilities(watchlistId, owner, repo);
+      } catch (error) {
+        this.logger.error('Failed to fetch vulnerability data:', error);
+        // Don't fail the entire setup if vulnerability fetching fails
+      }
+
+      // Step 9: Mark repository as ready AFTER all processing is complete
       await this.prisma.watchlist.update({
         where: { watchlist_id: watchlistId },
         data: {
@@ -568,22 +585,6 @@ export class RepositorySetupProcessor {
             weeklyCommitRate: weeklyCommitRate,
           }
         : null;
-
-      // Step 7: Run AI anomaly detection on the previous 50 commits
-      try {
-        await this.runAIAnomalyDetection(watchlistId);
-      } catch (error) {
-        this.logger.error('Failed to run AI anomaly detection:', error);
-        // Don't fail the entire setup if AI detection fails
-      }
-
-      // Step 8: Fetch and store vulnerability data
-      try {
-        await this.fetchAndStoreVulnerabilities(watchlistId, owner, repo);
-      } catch (error) {
-        this.logger.error('Failed to fetch vulnerability data:', error);
-        // Don't fail the entire setup if vulnerability fetching fails
-      }
 
       this.logger.log(
         `✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}${activityInfo ? `, activity: ${activityInfo.activityScore}/100 (${activityInfo.activityLevel}), weekly rate: ${activityInfo.weeklyCommitRate.toFixed(2)} commits/week` : ''}`,

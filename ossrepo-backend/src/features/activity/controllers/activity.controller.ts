@@ -12,6 +12,7 @@ import {
   Delete,
   NotFoundException,
   InternalServerErrorException,
+  Put,
 } from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { CommitSummaryDto, CommitSummaryResponseDto } from '../dto/commit-summary.dto';
@@ -63,6 +64,32 @@ export class ActivityController {
     const result = await this.activityService.addToWatchlist(dto);
 
     return result;
+  }
+
+  @Put('user-watchlist-alerts/:userWatchlistId')
+  @ApiOperation({
+    summary: 'Update alert settings for a user watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Alert settings updated successfully',
+  })
+  async updateUserWatchlistAlerts(
+    @Param('userWatchlistId') userWatchlistId: string,
+    @Body() body: { alerts: any }
+  ) {
+    this.logger.log(`📝 Updating alert settings for user watchlist ${userWatchlistId}`);
+
+    try {
+      await this.activityService.updateUserWatchlistAlerts(userWatchlistId, body.alerts);
+      return { success: true, message: 'Alert settings updated successfully' };
+    } catch (error) {
+      this.logger.error(`Error updating alert settings: ${error.message}`);
+      throw new HttpException(
+        `Failed to update alert settings: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   @Get('watchlist/:watchlistId/status')

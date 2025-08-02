@@ -90,60 +90,42 @@ export class FilesChangedAlertDto {
   hardcoded_threshold?: number;
 }
 
-export class HighChurnAlertDto {
+export class SuspiciousAuthorTimestampsAlertDto {
   @ApiProperty({
     example: true,
-    description: 'Enable/disable high churn alerts',
-  })
-  @IsBoolean()
-  enabled: boolean;
-
-  @ApiProperty({
-    example: 2.5,
-    description: 'Multiplier from typical daily norm',
-    required: false,
-  })
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  multiplier?: number;
-
-  @ApiProperty({
-    example: 10,
-    description: 'Hardcoded threshold for number of commits in time period',
-    required: false,
-  })
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  hardcoded_threshold?: number;
-}
-
-export class AncestryBreaksAlertDto {
-  @ApiProperty({
-    example: true,
-    description: 'Whether to alert on history rewrites',
+    description: 'Enable/disable suspicious author timestamps alerts',
   })
   @IsBoolean()
   enabled: boolean;
 }
 
-export class UnusualAuthorActivityAlertDto {
+export class NewVulnerabilitiesDetectedAlertDto {
   @ApiProperty({
     example: true,
-    description: 'Enable/disable unusual author activity alerts',
+    description: 'Enable/disable new vulnerabilities detected alerts',
+  })
+  @IsBoolean()
+  enabled: boolean;
+}
+
+export class HealthScoreDecreasesAlertDto {
+  @ApiProperty({
+    example: true,
+    description: 'Enable/disable health score decreases alerts',
   })
   @IsBoolean()
   enabled: boolean;
 
   @ApiProperty({
-    example: 80,
-    description: 'Percentage outside typical time range',
+    example: 5,
+    description: 'Minimum health score change to trigger alert',
+    required: false,
   })
   @IsNumber()
-  @Min(0)
-  @Max(100)
-  percentage_outside_range: number;
+  @Min(1)
+  @Max(50)
+  @IsOptional()
+  minimum_health_change?: number;
 }
 
 export class AIAnomalyDetectionAlertDto {
@@ -166,20 +148,20 @@ export class AlertSettingsDto {
   @Type(() => FilesChangedAlertDto)
   files_changed: FilesChangedAlertDto;
 
-  @ApiProperty({ type: HighChurnAlertDto })
+  @ApiProperty({ type: SuspiciousAuthorTimestampsAlertDto })
   @ValidateNested()
-  @Type(() => HighChurnAlertDto)
-  high_churn: HighChurnAlertDto;
+  @Type(() => SuspiciousAuthorTimestampsAlertDto)
+  suspicious_author_timestamps: SuspiciousAuthorTimestampsAlertDto;
 
-  @ApiProperty({ type: AncestryBreaksAlertDto })
+  @ApiProperty({ type: NewVulnerabilitiesDetectedAlertDto })
   @ValidateNested()
-  @Type(() => AncestryBreaksAlertDto)
-  ancestry_breaks: AncestryBreaksAlertDto;
+  @Type(() => NewVulnerabilitiesDetectedAlertDto)
+  new_vulnerabilities_detected: NewVulnerabilitiesDetectedAlertDto;
 
-  @ApiProperty({ type: UnusualAuthorActivityAlertDto })
+  @ApiProperty({ type: HealthScoreDecreasesAlertDto })
   @ValidateNested()
-  @Type(() => UnusualAuthorActivityAlertDto)
-  unusual_author_activity: UnusualAuthorActivityAlertDto;
+  @Type(() => HealthScoreDecreasesAlertDto)
+  health_score_decreases: HealthScoreDecreasesAlertDto;
 
   @ApiProperty({ type: AIAnomalyDetectionAlertDto })
   @ValidateNested()
@@ -197,11 +179,6 @@ export class AddToWatchlistDto {
   @IsString()
   @IsNotEmpty()
   added_by: string;
-
-  @ApiProperty({ example: 'Important repository to monitor', required: false })
-  @IsString()
-  @IsOptional()
-  notes?: string;
 
   @ApiProperty({ type: AlertSettingsDto })
   @ValidateNested()

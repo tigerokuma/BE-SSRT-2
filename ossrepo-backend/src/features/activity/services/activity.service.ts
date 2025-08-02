@@ -70,7 +70,6 @@ export class ActivityService {
             watchlist_id: existingWatchlist.watchlist_id,
             added_at: new Date(),
             alerts: JSON.stringify(dto.alerts),
-            notes: dto.notes || null,
             created_at: new Date(),
           },
         });
@@ -121,7 +120,6 @@ export class ActivityService {
             watchlist_id: watchlistId,
             added_at: new Date(),
             alerts: JSON.stringify(dto.alerts),
-            notes: dto.notes || null,
             created_at: new Date(),
           },
         });
