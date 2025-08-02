@@ -36,7 +36,6 @@ export class PackagesService {
       last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
       version: pkg.version || '',
       license: pkg.license || '',
-      vulnerabilities: pkg.vulnerabilities || [],
       osv_vulnerabilities: pkg.osv_vulnerabilities || []
     };
   }
@@ -53,7 +52,6 @@ export class PackagesService {
       last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
       version: pkg.version || '',
       license: pkg.license || '',
-      vulnerabilities: pkg.vulnerabilities || [],
       osv_vulnerabilities: pkg.osv_vulnerabilities || [],
       package_id: pkg.package_id || '',
       published: pkg.published_at ? new Date(pkg.published_at).toISOString().split('T')[0] : '',
