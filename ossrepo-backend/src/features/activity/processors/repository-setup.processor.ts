@@ -13,6 +13,7 @@ import {
   CommitData,
 } from '../services/activity-analysis.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
+import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.service';
 
 interface RepositorySetupJobData {
   watchlistId: string;
@@ -39,6 +40,7 @@ export class RepositorySetupProcessor {
     private readonly busFactorService: BusFactorService,
     private readonly activityAnalysisService: ActivityAnalysisService,
     private readonly repositorySummaryService: RepositorySummaryService,
+    private readonly aiAnomalyDetectionService: AIAnomalyDetectionService,
   ) {}
 
   @Process('clone-and-analyze')
@@ -565,6 +567,14 @@ export class RepositorySetupProcessor {
           }
         : null;
 
+      // Step 7: Run AI anomaly detection on the previous 50 commits
+      try {
+        await this.runAIAnomalyDetection(watchlistId);
+      } catch (error) {
+        this.logger.error('Failed to run AI anomaly detection:', error);
+        // Don't fail the entire setup if AI detection fails
+      }
+
       this.logger.log(
         `✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}${activityInfo ? `, activity: ${activityInfo.activityScore}/100 (${activityInfo.activityLevel}), weekly rate: ${activityInfo.weeklyCommitRate.toFixed(2)} commits/week` : ''}`,
       );
@@ -747,6 +757,93 @@ export class RepositorySetupProcessor {
     } catch (error) {
       this.logger.error(`❌ Error logging commits to database:`, error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Run AI anomaly detection on the previous 50 commits
+   */
+  private async runAIAnomalyDetection(watchlistId: string): Promise<void> {
+    try {
+      this.logger.log(`🔍 Starting AI anomaly detection for watchlist ${watchlistId}`);
+
+      // Get the last 50 commits from the database
+      const commits = await this.prisma.log.findMany({
+        where: {
+          watchlist_id: watchlistId,
+          event_type: 'COMMIT',
+        },
+        orderBy: {
+          timestamp: 'desc',
+        },
+        take: 50,
+      });
+
+      if (commits.length === 0) {
+        this.logger.log(`📝 No commits found for AI anomaly detection`);
+        return;
+      }
+
+      this.logger.log(`🔍 Analyzing ${commits.length} commits for anomalies`);
+
+      // Get contributor and repo stats for context
+      const contributorStats = await this.prisma.contributorStats.findMany({
+        where: { watchlist_id: watchlistId },
+      });
+
+      const repoStats = await this.prisma.repoStats.findFirst({
+        where: { watchlist_id: watchlistId },
+      });
+
+      // Process each commit for AI anomaly detection
+      for (const commit of commits) {
+        try {
+          const payload = commit.payload as any;
+          
+          // Prepare data for AI analysis
+          const analysisData = {
+            sha: payload.sha,
+            author: commit.actor,
+            email: payload.email || 'unknown@example.com',
+            message: payload.message,
+            date: commit.timestamp,
+            linesAdded: payload.lines_added || 0,
+            linesDeleted: payload.lines_deleted || 0,
+            filesChanged: payload.files_changed || [],
+            contributorStats: contributorStats.find(cs => cs.author_email === payload.email) ? {
+              avgLinesAdded: contributorStats.find(cs => cs.author_email === payload.email)!.avg_lines_added,
+              avgLinesDeleted: contributorStats.find(cs => cs.author_email === payload.email)!.avg_lines_deleted,
+              avgFilesChanged: contributorStats.find(cs => cs.author_email === payload.email)!.avg_files_changed,
+              stddevLinesAdded: contributorStats.find(cs => cs.author_email === payload.email)!.stddev_lines_added,
+              stddevLinesDeleted: contributorStats.find(cs => cs.author_email === payload.email)!.stddev_lines_deleted,
+              stddevFilesChanged: contributorStats.find(cs => cs.author_email === payload.email)!.stddev_files_changed,
+              totalCommits: contributorStats.find(cs => cs.author_email === payload.email)!.total_commits,
+            } : undefined,
+            repoStats: repoStats ? {
+              avgLinesAdded: repoStats.avg_lines_added,
+              avgLinesDeleted: repoStats.avg_lines_deleted,
+              avgFilesChanged: repoStats.avg_files_changed,
+              totalCommits: repoStats.total_commits,
+              totalContributors: contributorStats.length,
+            } : undefined,
+          };
+
+          // Run AI anomaly detection and store result
+          await this.aiAnomalyDetectionService.analyzeAndStoreAnomaly(
+            watchlistId,
+            analysisData,
+          );
+
+        } catch (error) {
+          this.logger.error(`Failed to analyze commit ${commit.event_id} for anomalies:`, error);
+          // Continue with other commits even if one fails
+        }
+      }
+
+      this.logger.log(`✅ Completed AI anomaly detection for ${commits.length} commits`);
+    } catch (error) {
+      this.logger.error('Failed to run AI anomaly detection:', error);
+      // Don't throw error - this is not critical for repository setup
     }
   }
 

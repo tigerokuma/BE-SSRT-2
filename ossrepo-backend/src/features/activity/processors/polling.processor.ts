@@ -6,6 +6,7 @@ import { GitManagerService } from '../services/git-manager.service';
 import { AlertingService } from '../services/alerting.service';
 import { ActivityAnalysisService } from '../services/activity-analysis.service';
 import { BusFactorService } from '../services/bus-factor.service';
+import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as fs from 'fs';
@@ -36,6 +37,7 @@ export class PollingProcessor {
     private readonly alertingService: AlertingService,
     private readonly activityAnalysisService: ActivityAnalysisService,
     private readonly busFactorService: BusFactorService,
+    private readonly aiAnomalyDetectionService: AIAnomalyDetectionService,
     @InjectQueue('polling') private readonly pollingQueue: Queue,
     @InjectQueue('repository-setup') private readonly setupQueue: Queue,
   ) {
@@ -261,6 +263,9 @@ export class PollingProcessor {
 
       // Log commits to database
       await this.logCommitsToDatabase(watchlistId, newCommits);
+
+      // Check new commits for AI anomalies
+      await this.checkNewCommitsForAnomalies(watchlistId, newCommits);
 
       // Check for alerts on each commit
       for (const commit of newCommits) {
@@ -886,6 +891,79 @@ export class PollingProcessor {
              this.logger.log(`Activity score updated for ${watchlistId}`);
     } catch (error) {
       this.logger.error(`Error updating activity score: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check new commits for AI anomalies during polling
+   */
+  private async checkNewCommitsForAnomalies(watchlistId: string, newCommits: any[]): Promise<void> {
+    try {
+      if (newCommits.length === 0) {
+        this.logger.log(`📝 No new commits to check for anomalies`);
+        return;
+      }
+
+      this.logger.log(`🔍 Checking ${newCommits.length} new commits for AI anomalies`);
+
+      // Get contributor and repo stats for context
+      const contributorStats = await this.prisma.contributorStats.findMany({
+        where: { watchlist_id: watchlistId },
+      });
+
+      const repoStats = await this.prisma.repoStats.findFirst({
+        where: { watchlist_id: watchlistId },
+      });
+
+      // Process each new commit for AI anomaly detection
+      for (const commit of newCommits) {
+        try {
+          const payload = commit.payload as any;
+          
+          // Prepare data for AI analysis
+          const analysisData = {
+            sha: payload.sha,
+            author: commit.actor,
+            email: payload.email || 'unknown@example.com',
+            message: payload.message,
+            date: commit.timestamp,
+            linesAdded: payload.lines_added || 0,
+            linesDeleted: payload.lines_deleted || 0,
+            filesChanged: payload.files_changed || [],
+            contributorStats: contributorStats.find(cs => cs.author_email === payload.email) ? {
+              avgLinesAdded: contributorStats.find(cs => cs.author_email === payload.email)!.avg_lines_added,
+              avgLinesDeleted: contributorStats.find(cs => cs.author_email === payload.email)!.avg_lines_deleted,
+              avgFilesChanged: contributorStats.find(cs => cs.author_email === payload.email)!.avg_files_changed,
+              stddevLinesAdded: contributorStats.find(cs => cs.author_email === payload.email)!.stddev_lines_added,
+              stddevLinesDeleted: contributorStats.find(cs => cs.author_email === payload.email)!.stddev_lines_deleted,
+              stddevFilesChanged: contributorStats.find(cs => cs.author_email === payload.email)!.stddev_files_changed,
+              totalCommits: contributorStats.find(cs => cs.author_email === payload.email)!.total_commits,
+            } : undefined,
+            repoStats: repoStats ? {
+              avgLinesAdded: repoStats.avg_lines_added,
+              avgLinesDeleted: repoStats.avg_lines_deleted,
+              avgFilesChanged: repoStats.avg_files_changed,
+              totalCommits: repoStats.total_commits,
+              totalContributors: contributorStats.length,
+            } : undefined,
+          };
+
+          // Run AI anomaly detection and store result
+          await this.aiAnomalyDetectionService.analyzeAndStoreAnomaly(
+            watchlistId,
+            analysisData,
+          );
+
+        } catch (error) {
+          this.logger.error(`Failed to analyze commit ${commit.event_id} for anomalies:`, error);
+          // Continue with other commits even if one fails
+        }
+      }
+
+      this.logger.log(`✅ Completed AI anomaly detection for ${newCommits.length} new commits`);
+    } catch (error) {
+      this.logger.error('Failed to check new commits for anomalies:', error);
+      // Don't throw error - this is not critical for polling
     }
   }
 } 

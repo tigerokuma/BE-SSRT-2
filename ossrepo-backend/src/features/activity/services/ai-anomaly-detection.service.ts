@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 
 const execAsync = promisify(exec);
 
@@ -46,7 +47,24 @@ export class AIAnomalyDetectionService {
   private readonly modelName = 'gemma2:2b';
   private readonly maxPromptLength = 2000; // Characters
 
-  constructor() {
+  // Bot patterns to filter out
+  private readonly botPatterns = [
+    /dependabot/i,
+    /github-actions/i,
+    /github-actions\[bot\]/i,
+    /renovate/i,
+    /greenkeeper/i,
+    /snyk/i,
+    /whitesource/i,
+    /mergify/i,
+    /tidelift/i,
+    /remix run bot/i,
+    /bot@/i,
+    /noreply@github\.com/i,
+    /actions@github\.com/i,
+  ];
+
+  constructor(private readonly prisma: PrismaService) {
     this.initializeModel();
   }
 
@@ -96,91 +114,298 @@ export class AIAnomalyDetectionService {
   }
 
   /**
+   * Check if a commit is from a bot
+   */
+  private isBotCommit(data: CommitAnalysisData): boolean {
+    const author = data.author || '';
+    const email = data.email || '';
+    const message = data.message || '';
+
+    // Check author name and email against bot patterns
+    for (const pattern of this.botPatterns) {
+      if (pattern.test(author) || pattern.test(email)) {
+        return true;
+      }
+    }
+
+    // Check for common bot commit message patterns
+    const botMessagePatterns = [
+      /^chore\(deps\):/i,
+      /^chore\(dependencies\):/i,
+      /^chore\(security\):/i,
+      /^ci:/i,
+      /^build:/i,
+      /^chore: update/i,
+      /^chore: bump/i,
+      /^chore: upgrade/i,
+      /^chore: renovate/i,
+      /^chore: dependabot/i,
+    ];
+
+    for (const pattern of botMessagePatterns) {
+      if (pattern.test(message)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Analyze a commit for suspicious activity using AI
    */
   async analyzeCommitForAnomalies(data: CommitAnalysisData): Promise<AnomalyDetectionResult> {
     try {
-      const prompt = this.buildAnomalyDetectionPrompt(data);
-      const startTime = Date.now();
-      const response = await this.generateWithGemma(prompt);
-      const generationTimeMs = Date.now() - startTime;
+      // Skip bot commits entirely
+      if (this.isBotCommit(data)) {
+        this.logger.log(`🤖 Skipping bot commit: ${data.author}`);
+        return {
+          isAnomalous: false,
+          confidence: 1.0,
+          reasoning: 'Bot commit - automatically excluded',
+          riskLevel: 'low',
+          suspiciousFactors: [],
+        };
+      }
 
-      const result = this.parseAnomalyResponse(response);
+      // Pre-filter: Skip obviously normal commits to reduce false positives
+      const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
       
+      // Skip very small commits (less than 10 lines total)
+      if (totalLines < 10) {
+        this.logger.log(`📝 Skipping small commit (${totalLines} lines): ${data.sha.substring(0, 8)}`);
+        return {
+          isAnomalous: false,
+          confidence: 0.9,
+          reasoning: 'Small commit - normal development activity',
+          riskLevel: 'low',
+          suspiciousFactors: [],
+        };
+      }
+
+      // Skip commits that are within normal ranges for the author
+      if (data.contributorStats) {
+        const avgLines = data.contributorStats.avgLinesAdded + data.contributorStats.avgLinesDeleted;
+        const stddevLines = data.contributorStats.stddevLinesAdded + data.contributorStats.stddevLinesDeleted;
+        
+        // If commit is within 2 standard deviations of author's average, skip AI analysis
+        if (totalLines <= avgLines + (2 * stddevLines)) {
+          this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs avg ${avgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
+          return {
+            isAnomalous: false,
+            confidence: 0.8,
+            reasoning: 'Within normal range for this contributor',
+            riskLevel: 'low',
+            suspiciousFactors: [],
+          };
+        }
+      }
+
+      // Skip commits that are within normal ranges for the repository
+      if (data.repoStats) {
+        const repoAvgLines = data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
+        
+        // If commit is within 3x repo average, skip AI analysis
+        if (totalLines <= repoAvgLines * 3) {
+          this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs repo avg ${repoAvgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
+          return {
+            isAnomalous: false,
+            confidence: 0.8,
+            reasoning: 'Within normal range for this repository',
+            riskLevel: 'low',
+            suspiciousFactors: [],
+          };
+        }
+      }
+
+      this.logger.log(`🔍 Analyzing commit for anomalies: ${data.sha.substring(0, 8)} (${totalLines} lines)`);
+
+      // Build the prompt for AI analysis
+      const prompt = this.buildAnomalyDetectionPrompt(data);
+
+      // Generate AI response
+      const aiResponse = await this.generateWithGemma(prompt);
+
+      // Parse the AI response
+      const result = this.parseAnomalyResponse(aiResponse);
+
       this.logger.log(
-        `🔍 AI Anomaly Analysis for commit ${data.sha}: ${result.isAnomalous ? '🚨 ANOMALOUS' : '✅ Normal'} (confidence: ${result.confidence})`,
+        `📊 AI Analysis Result: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'} (confidence: ${result.confidence})`
       );
 
       return result;
     } catch (error) {
-      this.logger.error(
-        'Failed to analyze commit with AI, using fallback detection:',
-        error,
-      );
-      return this.fallbackAnomalyDetection(data);
+      this.logger.error('Error in AI anomaly detection:', error);
+      return {
+        isAnomalous: false,
+        confidence: 0.5,
+        reasoning: 'AI analysis failed',
+        riskLevel: 'low',
+        suspiciousFactors: [],
+      };
+    }
+  }
+
+  /**
+   * Analyze a commit and store the result in the database ONLY if suspicious
+   */
+  async analyzeAndStoreAnomaly(
+    watchlistId: string,
+    data: CommitAnalysisData,
+  ): Promise<AnomalyDetectionResult> {
+    try {
+      // Check if we already have an analysis for this commit
+      const existingAnalysis = await this.prisma.ai_anomalies_detected.findUnique({
+        where: {
+          watchlist_id_commit_sha: {
+            watchlist_id: watchlistId,
+            commit_sha: data.sha,
+          },
+        },
+      });
+
+      if (existingAnalysis) {
+        this.logger.log(`📋 Found existing anomaly analysis for commit ${data.sha}`);
+        return existingAnalysis.anomaly_details as unknown as AnomalyDetectionResult;
+      }
+
+      // Perform the analysis
+      const result = await this.analyzeCommitForAnomalies(data);
+
+      // ONLY store the result if it's suspicious
+      if (result.isAnomalous) {
+        await this.prisma.ai_anomalies_detected.create({
+          data: {
+            id: crypto.randomUUID(),
+            watchlist_id: watchlistId,
+            commit_sha: data.sha,
+            anomaly_details: result as any,
+          },
+        });
+
+        this.logger.log(`💾 Stored suspicious anomaly analysis for commit ${data.sha} in database`);
+      } else {
+        this.logger.log(`📝 Commit ${data.sha} is normal - not storing analysis`);
+      }
+
+      return result;
+         } catch (error) {
+       this.logger.error('Failed to analyze and store anomaly:', error);
+       return {
+         isAnomalous: false,
+         confidence: 0.5,
+         reasoning: 'Analysis failed',
+         riskLevel: 'low',
+         suspiciousFactors: [],
+       };
+     }
+  }
+
+  /**
+   * Get all anomalies for a watchlist
+   */
+  async getAnomaliesForWatchlist(watchlistId: string): Promise<any[]> {
+    try {
+      const anomalies = await this.prisma.ai_anomalies_detected.findMany({
+        where: {
+          watchlist_id: watchlistId,
+        },
+        orderBy: {
+          detected_at: 'desc',
+        },
+      });
+
+      return anomalies.map(anomaly => ({
+        id: anomaly.id,
+        commitSha: anomaly.commit_sha,
+        anomalyDetails: anomaly.anomaly_details,
+        detectedAt: anomaly.detected_at,
+      }));
+    } catch (error) {
+      this.logger.error('Failed to get anomalies for watchlist:', error);
+      return [];
     }
   }
 
   private buildAnomalyDetectionPrompt(data: CommitAnalysisData): string {
     const cleanMessage = (data.message || 'No message')
       .replace(/[^\w\s.,!?-]/g, ' ')
-      .substring(0, 200);
+      .substring(0, 100);
 
-    const filesChanged = data.filesChanged?.length || 0;
     const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
+    const filesChanged = data.filesChanged?.length || 0;
     
-    let prompt = `Analyze this git commit for suspicious or anomalous activity. Consider:
+    // Format timestamp as human readable
+    const commitTime = new Date(data.date);
+    const timeString = commitTime.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+    
+    let prompt = `Analyze this commit for suspicious activity:
 
-COMMIT DATA:
-- SHA: ${data.sha}
-- Author: ${data.author} (${data.email})
-- Message: "${cleanMessage}"
-- Date: ${data.date.toISOString()}
-- Files changed: ${filesChanged}
-- Lines added: ${data.linesAdded || 0}
-- Lines deleted: ${data.linesDeleted || 0}
-- Total lines changed: ${totalLines}`;
+Author: ${data.author}
+Message: "${cleanMessage}"
+Lines: +${data.linesAdded || 0} -${data.linesDeleted || 0} (total: ${totalLines})
+Files: ${filesChanged}
+Time: ${timeString}`;
 
     if (data.contributorStats) {
-      const stats = data.contributorStats;
+      const avgLines = data.contributorStats.avgLinesAdded + data.contributorStats.avgLinesDeleted;
+      const stddevLines = data.contributorStats.stddevLinesAdded + data.contributorStats.stddevLinesDeleted;
+      const totalCommits = data.contributorStats.totalCommits;
+      
       prompt += `
 
-CONTRIBUTOR HISTORY:
-- Average lines per commit: ${(stats.avgLinesAdded + stats.avgLinesDeleted).toFixed(1)}
-- Average files per commit: ${stats.avgFilesChanged.toFixed(1)}
-- Total commits by this author: ${stats.totalCommits}
-- Standard deviation (lines): ${(stats.stddevLinesAdded + stats.stddevLinesDeleted).toFixed(1)}
-- Standard deviation (files): ${stats.stddevFilesChanged.toFixed(1)}`;
+Author History:
+- Total commits: ${totalCommits}
+- Average lines per commit: ${avgLines.toFixed(0)}
+- Standard deviation: ${stddevLines.toFixed(0)}`;
+      
+      // Add commit time histogram if available
+      if (data.contributorStats.commitTimeHistogram) {
+        const timeHistogram = data.contributorStats.commitTimeHistogram;
+        const sortedHours = Object.entries(timeHistogram)
+          .sort(([,a], [,b]) => b - a)
+          .slice(0, 3)
+          .map(([hour, count]) => `${hour}:00 (${count} commits)`)
+          .join(', ');
+        
+        prompt += `
+- Typical commit hours: ${sortedHours}`;
+      }
     }
 
     if (data.repoStats) {
-      const stats = data.repoStats;
+      const repoAvgLines = data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
       prompt += `
 
-REPOSITORY CONTEXT:
-- Repository average lines per commit: ${(stats.avgLinesAdded + stats.avgLinesDeleted).toFixed(1)}
-- Repository average files per commit: ${stats.avgFilesChanged.toFixed(1)}
-- Total repository commits: ${stats.totalCommits}
-- Total contributors: ${stats.totalContributors}`;
+Repository Average: ${repoAvgLines.toFixed(0)} lines per commit`;
     }
 
     prompt += `
 
-SUSPICIOUS INDICATORS TO CHECK:
-1. Unusually large changes (many files/lines)
-2. Changes outside normal hours for this contributor
-3. Unusual file types or patterns
-4. Suspicious commit messages
-5. Changes that deviate significantly from contributor's history
-6. Changes that are much larger than repository average
+CRITICAL: Only flag as suspicious if EXTREMELY concerning:
+- Lines changed > 50x author average OR > 100x repo average
+- Suspicious file patterns (many config files, sensitive files, unusual extensions)
+- Clearly suspicious messages (security-related, "deleting", "removing", etc.)
+- Very unusual timing (commits at 3 AM when author never commits at night)
 
-Respond with JSON format:
+Small commits are NORMAL. Commits smaller than average are NORMAL.
+Only flag if there's a clear combination of multiple suspicious factors.
+Default to normal unless clearly suspicious.
+
+JSON response:
 {
-  "isAnomalous": true/false,
-  "confidence": 0.0-1.0,
-  "reasoning": "brief explanation",
-  "riskLevel": "low/moderate/high/critical",
-  "suspiciousFactors": ["factor1", "factor2"]
+  "isAnomalous": [true if suspicious, false if normal],
+  "confidence": [AI determines confidence 0.0-1.0],
+  "reasoning": "Brief explanation of why suspicious or normal",
+  "riskLevel": "low",
+  "suspiciousFactors": []
 }`;
 
     return prompt;
@@ -263,7 +488,13 @@ Respond with JSON format:
     try {
       if (!response || typeof response !== 'string') {
         this.logger.warn('Received empty or invalid response from AI model');
-        return this.fallbackAnomalyDetection({} as CommitAnalysisData);
+        return {
+          isAnomalous: false,
+          confidence: 0.5,
+          reasoning: 'Empty AI response',
+          riskLevel: 'low',
+          suspiciousFactors: [],
+        };
       }
 
       this.logger.log(`📝 Raw AI response length: ${response.length} characters`);
@@ -274,41 +505,62 @@ Respond with JSON format:
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
-          const result = {
-            isAnomalous: parsed.isAnomalous || false,
-            confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
-            reasoning: parsed.reasoning || 'No reasoning provided',
-            riskLevel: this.validateRiskLevel(parsed.riskLevel),
-            suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
-          };
+                     const result = {
+             isAnomalous: parsed.isAnomalous || false,
+             confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
+             reasoning: parsed.reasoning || 'No reasoning provided',
+             riskLevel: this.validateRiskLevel(parsed.riskLevel),
+             suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
+           };
           
-          this.logger.log(`✅ Successfully parsed JSON response: ${result.isAnomalous ? 'ANOMALOUS' : 'Normal'}`);
+          this.logger.log(`✅ Successfully parsed JSON response: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`);
           return result;
         } catch (jsonError) {
           this.logger.warn(`Failed to parse JSON from response: ${jsonError.message}`);
         }
       }
 
-      // Fallback parsing for non-JSON responses
-      const isAnomalous = response.toLowerCase().includes('anomalous') || 
-                         response.toLowerCase().includes('suspicious') ||
-                         response.toLowerCase().includes('unusual') ||
-                         response.toLowerCase().includes('concerning');
-      
-      const result: AnomalyDetectionResult = {
-        isAnomalous,
-        confidence: 0.6,
-        reasoning: response.substring(0, 200),
-        riskLevel: isAnomalous ? 'moderate' : 'low',
-        suspiciousFactors: isAnomalous ? ['AI detected suspicious patterns'] : [],
-      };
-      
-      this.logger.log(`📝 Using fallback parsing: ${result.isAnomalous ? 'ANOMALOUS' : 'Normal'}`);
-      return result;
-    } catch (error) {
-      this.logger.error('Failed to parse AI response:', error);
-      return this.fallbackAnomalyDetection({} as CommitAnalysisData);
-    }
+                     // Fallback parsing for non-JSON responses - be very conservative
+      const isAnomalous = response.toLowerCase().includes('anomalous') && 
+                         response.toLowerCase().includes('suspicious') &&
+                         (response.toLowerCase().includes('unusual') ||
+                          response.toLowerCase().includes('concerning'));
+     
+     // Clean up the reasoning - remove JSON references and focus on actual analysis
+     let cleanReasoning = response.substring(0, 200)
+       .replace(/the json response you provided/i, '')
+       .replace(/the json you provided/i, '')
+       .replace(/json response/i, '')
+       .replace(/here's why:/i, '')
+       .replace(/here's a breakdown:/i, '')
+       .replace(/the json/i, '')
+       .replace(/json/i, '')
+       .trim();
+     
+     if (!cleanReasoning) {
+       cleanReasoning = isAnomalous ? 'Unusual patterns detected' : 'Normal commit';
+     }
+     
+     const result: AnomalyDetectionResult = {
+       isAnomalous,
+       confidence: 0.5,
+       reasoning: cleanReasoning,
+       riskLevel: isAnomalous ? 'moderate' : 'low',
+       suspiciousFactors: isAnomalous ? ['AI detected suspicious patterns'] : [],
+     };
+       
+       this.logger.log(`📝 Using fallback parsing: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`);
+       return result;
+     } catch (error) {
+       this.logger.error('Failed to parse AI response:', error);
+       return {
+         isAnomalous: false,
+         confidence: 0.5,
+         reasoning: 'Failed to parse AI response',
+         riskLevel: 'low',
+         suspiciousFactors: [],
+       };
+     }
   }
 
   private validateRiskLevel(level: string): 'low' | 'moderate' | 'high' | 'critical' {
@@ -316,58 +568,7 @@ Respond with JSON format:
     return validLevels.includes(level?.toLowerCase()) ? level.toLowerCase() as any : 'low';
   }
 
-  private fallbackAnomalyDetection(data: CommitAnalysisData): AnomalyDetectionResult {
-    // Simple heuristic-based fallback detection
-    const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
-    const filesChanged = data.filesChanged?.length || 0;
-    
-    let isAnomalous = false;
-    let suspiciousFactors: string[] = [];
-    let riskLevel: 'low' | 'moderate' | 'high' | 'critical' = 'low';
 
-    // Check for unusually large commits
-    if (totalLines > 1000) {
-      isAnomalous = true;
-      suspiciousFactors.push('Very large commit (>1000 lines)');
-      riskLevel = 'high';
-    } else if (totalLines > 500) {
-      isAnomalous = true;
-      suspiciousFactors.push('Large commit (>500 lines)');
-      riskLevel = 'moderate';
-    }
-
-    // Check for many files changed
-    if (filesChanged > 50) {
-      isAnomalous = true;
-      suspiciousFactors.push('Many files changed (>50)');
-      riskLevel = riskLevel === 'high' ? 'critical' : 'high';
-    } else if (filesChanged > 20) {
-      isAnomalous = true;
-      suspiciousFactors.push('Many files changed (>20)');
-      riskLevel = riskLevel === 'high' ? 'critical' : 'moderate';
-    }
-
-    // Check contributor history if available
-    if (data.contributorStats) {
-      const avgLines = data.contributorStats.avgLinesAdded + data.contributorStats.avgLinesDeleted;
-      const stddev = data.contributorStats.stddevLinesAdded + data.contributorStats.stddevLinesDeleted;
-      const threshold = avgLines + (2 * stddev);
-      
-      if (totalLines > threshold) {
-        isAnomalous = true;
-        suspiciousFactors.push('Unusual for this contributor');
-        riskLevel = riskLevel === 'high' ? 'critical' : 'moderate';
-      }
-    }
-
-    return {
-      isAnomalous,
-      confidence: 0.7,
-      reasoning: `Fallback detection: ${isAnomalous ? 'Suspicious patterns detected' : 'No obvious anomalies'}`,
-      riskLevel,
-      suspiciousFactors,
-    };
-  }
 
   async testModelConnection(): Promise<boolean> {
     try {

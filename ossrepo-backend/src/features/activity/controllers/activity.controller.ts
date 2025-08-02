@@ -74,6 +74,8 @@ export class ActivityController {
 
 
 
+
+
   @Get('rate-limit/status')
   @ApiOperation({
     summary: 'Get GitHub API rate limit status and processing strategy',
@@ -713,27 +715,27 @@ export class ActivityController {
         },
       });
 
-      // Get AI-detected alerts for this watchlist
-      const aiAlerts = await this.prisma.alertTriggered.findMany({
+      // Get AI-detected anomalies for this watchlist
+      const aiAnomalies = await this.prisma.ai_anomalies_detected.findMany({
         where: {
           watchlist_id: actualWatchlistId,
-          metric: 'ai_powered_anomaly_detection', // Filter for AI detection alerts
         },
         select: {
           commit_sha: true,
-          description: true,
-          alert_level: true,
-          details_json: true,
+          anomaly_details: true,
         },
       });
 
-      // Create a map of commit SHA to AI alert details
-      const aiAlertMap = new Map();
-      aiAlerts.forEach(alert => {
-        aiAlertMap.set(alert.commit_sha, {
-          description: alert.description,
-          alertLevel: alert.alert_level,
-          details: alert.details_json,
+      // Create a map of commit SHA to AI anomaly details
+      const aiAnomalyMap = new Map();
+      aiAnomalies.forEach(anomaly => {
+        const details = anomaly.anomaly_details as any;
+        aiAnomalyMap.set(anomaly.commit_sha, {
+          isAnomalous: details.isAnomalous || false,
+          reasoning: details.reasoning || '',
+          riskLevel: details.riskLevel || 'low',
+          confidence: details.confidence || 0,
+          suspiciousFactors: details.suspiciousFactors || [],
         });
       });
 
@@ -743,10 +745,10 @@ export class ActivityController {
         const timeAgo = this.getTimeAgo(commit.timestamp);
         const commitSha = payload?.sha || commit.event_id.replace('commit_', '');
         
-        // Check if this commit has an AI alert
-        const aiAlert = aiAlertMap.get(commitSha);
-        const isSuspicious = !!aiAlert;
-        const suspiciousReason = aiAlert?.description || '';
+        // Check if this commit has an AI anomaly
+        const aiAnomaly = aiAnomalyMap.get(commitSha);
+        const isSuspicious = aiAnomaly?.isAnomalous || false;
+        const suspiciousReason = aiAnomaly?.reasoning || '';
         
         return {
           id: commit.event_id,
