@@ -14,6 +14,7 @@ import {
 } from '../services/activity-analysis.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
 import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.service';
+import { VulnerabilityService } from '../services/vulnerability.service';
 
 interface RepositorySetupJobData {
   watchlistId: string;
@@ -41,6 +42,7 @@ export class RepositorySetupProcessor {
     private readonly activityAnalysisService: ActivityAnalysisService,
     private readonly repositorySummaryService: RepositorySummaryService,
     private readonly aiAnomalyDetectionService: AIAnomalyDetectionService,
+    private readonly vulnerabilityService: VulnerabilityService,
   ) {}
 
   @Process('clone-and-analyze')
@@ -575,6 +577,14 @@ export class RepositorySetupProcessor {
         // Don't fail the entire setup if AI detection fails
       }
 
+      // Step 8: Fetch and store vulnerability data
+      try {
+        await this.fetchAndStoreVulnerabilities(watchlistId, owner, repo);
+      } catch (error) {
+        this.logger.error('Failed to fetch vulnerability data:', error);
+        // Don't fail the entire setup if vulnerability fetching fails
+      }
+
       this.logger.log(
         `✅ Repository setup completed in ${duration}s - ${commitCount} commits retrieved, ${healthMetricsCount} health metrics retrieved${busFactorInfo ? `, bus factor: ${busFactorInfo.busFactor} (${busFactorInfo.riskLevel})` : ''}${activityInfo ? `, activity: ${activityInfo.activityScore}/100 (${activityInfo.activityLevel}), weekly rate: ${activityInfo.weeklyCommitRate.toFixed(2)} commits/week` : ''}`,
       );
@@ -963,5 +973,47 @@ export class RepositorySetupProcessor {
     const hash = createHash('sha256');
     hash.update(JSON.stringify(logData));
     return hash.digest('hex');
+  }
+
+  /**
+   * Fetch and store vulnerability data for a repository
+   */
+  private async fetchAndStoreVulnerabilities(watchlistId: string, owner: string, repo: string): Promise<void> {
+    try {
+      this.logger.log(`🔍 Fetching vulnerability data for ${owner}/${repo}`);
+      
+      // Get package name from watchlist
+      const watchlist = await this.prisma.watchlist.findUnique({
+        where: { watchlist_id: watchlistId },
+        include: { package: true }
+      });
+
+      if (!watchlist || !watchlist.package) {
+        this.logger.warn(`⚠️ No package found for watchlist ${watchlistId}`);
+        return;
+      }
+
+      const packageName = watchlist.package.package_name;
+      const repoUrl = watchlist.package.repo_url;
+
+      // Fetch vulnerabilities from OSV.dev
+      const vulnerabilities = await this.vulnerabilityService.fetchVulnerabilities(packageName, repoUrl);
+      
+      if (vulnerabilities.length === 0) {
+        this.logger.log(`✅ No vulnerabilities found for package: ${packageName}`);
+        return;
+      }
+
+      // Generate summary
+      const summary = this.vulnerabilityService.generateVulnerabilitySummary(vulnerabilities);
+
+      // Store vulnerabilities in database
+      await this.vulnerabilityService.storeVulnerabilities(watchlistId, vulnerabilities, summary);
+
+      this.logger.log(`✅ Stored ${vulnerabilities.length} vulnerabilities for package: ${packageName}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to fetch/store vulnerabilities for ${owner}/${repo}:`, error.message);
+      throw error;
+    }
   }
 }

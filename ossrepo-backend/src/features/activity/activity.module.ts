@@ -13,8 +13,10 @@ import { AISummaryService } from './services/ai-summary.service';
 import { RepositorySummaryService } from './services/repository-summary.service';
 import { AlertingService } from './services/alerting.service';
 import { AIAnomalyDetectionService } from './services/ai-anomaly-detection.service';
+import { VulnerabilityService } from './services/vulnerability.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
+import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 
 @Module({
@@ -25,6 +27,7 @@ import { ConfigModule } from '@nestjs/config';
     }),
     PrismaModule,
     QueueModule,
+    HttpModule,
   ],
   controllers: [ActivityController],
   providers: [
@@ -41,6 +44,7 @@ import { ConfigModule } from '@nestjs/config';
     RepositorySummaryService,
     AlertingService,
     AIAnomalyDetectionService,
+    VulnerabilityService,
   ],
   exports: [ActivityService, AISummaryService, RepositorySummaryService],
 })

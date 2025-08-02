@@ -5,12 +5,14 @@ import {
   UpdateWatchlistRequest,
 } from '../dto/watchlist.dto';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { VulnerabilityService } from '../../activity/services/vulnerability.service';
 
 @Injectable()
 export class WatchlistService {
   constructor(
     private readonly watchlistRepository: WatchlistRepository,
     private readonly prisma: PrismaService,
+    private readonly vulnerabilityService: VulnerabilityService,
   ) {}
 
   async getWatchlist(userId?: string) {
@@ -18,39 +20,55 @@ export class WatchlistService {
     const userWatchlist = await this.watchlistRepository.getWatchlist(userId);
     
     // Transform the data to match frontend expectations
-    return userWatchlist.map(item => ({
-      id: item.id,
-      watchlist_id: item.watchlist.watchlist_id, // Add watchlist_id for status checking
-      name: item.watchlist.package.package_name,
-      repo_url: item.watchlist.package.repo_url,
-      description: item.enhancedDescription || item.watchlist.package.description, // Use enhanced description if available
-      version: item.watchlist.package.version,
-      downloads: item.downloads, // Use enriched data from repository
-      stars: item.stars, // Use enriched data from repository
-      forks: item.forks, // Use enriched data from repository
-      contributors: item.contributors, // Use enriched data from repository
-      npm_url: item.npmUrl, // NPM URL from npm_packages table
-      risk_score: item.watchlist.package.risk_score,
-      last_updated: item.watchlist.package.last_updated,
-      notes: item.notes,
-      alerts: item.alerts ? JSON.parse(item.alerts) : null,
-      added_at: item.added_at,
-      status: item.watchlist.status, // This is already the status from the database!
-      processing_started_at: item.watchlist.processing_started_at,
-      processing_completed_at: item.watchlist.processing_completed_at,
-      last_error: item.watchlist.last_error,
-      // New enriched data fields
-      notification_count: item.alertCount || 0, // Number of alerts triggered
-      activity_score: item.activityScore !== undefined && item.activityScore !== null ? item.activityScore : null, // Activity score from ActivityData
-      bus_factor: item.busFactor || null, // Bus factor from BusFactorData
-      health_score: item.healthScore || null, // Health score from HealthData
-      tracking_duration: item.trackingDuration || '0 days', // How long tracking
-      // AI summary data
-      ai_summary: item.aiSummary || null,
-      ai_confidence: item.aiConfidence || null,
-      ai_model_used: item.aiModelUsed || null,
-      ai_created_at: item.aiCreatedAt || null
+    const transformedItems = await Promise.all(userWatchlist.map(async (item) => {
+      // Get vulnerability data for each item
+      const vulnerabilityData = await this.getVulnerabilityData(item.watchlist.watchlist_id);
+      
+      return {
+        id: item.id,
+        watchlist_id: item.watchlist.watchlist_id, // Add watchlist_id for status checking
+        name: item.watchlist.package.package_name,
+        repo_url: item.watchlist.package.repo_url,
+        description: item.enhancedDescription || item.watchlist.package.description, // Use enhanced description if available
+        version: item.watchlist.package.version,
+        downloads: item.downloads, // Use enriched data from repository
+        stars: item.stars, // Use enriched data from repository
+        forks: item.forks, // Use enriched data from repository
+        contributors: item.contributors, // Use enriched data from repository
+        npm_url: item.npmUrl, // NPM URL from npm_packages table
+        risk_score: item.watchlist.package.risk_score,
+        last_updated: item.watchlist.package.last_updated,
+        notes: item.notes,
+        alerts: item.alerts ? JSON.parse(item.alerts) : null,
+        added_at: item.added_at,
+        status: item.watchlist.status, // This is already the status from the database!
+        processing_started_at: item.watchlist.processing_started_at,
+        processing_completed_at: item.watchlist.processing_completed_at,
+        last_error: item.watchlist.last_error,
+        // New enriched data fields
+        notification_count: item.alertCount || 0, // Number of alerts triggered
+        activity_score: item.activityScore !== undefined && item.activityScore !== null ? item.activityScore : null, // Activity score from ActivityData
+        bus_factor: item.busFactor || null, // Bus factor from BusFactorData
+        health_score: item.healthScore || null, // Health score from HealthData
+        tracking_duration: item.trackingDuration || '0 days', // How long tracking
+        // AI summary data
+        ai_summary: item.aiSummary || null,
+        ai_confidence: item.aiConfidence || null,
+        ai_model_used: item.aiModelUsed || null,
+        ai_created_at: item.aiCreatedAt || null,
+        // Vulnerability data
+        vulnerability_summary: vulnerabilityData.summary ? {
+          total_count: vulnerabilityData.summary.totalCount,
+          critical_count: vulnerabilityData.summary.criticalCount,
+          high_count: vulnerabilityData.summary.highCount,
+          medium_count: vulnerabilityData.summary.mediumCount,
+          low_count: vulnerabilityData.summary.lowCount,
+          last_updated: vulnerabilityData.summary.lastUpdated
+        } : null
+      };
     }));
+    
+    return transformedItems;
   }
 
   async getWatchlistItemDetails(userWatchlistId: string) {
@@ -166,7 +184,9 @@ export class WatchlistService {
       ai_created_at: item.aiCreatedAt || null,
       // Health data
       health_history: transformedHealthHistory,
-      scorecard_health: transformedScorecardData.length > 0 ? transformedScorecardData : scorecardHealth
+      scorecard_health: transformedScorecardData.length > 0 ? transformedScorecardData : scorecardHealth,
+      // Vulnerability data
+      vulnerabilities: await this.getVulnerabilityData(item.watchlist.watchlist_id)
     };
   }
 
@@ -191,5 +211,33 @@ export class WatchlistService {
     // - Handle conflicts with existing items
     // - Return import results
     throw new Error('Not implemented');
+  }
+
+  /**
+   * Get vulnerability data for a watchlist
+   */
+  private async getVulnerabilityData(watchlistId: string) {
+    try {
+      const vulnerabilityData = await this.vulnerabilityService.getVulnerabilities(watchlistId);
+      const vulnerabilities = vulnerabilityData?.vulnerabilities || [];
+      const summary = vulnerabilityData?.summary || null;
+      return {
+        vulnerabilities,
+        summary
+      };
+    } catch (error) {
+      // Return empty data if vulnerability fetching fails
+      return {
+        vulnerabilities: [],
+        summary: {
+          totalCount: 0,
+          criticalCount: 0,
+          highCount: 0,
+          mediumCount: 0,
+          lowCount: 0,
+          lastUpdated: new Date().toISOString()
+        }
+      };
+    }
   }
 }

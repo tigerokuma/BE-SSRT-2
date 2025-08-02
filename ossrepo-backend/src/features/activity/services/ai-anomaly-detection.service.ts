@@ -299,7 +299,7 @@ export class AIAnomalyDetectionService {
   ): Promise<AnomalyDetectionResult> {
     try {
       // Check if we already have an analysis for this commit
-      const existingAnalysis = await this.prisma.ai_anomalies_detected.findUnique({
+      const existingAnalysis = await this.prisma.aIAnomaliesDetected.findUnique({
         where: {
           watchlist_id_commit_sha: {
             watchlist_id: watchlistId,
@@ -318,7 +318,7 @@ export class AIAnomalyDetectionService {
 
       // ONLY store the result if it's suspicious
       if (result.isAnomalous) {
-        await this.prisma.ai_anomalies_detected.create({
+        await this.prisma.aIAnomaliesDetected.create({
           data: {
             id: crypto.randomUUID(),
             watchlist_id: watchlistId,
@@ -350,7 +350,7 @@ export class AIAnomalyDetectionService {
    */
   async getAnomaliesForWatchlist(watchlistId: string): Promise<any[]> {
     try {
-      const anomalies = await this.prisma.ai_anomalies_detected.findMany({
+      const anomalies = await this.prisma.aIAnomaliesDetected.findMany({
         where: {
           watchlist_id: watchlistId,
         },

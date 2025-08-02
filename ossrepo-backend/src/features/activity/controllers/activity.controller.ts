@@ -28,6 +28,7 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { BusFactorService } from '../services/bus-factor.service';
+import { VulnerabilityService } from '../services/vulnerability.service';
 
 @ApiTags('Activity')
 @Controller('activity')
@@ -47,6 +48,7 @@ export class ActivityController {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly busFactorService: BusFactorService,
+    private readonly vulnerabilityService: VulnerabilityService,
   ) {}
 
   @Post('user-watchlist-added')
@@ -716,7 +718,7 @@ export class ActivityController {
       });
 
       // Get AI-detected anomalies for this watchlist
-      const aiAnomalies = await this.prisma.ai_anomalies_detected.findMany({
+      const aiAnomalies = await this.prisma.aIAnomaliesDetected.findMany({
         where: {
           watchlist_id: actualWatchlistId,
         },
@@ -1127,4 +1129,29 @@ export class ActivityController {
     
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
+
+  @Get('test-github-vulnerabilities')
+  @ApiOperation({
+    summary: 'Test GitHub Security Advisories API for a repository',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'GitHub Security Advisories test completed',
+  })
+  async testGitHubVulnerabilities(@Query('repoUrl') repoUrl: string) {
+    this.logger.log(`🧪 Testing GitHub Security Advisories for: ${repoUrl}`);
+    
+    try {
+      await this.vulnerabilityService.testGitHubAPI(repoUrl);
+      return { message: 'GitHub API test completed - check logs for details' };
+    } catch (error) {
+      this.logger.error(`GitHub API test failed:`, error);
+      throw new HttpException(
+        `GitHub API test failed: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+
 }

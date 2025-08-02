@@ -110,7 +110,7 @@ export class AISummaryService {
       const generationTimeMs = Date.now() - startTime;
 
       return {
-        summary: this.truncateSummary(summary),
+        summary: summary,
         confidence: this.calculateConfidence(repoData),
         generatedAt: new Date(),
         modelUsed: this.modelName,
@@ -150,7 +150,7 @@ Language: ${repoData.language || 'Unknown'}
 Bus Factor: ${repoData.busFactor || 'Unknown'}
 Recent Activity: ${cleanRecentCommits}
 
-Generate a comprehensive 3-4 sentence summary of this repository highlighting what it does, its activity level, community health, and notable characteristics. Focus on practical insights for developers considering using this package. Keep under 800 characters.`;
+Generate a comprehensive 3-4 sentence summary of this repository highlighting what it does, its activity level, community health, and notable characteristics. Focus on practical insights for developers considering using this package.`;
 
     return context;
   }
@@ -320,7 +320,7 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
     summary += '.';
 
     return {
-      summary: this.truncateSummary(summary),
+      summary: summary,
       confidence: 0.3, // Low confidence for fallback
       generatedAt: new Date(),
       modelUsed: 'fallback',
