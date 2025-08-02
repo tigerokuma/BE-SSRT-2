@@ -8,6 +8,7 @@ import { NpmPackagesRepository } from './repositories/npm-packages.repository';
 import { GitHubRepositoriesRepository } from './repositories/github-repositories.repository';
 import { GitHubService } from './services/github.service';
 import { NPMService } from './services/npm.service';
+import { OsvVulnerabilityService } from './services/osv-vulnerability.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
     GitHubRepositoriesRepository,
     GitHubService,
     NPMService,
+    OsvVulnerabilityService,
   ],
   exports: [
     PackagesService,

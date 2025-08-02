@@ -4,6 +4,7 @@ import { GitHubRepositoriesRepository } from '../repositories/github-repositorie
 import { NPMService } from './npm.service';
 import { GitHubService } from './github.service';
 import { GitHubRepository } from 'generated/prisma';
+import { OsvVulnerabilityService } from './osv-vulnerability.service';
 
 @Injectable()
 export class PackageSearchService {
@@ -11,8 +12,11 @@ export class PackageSearchService {
     private readonly npmRepo: NpmPackagesRepository,
     private readonly githubRepo: GitHubRepositoriesRepository,
     private readonly npmService: NPMService,
-    private readonly githubService: GitHubService
+    private readonly githubService: GitHubService,
+    private readonly osvVulnerabilityService: OsvVulnerabilityService
   ) {}
+
+
 
   async searchPackages(name: string) {
     console.log(`================== PARALLEL SEARCH: Searching for packages: ${name} ==================`);
@@ -82,7 +86,15 @@ export class PackageSearchService {
       });
       
       console.log(`Returning ${sorted.length} NPM packages (GitHub data will be fetched separately)`);
-      return sorted.slice(0, 10);
+      // Fetch OSV vulnerabilities for each package (in parallel)
+      const withSecurity = await Promise.all(sorted.slice(0, 10).map(async pkg => {
+        const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
+        return {
+          ...pkg,
+          osv_vulnerabilities
+        };
+      }));
+      return withSecurity;
       
     } catch (error) {
       console.warn('NPM search failed:', error.message);
