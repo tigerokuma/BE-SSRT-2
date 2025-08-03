@@ -46,10 +46,31 @@ model NpmPackage {
   risk_score   Float?
   repo_url     String? // Link to GitHub repo (no foreign key constraint)
   fetched_at   DateTime  @default(now())
-  osv_vulnerabilities Json?
   has_osvvulnerabilities Boolean @default(false)
+  
+  // Relations
+  osvVulnerabilities OsvVulnerability[]
 
   @@map("npm_packages")
+}
+
+// NEW: Normalized OSV vulnerability data
+model OsvVulnerability {
+  id            String   @id
+  package_name  String
+  summary       String
+  severity      String?
+  details       String?
+  affected      Json?    // Version ranges - could be normalized further
+  references    Json?    // References array - could be normalized further
+  published     DateTime?
+  modified      DateTime?
+  
+  // Relations
+  npmPackage    NpmPackage @relation(fields: [package_name], references: [package_name])
+  
+  @@index([package_name])
+  @@map("osv_vulnerabilities")
 }
 
 // NEW: Detailed GitHub repository data (enriched separately)
