@@ -5,6 +5,7 @@ import { NPMService } from './npm.service';
 import { GitHubService } from './github.service';
 import { GitHubRepository } from 'generated/prisma';
 import { OsvVulnerabilityService } from './osv-vulnerability.service';
+import { OsvVulnerabilityRepository } from '../repositories/osv-vulnerability.repository';
 
 @Injectable()
 export class PackageSearchService {
@@ -13,7 +14,8 @@ export class PackageSearchService {
     private readonly githubRepo: GitHubRepositoriesRepository,
     private readonly npmService: NPMService,
     private readonly githubService: GitHubService,
-    private readonly osvVulnerabilityService: OsvVulnerabilityService
+    private readonly osvVulnerabilityService: OsvVulnerabilityService,
+    private readonly osvVulnerabilityRepository: OsvVulnerabilityRepository
   ) {}
 
 
@@ -86,9 +88,29 @@ export class PackageSearchService {
       });
       
       console.log(`Returning ${sorted.length} NPM packages (GitHub data will be fetched separately)`);
-      // Fetch OSV vulnerabilities for each package (in parallel)
+      // Fetch OSV vulnerabilities for each package (in parallel) and store in database
       const withSecurity = await Promise.all(sorted.slice(0, 10).map(async pkg => {
         const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
+        
+        // Store vulnerabilities in database if any found
+        if (osv_vulnerabilities.length > 0) {
+          try {
+            const vulnerabilitiesToStore = osv_vulnerabilities.map(vuln => ({
+              ...vuln,
+              package_name: pkg.package_name
+            }));
+            await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
+            
+            // Update has_osvvulnerabilities flag
+            await this.npmRepo.createOrUpdate({
+              package_name: pkg.package_name,
+              has_osvvulnerabilities: true
+            });
+          } catch (error) {
+            console.warn(`Failed to store vulnerabilities for ${pkg.package_name}:`, error.message);
+          }
+        }
+        
         return {
           ...pkg,
           osv_vulnerabilities
