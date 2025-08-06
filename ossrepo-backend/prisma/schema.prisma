@@ -46,10 +46,31 @@ model NpmPackage {
   risk_score   Float?
   repo_url     String? // Link to GitHub repo (no foreign key constraint)
   fetched_at   DateTime  @default(now())
-  osv_vulnerabilities Json?
   has_osvvulnerabilities Boolean @default(false)
+  
+  // Relations
+  osvVulnerabilities OsvVulnerability[]
 
   @@map("npm_packages")
+}
+
+// NEW: Normalized OSV vulnerability data
+model OsvVulnerability {
+  id            String   @id
+  package_name  String
+  summary       String
+  severity      String?
+  details       String?
+  affected      Json?    // Version ranges - could be normalized further
+  references    Json?    // References array - could be normalized further
+  published     DateTime?
+  modified      DateTime?
+  
+  // Relations
+  npmPackage    NpmPackage @relation(fields: [package_name], references: [package_name])
+  
+  @@index([package_name])
+  @@map("osv_vulnerabilities")
 }
 
 // NEW: Detailed GitHub repository data (enriched separately)
@@ -134,6 +155,9 @@ model Watchlist {
   repoStats                        RepoStats?
   alertTriggered                   AlertTriggered[]
   sbom                             WatchlistSbom?
+  aiAnomaliesDetected             AIAnomaliesDetected[]
+  vulnerabilities                  Vulnerability[]
+  vulnerabilitySummary             VulnerabilitySummary?
 }
 
 model UserWatchlist {
@@ -179,6 +203,7 @@ model BusFactorData {
   watchlist_id    String
   bus_factor      Int
   total_contributors Int
+  total_commits   Int     // Total commits from all human contributors
   top_contributors Json    // Array of contributor objects
   risk_level      String   // LOW, MEDIUM, HIGH, CRITICAL
   risk_reason     String?
@@ -514,4 +539,61 @@ model UserWatchlistSbom {
 
   user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   @@index([user_id])
+}
+
+model AIAnomaliesDetected {
+  id                String    @id @default(uuid())
+  watchlist_id      String
+  commit_sha        String
+  anomaly_details   Json
+  detected_at       DateTime  @default(now())
+
+  repository        Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@unique([watchlist_id, commit_sha])
+  @@index([watchlist_id])
+  @@index([commit_sha])
+  @@map("ai_anomalies_detected")
+}
+
+// NEW: Vulnerability data storage
+model Vulnerability {
+  id                String    @id @default(uuid())
+  watchlist_id      String
+  title             String
+  description       String    @db.Text
+  severity          String    // CRITICAL, HIGH, MEDIUM, LOW
+  cve_id            String?
+  ghsa_id           String?
+  published_date    DateTime
+  affected_versions String[]
+  fixed_versions    String[]
+  references        Json      // Array of reference objects
+  created_at        DateTime  @default(now())
+
+  // Relations
+  watchlist         Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@index([severity])
+  @@index([published_date])
+  @@map("vulnerabilities")
+}
+
+// NEW: Vulnerability summary data storage
+model VulnerabilitySummary {
+  id                String    @id @default(uuid())
+  watchlist_id      String    @unique
+  total_count       Int       @default(0)
+  critical_count    Int       @default(0)
+  high_count        Int       @default(0)
+  medium_count      Int       @default(0)
+  low_count         Int       @default(0)
+  last_updated      DateTime  @default(now())
+
+  // Relations
+  watchlist         Watchlist @relation(fields: [watchlist_id], references: [watchlist_id], onDelete: Cascade)
+
+  @@index([watchlist_id])
+  @@map("vulnerability_summaries")
 }
