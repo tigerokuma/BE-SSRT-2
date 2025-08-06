@@ -72,4 +72,22 @@ export class SbomRepository {
     })
   }
 
+  async getWatchFollows(user_id: string) {
+    const watchlists = await this.prisma.userWatchlist.findMany({
+      where: { user_id },
+      select: {
+        watchlist_id: true,
+        watchlist: {
+          select: { package: { select: { package_name: true } } }
+        }
+      }
+    });
+
+    return watchlists.map(w => ({
+      watchlist_id: w.watchlist_id,
+      package_name: w.watchlist.package.package_name
+    }));
+
+  }
+
 }

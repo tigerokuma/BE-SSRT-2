@@ -36,7 +36,6 @@ export class PackagesService {
       last_updated: pkg.last_updated ? new Date(pkg.last_updated).toISOString().split('T')[0] : '',
       version: pkg.version || '',
       license: pkg.license || '',
-      vulnerabilities: pkg.vulnerabilities || [],
       osv_vulnerabilities: pkg.osv_vulnerabilities || []
     };
   }
