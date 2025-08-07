@@ -12,7 +12,6 @@ export class SbomController {
 
   @Get('dep-list/:user_id')
   async getDepList(@Param('user_id') user_id: string){
-    console.log(await this.sbomService.getDepList(user_id));
     return await this.sbomService.getDepList(user_id);
   }
 
@@ -43,7 +42,8 @@ export class SbomController {
     const vulnerablePackages = vulns ? vulns.split(',') : [];
     const sbom = (await this.sbomService.getUserSbom(params.user_id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomService.getNodeDeps(sbomText, params.node_id, vulnerablePackages);
+    const temp =  this.sbomService.getNodeDeps(sbomText, params.node_id, vulnerablePackages);
+    return temp;
   }
 
   @Get('search/:watchlist_id/:search')
@@ -59,15 +59,15 @@ export class SbomController {
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
     return this.sbomService.searchNodeDeps(sbomText, params.search);
   }
-
+  
   @Get('watchlist/:watchlist_id')
   async getWatchlistSbom(@Param('watchlist_id') watchlist_id: string) {
-    return await this.sbomService.getWatchSbom(watchlist_id);
+    return (await this.sbomService.getWatchSbom(watchlist_id))?.sbom;
   }
 
   @Get('user-watchlist/:user_id')
   async getUserSbom(@Param('user_id') user_id: string) {
-    return await this.sbomService.getUserSbom(user_id);
+    return (await this.sbomService.getUserSbom(user_id))?.sbom;
   }
 
   @Post('merge-SBOM/:user_id')

@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as Docker from 'dockerode';
 import * as os from 'os';
+import { stringify } from 'querystring';
 
 interface SBOMComponent {
   'bom-ref': string;
@@ -177,9 +178,9 @@ export class SbomService {
     const licenseSummary: Record<string, number> = {};
     const riskSummary: Record<string, number> = { Low: 0, Medium: 0, High: 0, Unknown: 0 };
 
-    const dependencies = sbomJson.metadata.component.purl || [];
+    const sbomPackage = sbomJson.metadata.component["bom-ref"];
     const rootDep = (sbomJson.dependencies || []).find(
-      (dep: any) => dep.ref === dependencies
+      (dep: any) => dep.ref === sbomPackage
     );
 
     const directDependencies = rootDep?.dependsOn?.length || 0;
@@ -217,6 +218,7 @@ export class SbomService {
       // In CycloneDX: If it appears in dependencies root list, consider direct
     }
     return {
+      sbomPackage,
       directDependencies,
       transitiveDependencies,
       licenseSummary,
@@ -344,7 +346,7 @@ export class SbomService {
     const containerPath = '/app';
     const filenames = filePaths.map(f => path.basename(f));
 
-    const data = await this.runCommand({
+    await this.runCommand({
       image: 'cyclonedx-cli',
       cmd: [
         'merge',
@@ -356,7 +358,42 @@ export class SbomService {
     });
 
     const mergedPath = path.join(absPath, 'merged.json');
-    const mergedData = await fs.promises.readFile(mergedPath, 'utf-8');
+    const mergedString = await fs.promises.readFile(mergedPath, 'utf-8');
+    const mergedData = JSON.parse(mergedString);
+
+
+    const originalTopComponents = sboms
+    .map((sbom) => {
+      try {
+        const parsed = JSON.parse(JSON.stringify(sbom.sbom));
+        return parsed.metadata?.component?.['bom-ref'];
+      } catch (e) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+    const newTop = {
+      type: "application",
+      "bom-ref": `pkg:user/${user_id}@latest`,
+      name: `user-watchlist-sbom-${user_id}`,
+      version: "1.0.0"
+    };
+
+    mergedData.metadata = {
+    ...(mergedData.metadata || {}),
+    component: newTop
+  };
+
+    mergedData.dependencies = [
+    {
+      ref: newTop["bom-ref"],
+      dependsOn: originalTopComponents
+    },
+    ...(mergedData.dependencies || [])
+  ];
+
+
     
     // Clean up
     await this.cleanupTempFolder(tempDir);
