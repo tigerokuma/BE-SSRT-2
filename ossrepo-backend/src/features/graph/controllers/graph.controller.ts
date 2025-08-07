@@ -26,6 +26,7 @@ import {
     UpdateGraphExportDto,
     GraphExportDto,
 } from '../dto/graph-export.dto';
+import {LlmService} from "../services/llm.service";
 
 // ---- CONTROLLER ----
 @Controller('graph')
@@ -34,6 +35,7 @@ export class GraphController {
         private readonly graphService: GraphService,
         private readonly graphBuilder: GraphBuilderService,
         private readonly graphStorage: GraphStorageService,
+        private readonly llm: LlmService,
     ) {
     }
 
