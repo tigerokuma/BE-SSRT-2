@@ -55,6 +55,35 @@ export class PackagesController {
     return result;
   }
 
+  @Get(':name/vulnerabilities')
+  async getPackageVulnerabilities(@Param('name') name: string) {
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('Package name is required');
+    }
+
+    const vulnerabilities = await this.packagesService.getPackageVulnerabilities(name.trim());
+    return {
+      package_name: name.trim(),
+      vulnerabilities,
+      count: vulnerabilities.length
+    };
+  }
+
+  @Get('vulnerabilities/search')
+  async searchVulnerabilities(@Query('package') packageName: string) {
+    if (!packageName || packageName.trim().length === 0) {
+      throw new BadRequestException('Package name is required');
+    }
+
+    const vulnerabilities = await this.packagesService.searchVulnerabilities(packageName.trim());
+    return {
+      package_name: packageName.trim(),
+      vulnerabilities,
+      count: vulnerabilities.length,
+      source: 'osv_api'
+    };
+  }
+
   @Delete('cache/refresh')
   async forceRefreshCache(@Query('repo_url') repoUrl?: string) {
     const result = await this.packagesService.forceRefreshCache(repoUrl);
