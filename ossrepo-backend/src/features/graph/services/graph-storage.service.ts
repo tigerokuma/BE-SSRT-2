@@ -123,5 +123,14 @@ export class GraphStorageService {
         const rows = await this.repo.getSnapshotsByIds(ids);
         return rows.map(mapPrismaSnapshotToDto);
     }
+
+    async queryNodes(filter: any) {
+        // Use Prisma or SQL to get nodes by filter
+        return this.prisma.graphNode.findMany({where: filter});
+    }
+
+    async queryEdges(filter: any) {
+        return this.prisma.graphEdge.findMany({where: filter});
+    }
 }
 

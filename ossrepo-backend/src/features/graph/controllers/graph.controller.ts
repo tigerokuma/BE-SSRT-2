@@ -37,6 +37,28 @@ export class GraphController {
     ) {
     }
 
+    @Get('subgraph')
+    async querySubgraph(
+        @Query('repoId') repoId: string,
+        @Query('commitId') commitId: string,
+        @Query('q') q: string,
+    ) {
+        // 1. Use LLM to convert user query string to a graph query (Cypher, SQL, Prisma, etc)
+        const { prismaQuery } = await this.llm.generateGraphQuery(q, repoId, commitId);
+
+        // 2. Execute the generated query (restrict by repo/commit if needed)
+        // If using Prisma:
+        const nodes = await this.graphStorage.queryNodes(prismaQuery);
+        const edges = await this.graphStorage.queryEdges(prismaQuery);
+
+        // 3. Transform to Cytoscape format
+        const elements = [
+            ...nodes.map(n => ({ data: n })),
+            ...edges.map(e => ({ data: e })),
+        ];
+        return { elements };
+    }
+
     // --------- BUILD (PYTHON TRIGGER) -------------
     @Post('build/:repoId')
     @HttpCode(202)
