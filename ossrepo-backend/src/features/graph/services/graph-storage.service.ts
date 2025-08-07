@@ -126,11 +126,11 @@ export class GraphStorageService {
 
     async queryNodes(filter: any) {
         // Use Prisma or SQL to get nodes by filter
-        return this.prisma.graphNode.findMany({where: filter});
+        return this.repo.queryNodes(filter)
     }
 
     async queryEdges(filter: any) {
-        return this.prisma.graphEdge.findMany({where: filter});
+        return this.repo.queryEdges(filter)
     }
 }
 

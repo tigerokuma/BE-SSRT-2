@@ -175,6 +175,11 @@ export class GraphRepository {
         });
     }
 
+    async queryNodes(filter: any) {
+        // Use Prisma or SQL to get nodes by filter
+        return this.prisma.graphNode.findMany({where: filter});
+    }
+
     async deleteNode(nodeId: string) {
         return this.prisma.graphNode.delete({where: {node_id: nodeId}});
     }
@@ -221,6 +226,9 @@ export class GraphRepository {
             where: {edge_id: dto.edge_id},
             data: dto.data,
         });
+    }
+    async queryEdges(filter: any) {
+        return this.prisma.graphEdge.findMany({where: filter});
     }
 
     async deleteEdge(edgeId: string) {
