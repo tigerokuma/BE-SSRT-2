@@ -25,6 +25,15 @@ export class PackagesService {
     return await this.packageSearchService.forceRefreshCache(repoUrl);
   }
 
+  // OSV Vulnerability methods for advanced use cases
+  async getPackageVulnerabilities(name: string) {
+    return await this.packageSearchService.getPackageVulnerabilities(name);
+  }
+
+  async searchVulnerabilities(packageName: string) {
+    return await this.packageSearchService.searchVulnerabilities(packageName);
+  }
+
   // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {

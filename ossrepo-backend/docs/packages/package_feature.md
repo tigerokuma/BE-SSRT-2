@@ -311,14 +311,64 @@ CREATE TABLE github_repositories (
 - Better caching strategy ✅
 - Reduced API failures due to GitHub rate limits ✅
 
-### Technical Resolution Summary
+### 🔧 Technical Resolution Summary
 
-**Problem Solved**: The search API was incorrectly returning GitHub fields (`stars`, `forks`, `contributors`) with `null` values instead of using the proper `PackageCardDto`.
+#### **Primary Problem Solved**: 
+**Swagger vs HTTP Discrepancy with OSV Data**
 
-**Root Cause**: The `PackagesService.transformToCard` method was including GitHub fields in search results.
+**Issue**: Inconsistent OSV vulnerability data between Swagger UI and direct HTTP calls
+- **Swagger UI**: Showed OSV vulnerability data ✅
+- **Direct HTTP calls**: Missing OSV vulnerability data ❌
 
-**Solution**: Updated the transformation methods to:
-- `transformToCard`: Returns only NPM data (no GitHub fields)
-- `transformToDetails`: Returns NPM + optional GitHub data
+**Root Cause**: Cached package searches returned NPM data only, missing OSV vulnerabilities
+```typescript
+// Before (Problem)
+if (exactMatch && await this.npmRepo.isDataFresh(exactMatch.fetched_at)) {
+  return cachedPackages; // ❌ Missing OSV data
+}
+```
 
-**Result**: ✅ Search endpoint now properly returns `PackageCardDto` with NPM data only, while details endpoint returns `PackageDetailsDto` with optional GitHub data.
+**Solution**: Implemented **Hybrid OSV Caching Approach**
+```typescript
+// After (Fixed)
+if (exactMatch && await this.npmRepo.isDataFresh(exactMatch.fetched_at)) {
+  const withSecurity = await Promise.all(cachedPackages.map(async pkg => {
+    const osv_vulnerabilities = pkg.has_osvvulnerabilities
+      ? await this.osvVulnerabilityRepository.findByPackageName(pkg.package_name)
+      : await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name);
+    return { ...pkg, osv_vulnerabilities }; // ✅ Always includes OSV data
+  }));
+  return withSecurity;
+}
+```
+
+**Result**: 
+- ✅ **Consistent OSV data**: Both cached and fresh searches include vulnerability information
+- ✅ **Swagger vs HTTP resolved**: Identical results across all request methods
+- ✅ **Performance optimized**: Database-first approach with API fallback
+- ✅ **New endpoints added**: Dedicated OSV vulnerability operations
+
+#### **Secondary Enhancement**: 
+**Improved Package Data Structure**
+
+**Enhanced DTO Structure**:
+- `transformToCard`: Returns NPM + OSV data (no GitHub fields)
+- `transformToDetails`: Returns NPM + GitHub + OSV data
+
+**New API Endpoints**:
+- `GET /packages/:name/vulnerabilities` - Get stored vulnerabilities
+- `GET /packages/vulnerabilities/search?package` - Fetch fresh vulnerabilities
+
+**Database Improvements**:
+- Smart `has_osvvulnerabilities` flag for quick checks
+- Normalized `osv_vulnerabilities` table with efficient queries
+- Hybrid caching strategy for optimal performance
+
+#### **Team Benefits**:
+- 🎯 **Predictable API responses**: OSV data always included
+- 🚀 **Better performance**: Smart caching reduces API calls
+- 🛡️ **Enhanced security**: Comprehensive vulnerability information
+- 🔧 **Developer tools**: Dedicated endpoints for advanced operations
+- 📚 **Clear documentation**: Updated guides for team usage
+
+**Final Result**: ✅ **All endpoints now consistently return complete package information with OSV vulnerability data**, ensuring developers always have access to security information regardless of how they access the API.
