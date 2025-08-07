@@ -1,11 +1,21 @@
 import {Injectable} from '@nestjs/common';
 import {PrismaService} from "../../../common/prisma/prisma.service";
-import {BatchSaveNodesDto, DeleteNodesBySnapshotDto, SaveNodeDto, UpdateNodeDto} from '../dto/graph-node.dto';
-import {BatchSaveEdgesDto, DeleteEdgesBySnapshotDto, SaveEdgeDto, UpdateEdgeDto} from '../dto/graph-edge.dto';
+import {
+    BatchCreateGraphNodeDto,
+    DeleteNodesBySnapshotDto,
+    CreateGraphNodeDto,
+    UpdateGraphNodeDto
+} from '../dto/graph-node.dto';
+import {
+    BatchCreateGraphEdgeDto,
+    DeleteEdgesBySnapshotDto,
+    CreateGraphEdgeDto,
+    UpdateGraphEdgeDto
+} from '../dto/graph-edge.dto';
 import {CreateGraphSnapshotDto, UpdateGraphSnapshotDto} from '../dto/graph-snapshot.dto';
-import {CreateGraphSubtaskDto, GraphSubtaskDto, UpdateGraphSubtaskDto} from '../dto/graph-subtask.dto';
 import {mapPrismaSubtaskToDto} from '../utils/graph.mapper';
 import {Logger} from '@nestjs/common';
+import {BuildSubtaskDto, CreateBuildSubtaskDto, UpdateBuildSubtaskDto} from "../dto/build-subtask.dto";
 
 
 @Injectable()
@@ -96,6 +106,18 @@ export class GraphRepository {
         });
     }
 
+    async findAllBuildTasks() {
+        return this.prisma.buildTask.findMany();
+    }
+
+    async findBuildTasksByRepoId(repoId: string) {
+        return this.prisma.buildTask.findMany({where: {repo_id: repoId}});
+    }
+
+    async findBuildTaskById(taskId: string) {
+        return this.prisma.buildTask.findUnique({where: {task_id: taskId}});
+    }
+
     async getLatestExportByRepoId(repoId: string, format: string = 'graphml') {
         return this.prisma.graphExport.findFirst({
             where: {repo_id: repoId, format, status: 'ready'},
@@ -110,7 +132,7 @@ export class GraphRepository {
     }
 
     // --- Node CRUD ---
-    async createNode(snapshotId: string, dto: SaveNodeDto) {
+    async createNode(snapshotId: string, dto: CreateGraphNodeDto) {
         this.logger.log(`BatchSaveNodesDto: ${JSON.stringify(dto, null, 2)}`);
         return this.prisma.graphNode.create({
             data: {
@@ -124,7 +146,7 @@ export class GraphRepository {
         });
     }
 
-    async createNodes(batch: BatchSaveNodesDto) {
+    async createNodes(batch: BatchCreateGraphNodeDto) {
         this.logger.log(`BatchSaveNodesDto: ${JSON.stringify(batch, null, 2)}`);
         return this.prisma.graphNode.createMany({
             data: batch.nodes.map(n => ({
@@ -146,7 +168,7 @@ export class GraphRepository {
         return this.prisma.graphNode.findMany({where: {snapshot_id: snapshotId}});
     }
 
-    async updateNode(dto: UpdateNodeDto) {
+    async updateNode(dto: UpdateGraphNodeDto) {
         return this.prisma.graphNode.update({
             where: {node_id: dto.node_id},
             data: dto.data,
@@ -162,7 +184,7 @@ export class GraphRepository {
     }
 
     // --- Edge CRUD ---
-    async createEdge(snapshotId: string, dto: SaveEdgeDto) {
+    async createEdge(snapshotId: string, dto: CreateGraphEdgeDto) {
         return this.prisma.graphEdge.create({
             data: {
                 snapshot_id: snapshotId,
@@ -174,7 +196,7 @@ export class GraphRepository {
         });
     }
 
-    async createEdges(batch: BatchSaveEdgesDto) {
+    async createEdges(batch: BatchCreateGraphEdgeDto) {
         return this.prisma.graphEdge.createMany({
             data: batch.edges.map(e => ({
                 snapshot_id: batch.snapshot_id,
@@ -194,7 +216,7 @@ export class GraphRepository {
         return this.prisma.graphEdge.findMany({where: {snapshot_id: snapshotId}});
     }
 
-    async updateEdge(dto: UpdateEdgeDto) {
+    async updateEdge(dto: UpdateGraphEdgeDto) {
         return this.prisma.graphEdge.update({
             where: {edge_id: dto.edge_id},
             data: dto.data,
@@ -213,11 +235,11 @@ export class GraphRepository {
     async createGraphSnapshot(dto: CreateGraphSnapshotDto) {
         return this.prisma.graphSnapshot.create({
             data: {
-                subtask_id: dto.subtaskId,
-                repo_id: dto.repoId,
-                commit_id: dto.commitId,
+                subtask_id: dto.subtask_id,
+                repo_id: dto.repo_id,
+                commit_id: dto.commit_id,
                 language: dto.language,
-                graph_type: dto.graphType,
+                graph_type: dto.graph_type,
                 version: dto.version,
                 status: 'stored',
             },
@@ -248,11 +270,11 @@ export class GraphRepository {
     // UPDATE
     async updateGraphSnapshot(dto: UpdateGraphSnapshotDto) {
         return this.prisma.graphSnapshot.update({
-            where: {snapshot_id: dto.snapshotId},
+            where: {snapshot_id: dto.snapshot_id},
             data: {
-                node_count: dto.nodeCount,
-                edge_count: dto.edgeCount,
-                s3_url: dto.s3Url,
+                node_count: dto.node_count,
+                edge_count: dto.edge_count,
+                s3_url: dto.s3_url,
                 status: dto.status,
             },
         });
@@ -273,27 +295,27 @@ export class GraphRepository {
     }
 
 
-    async createGraphSubtask(dto: CreateGraphSubtaskDto): Promise<GraphSubtaskDto> {
+    async createGraphSubtask(dto: CreateBuildSubtaskDto): Promise<BuildSubtaskDto> {
         const row = await this.prisma.buildSubtask.create({
             data: {
-                task_id: dto.taskId,
+                task_id: dto.task_id,
                 language: dto.language,
                 step: dto.step,
-                status: dto.status,
+                status: dto.status ?? 'pending',
                 message: dto.message ?? null,
             },
         });
         return mapPrismaSubtaskToDto(row);
     }
 
-    async getGraphSubtaskById(subtaskId: string): Promise<GraphSubtaskDto | null> {
+    async getGraphSubtaskById(subtaskId: string): Promise<BuildSubtaskDto | null> {
         const row = await this.prisma.buildSubtask.findUnique({
             where: {subtask_id: subtaskId},
         });
         return row ? mapPrismaSubtaskToDto(row) : null;
     }
 
-    async getGraphSubtasksByTask(taskId: string): Promise<GraphSubtaskDto[]> {
+    async getGraphSubtasksByTask(taskId: string): Promise<BuildSubtaskDto[]> {
         const rows = await this.prisma.buildSubtask.findMany({
             where: {task_id: taskId},
             orderBy: {created_at: 'asc'},
@@ -301,7 +323,7 @@ export class GraphRepository {
         return rows.map(mapPrismaSubtaskToDto);
     }
 
-    async updateGraphSubtask(subtaskId: string, dto: UpdateGraphSubtaskDto): Promise<GraphSubtaskDto> {
+    async updateGraphSubtask(subtaskId: string, dto: UpdateBuildSubtaskDto): Promise<BuildSubtaskDto> {
         const row = await this.prisma.buildSubtask.update({
             where: {subtask_id: subtaskId},
             data: {

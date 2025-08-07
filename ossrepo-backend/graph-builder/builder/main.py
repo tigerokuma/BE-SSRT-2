@@ -7,7 +7,7 @@ import subprocess
 import os
 import shutil
 
-from .build_engine import run_ast_extraction
+from .build_engine import run_ast_extraction, update_task_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,27 +25,62 @@ class BuildRequest(BaseModel):
     commitId: Optional[str] = None
 
 def run_build_task(req: BuildRequest):
-    logging.info(f"Starting build task: {req.taskId} for repo {req.repoId}")
+    logging.info(f"🚀 Starting build task: {req.taskId} for repo {req.repoId}")
+    update_task_status(req.taskId, "in_progress", "Task started by builder")
+
+    # Clean up old repoPath if exists
     if os.path.exists(req.repoPath):
         try:
             shutil.rmtree(req.repoPath)
         except Exception as e:
-            logging.error(f"Failed to delete existing directory: {e}")
+            logging.error(f"Failed to delete directory: {e}")
+            update_task_status(req.taskId, "failed", f"Failed to clean repo path: {e}")
             return
-    clone_cmd = ["gh", "repo", "clone", req.repoId, req.repoPath]
+
     try:
-        subprocess.run(clone_cmd, check=True)
+        # Clone the repo
+        subprocess.run(["gh", "repo", "clone", req.repoId, req.repoPath], check=True)
+
+        # If commitId is provided, checkout that commit
         if req.commitId:
             subprocess.run(["git", "checkout", req.commitId], cwd=req.repoPath, check=True)
-        # Pass repoId and taskId (as subtaskId for now)
+            commit_id = req.commitId
+        else:
+            # Otherwise, get current HEAD commit hash
+            completed = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=req.repoPath,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            commit_id = completed.stdout.strip()
+            logging.info(f"No commitId provided. Using current HEAD: {commit_id}")
+
         run_ast_extraction(
             req.repoPath,
             req.repoId,
-            req.taskId,  # this is your task_id, NOT subtask_id
-            req.commitId,
+            req.taskId,
+            commit_id,
         )
+
     except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to clone or checkout: {e}")
+        logging.error(f"Git error: {e}")
+        update_task_status(req.taskId, "failed", f"Git error: {e}")
+
+    except Exception as e:
+        logging.error(f"Unhandled error: {e}")
+        update_task_status(req.taskId, "failed", f"Unhandled error: {e}")
+
+    finally:
+        # CLEANUP: always try to delete the repo dir, no matter what
+        if os.path.exists(req.repoPath):
+            try:
+                shutil.rmtree(req.repoPath)
+                logging.info(f"🧹 Deleted cloned repo at {req.repoPath}")
+            except Exception as e:
+                logging.error(f"Failed to delete repo after build: {e}")
+
 
 @app.post("/internal/build", status_code=202)
 def trigger_build(req: BuildRequest, background_tasks: BackgroundTasks):
