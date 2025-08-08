@@ -154,17 +154,19 @@ npm test -- --testPathPattern=graph
 
 ## ✅ Development Checklist
 
-- [ ] `graph.module.ts` created and configured
-- [ ] Module registered in `AppModule`
-- [ ] Controller created with basic endpoints
-- [ ] Service created with business logic
-- [ ] Repository created for data access
-- [ ] DTOs defined for request/response validation
-- [ ] Entity models created
-- [ ] Basic error handling implemented
+- [x] `graph.module.ts` created and configured
+- [x] Module registered in `AppModule`
+- [x] Controller created with basic endpoints
+- [x] Service created with business logic
+- [x] Repository created for data access
+- [x] DTOs defined for request/response validation
+- [x] Entity models created
+- [x] Basic error handling implemented
 - [ ] Unit tests written
-- [ ] API endpoints tested manually
-- [ ] Documentation updated
+- [x] API endpoints tested manually
+- [x] Documentation updated
 
 ---
+
+
 

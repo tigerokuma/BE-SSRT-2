@@ -4,6 +4,8 @@ import { GitHubRepositoriesRepository } from '../repositories/github-repositorie
 import { NPMService } from './npm.service';
 import { GitHubService } from './github.service';
 import { GitHubRepository } from 'generated/prisma';
+import { OsvVulnerabilityService } from './osv-vulnerability.service';
+import { OsvVulnerabilityRepository } from '../repositories/osv-vulnerability.repository';
 
 @Injectable()
 export class PackageSearchService {
@@ -11,8 +13,12 @@ export class PackageSearchService {
     private readonly npmRepo: NpmPackagesRepository,
     private readonly githubRepo: GitHubRepositoriesRepository,
     private readonly npmService: NPMService,
-    private readonly githubService: GitHubService
+    private readonly githubService: GitHubService,
+    private readonly osvVulnerabilityService: OsvVulnerabilityService,
+    private readonly osvVulnerabilityRepository: OsvVulnerabilityRepository
   ) {}
+
+
 
   async searchPackages(name: string) {
     console.log(`================== PARALLEL SEARCH: Searching for packages: ${name} ==================`);
@@ -27,7 +33,41 @@ export class PackageSearchService {
     
     if (exactMatch && await this.npmRepo.isDataFresh(exactMatch.fetched_at)) {
       console.log(`Found fresh exact match for "${name}" + ${cachedPackages.length - 1} related packages`);
-      return cachedPackages;
+      
+      // HYBRID APPROACH: Always include OSV data for cached packages
+      const withSecurity = await Promise.all(cachedPackages.slice(0, 10).map(async pkg => {
+        if (pkg.has_osvvulnerabilities) {
+          // Fetch stored vulnerabilities from database
+          const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(pkg.package_name);
+          return { ...pkg, osv_vulnerabilities };
+        } else {
+          // Check if package has vulnerabilities we haven't stored yet
+          const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
+          
+          // Store vulnerabilities if found
+          if (osv_vulnerabilities.length > 0) {
+            try {
+              const vulnerabilitiesToStore = osv_vulnerabilities.map(vuln => ({
+                ...vuln,
+                package_name: pkg.package_name
+              }));
+              await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
+              
+              // Update has_osvvulnerabilities flag
+              await this.npmRepo.createOrUpdate({
+                package_name: pkg.package_name,
+                has_osvvulnerabilities: true
+              });
+            } catch (error) {
+              console.warn(`Failed to store vulnerabilities for ${pkg.package_name}:`, error.message);
+            }
+          }
+          
+          return { ...pkg, osv_vulnerabilities };
+        }
+      }));
+      
+      return withSecurity;
     }
     
     // 3. No exact match OR stale - fetch from NPM API (fast)
@@ -82,7 +122,35 @@ export class PackageSearchService {
       });
       
       console.log(`Returning ${sorted.length} NPM packages (GitHub data will be fetched separately)`);
-      return sorted.slice(0, 10);
+      // Fetch OSV vulnerabilities for each package (in parallel) and store in database
+      const withSecurity = await Promise.all(sorted.slice(0, 10).map(async pkg => {
+        const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
+        
+        // Store vulnerabilities in database if any found
+        if (osv_vulnerabilities.length > 0) {
+          try {
+            const vulnerabilitiesToStore = osv_vulnerabilities.map(vuln => ({
+              ...vuln,
+              package_name: pkg.package_name
+            }));
+            await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
+            
+            // Update has_osvvulnerabilities flag
+            await this.npmRepo.createOrUpdate({
+              package_name: pkg.package_name,
+              has_osvvulnerabilities: true
+            });
+          } catch (error) {
+            console.warn(`Failed to store vulnerabilities for ${pkg.package_name}:`, error.message);
+          }
+        }
+        
+        return {
+          ...pkg,
+          osv_vulnerabilities
+        };
+      }));
+      return withSecurity;
       
     } catch (error) {
       console.warn('NPM search failed:', error.message);
@@ -140,10 +208,14 @@ export class PackageSearchService {
       }
     }
     
-    // 3. Manually combine NPM + GitHub data
+    // 3. Always include OSV data for complete package info
+    const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(name);
+    
+    // 4. Manually combine NPM + GitHub + OSV data
     return {
       ...npmPackage,
-      githubRepo: githubData
+      githubRepo: githubData,
+      osv_vulnerabilities
     };
   }
 
@@ -192,5 +264,36 @@ export class PackageSearchService {
       default_branch: githubRepoData.default_branch,
       language: githubRepoData.language
     };
+  }
+
+  // OSV Vulnerability methods for advanced use cases
+  async getPackageVulnerabilities(name: string) {
+    return await this.osvVulnerabilityRepository.findByPackageName(name);
+  }
+
+  async searchVulnerabilities(packageName: string) {
+    // Fetch fresh vulnerabilities from OSV API
+    const vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(packageName);
+    
+    // Store vulnerabilities if found
+    if (vulnerabilities.length > 0) {
+      try {
+        const vulnerabilitiesToStore = vulnerabilities.map(vuln => ({
+          ...vuln,
+          package_name: packageName
+        }));
+        await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
+        
+        // Update has_osvvulnerabilities flag
+        await this.npmRepo.createOrUpdate({
+          package_name: packageName,
+          has_osvvulnerabilities: true
+        });
+      } catch (error) {
+        console.warn(`Failed to store vulnerabilities for ${packageName}:`, error.message);
+      }
+    }
+    
+    return vulnerabilities;
   }
 } 

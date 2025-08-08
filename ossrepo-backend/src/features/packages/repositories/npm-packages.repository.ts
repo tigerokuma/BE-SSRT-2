@@ -41,6 +41,7 @@ export class NpmPackagesRepository {
         maintainers: packageData.maintainers || [],
         risk_score: packageData.risk_score,
         repo_url: packageData.repo_url,
+        has_osvvulnerabilities: packageData.has_osvvulnerabilities,
         fetched_at: new Date()
       },
       create: {
@@ -57,6 +58,7 @@ export class NpmPackagesRepository {
         maintainers: packageData.maintainers || [],
         risk_score: packageData.risk_score,
         repo_url: packageData.repo_url,
+        has_osvvulnerabilities: packageData.has_osvvulnerabilities || false,
         fetched_at: new Date()
       }
     });
