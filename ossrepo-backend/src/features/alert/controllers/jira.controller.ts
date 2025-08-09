@@ -1,32 +1,35 @@
-import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { JiraService } from  '../services/jira.service';
 import { Response } from 'express';
 import { JiraIssue } from '../dto/jira.dto';
 
 @Controller('jira')
 export class JiraController {
-  private readonly user: string; // change this when a user login system has been implemented
-  constructor(private readonly jiraService: JiraService) {
-    this.user = 'user-123';
-  }
+  constructor(private readonly jiraService: JiraService) {}
 
-  @Get('oAuth')
-  async jiraAuth( 
-    @Query('code') code: string, @Res() res: Response
+  @Get('oAuth/:user_id')
+  async jiraAuth(
+    @Query('code') code: string, 
+    @Param('user_id') user_id: string,
+    @Res() res: Response
   ) {
     const record = await this.jiraService.checkTempJiraInfo(code);
-    if (!record) {
+    if (record==null) {
+      console.log("expir");
       return res.status(410).send('Code expired.');
     }
-    
-    const user = this.user;
+  
 
-    if (!user) {
+    if (!user_id) {
       // Not logged in: Redirect to login page
-      return res.redirect(`/auth/login?code=${code}`);
+      const redirectAfterLogin = `/jira/oAuth?code=${code}`;
+      return res.redirect(`/auth/login?redirectUrl=${encodeURIComponent(redirectAfterLogin)}`);
     }
 
-    return res.redirect(`/jira/user-watchlist?code=${code}`);
+    const insertJira = { user_id, code };
+    await this.jiraService.linkProject(insertJira);
+
+    return res.json({ id: user_id });
   }
 
   @Get('gen-code')
@@ -43,7 +46,7 @@ export class JiraController {
 
   @Post('insert-code')
   async codeJira(
-    @Body() jiraInfo: { code: string, projectKey: string, webtrigger_url: string }) 
+    @Body() jiraInfo: { code: string, projectKey: string, webtriggerUrl: string }) 
   {
     try{
       return this.jiraService.addTempUrl(jiraInfo);
@@ -53,7 +56,7 @@ export class JiraController {
   }
 
   @Post('issue')
-  createJiraIssue(jiraIssue: {userID: string, summary: string, description: string}) 
+  createJiraIssue(@Body() jiraIssue: {userID: string, summary: string, description: string}) 
   {
     try{
       return this.jiraService.createIssue(jiraIssue);
@@ -62,8 +65,13 @@ export class JiraController {
     }
   }
 
-  @Get('check-link')
-  async checkJiraLink(@Body('insertJira') checkJira: { projectKey: string, webtrigger_url: string} )
+  @Get('user-info/:user_id')
+  async getJiraInfo(@Param('user_id') user_id: string) {
+    return await this.jiraService.getUserInfo(user_id);
+  }
+
+  @Post('check-link')
+  async checkJiraLink(@Body() checkJira: { projectKey: string, webtrigger_url: string} )
   {
     try{
       return await this.jiraService.linkExists(checkJira);

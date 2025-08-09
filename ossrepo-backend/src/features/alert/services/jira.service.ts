@@ -28,13 +28,14 @@ export class JiraService {
   }
 
   async checkTempJiraInfo(code: string) {
-    return await this.jiraRepository.checkCode(code);
+    const temp = await this.jiraRepository.checkCode(code);
+    return temp;
   }
 
   async linkProject(@Body() insertJira: any) {
-    const jiraInfo = await this.jiraRepository.getJiraInfo(insertJira.uwlId);
+    const jiraInfo = await this.jiraRepository.getTempJiraInfo(insertJira.code);
     
-    if(!jiraInfo){
+    if(jiraInfo==null){
       throw new Error("Code expired.");
     }
 
@@ -75,8 +76,14 @@ export class JiraService {
     return code;
   }
 
+  async getUserInfo(user_id: string){
+    const userInfo = await this.jiraRepository.getJiraInfo(user_id);
+    return {project_key: userInfo?.project_key};
+  }
+
   async linkExists(checkJira: {projectKey: string, webtrigger_url: string}) {
-    return this.jiraRepository.checkJiraLink(checkJira);
+    const temp = await this.jiraRepository.checkJiraLink(checkJira);
+    return temp?.user.user_id;
   }
 
 }
