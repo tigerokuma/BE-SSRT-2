@@ -1,79 +1,172 @@
-# 🤖 Slack Integration Module — Features & API
 
-This module enables Slack workspace integration, allowing users to authorize the app, list channels, join channels, and send messages. It handles OAuth authentication using Slack's official API.
+# Features Documentation
 
----
-
-## ✅ Features
-
-### 1. **Slack OAuth Integration**
-- Generates a Slack OAuth URL to start the authorization flow.
-- Exchanges the authorization code for an access token.
-- Stores the token associated with the user for future Slack API calls.
-
-### 2. **List Public Slack Channels**
-- Retrieves the list of public Slack channels using the user’s access token.
-- Supports filtering out archived channels and limiting results.
-
-### 3. **Join Slack Channel**
-- Joins a specified public Slack channel using the saved access token.
-- Updates the repository with the newly joined channel.
-
-### 4. **Send Messages to Slack**
-- Sends messages to the saved Slack channel using Slack’s `chat.postMessage` API.
+## Base Route: `/slack`
 
 ---
 
-## 🌐 API Endpoints
+### 1. **GET `/slack/slack-channel/:user_id`**
 
-### `GET /slack/channels`
+**Description:**  
+Get the Slack channel information for a user.
 
-**Description**: Retrieves public Slack channels associated with the authorized Slack workspace.
-- **Params**: None
-- **Response**: Array of channel objects (`[{ id, name, ... }]`)
-- **Errors**:
-  - `401 Unauthorized` if token is invalid
-  - `502 Bad Gateway` if Slack API fails
+**URL Parameters:**  
+- `user_id` (string, required): User ID.
 
----
+**Response:**  
+```json
+{
+  "name": "string"  // Slack channel name
+}
+```
 
-### `POST /slack/join-channel`
-
-**Description**: Joins a specified public Slack channel.
-- **Params**:
-  - `channel` (string): Channel ID to join
-- **Response**: Slack channel object
-- **Errors**:
-  - `502 Bad Gateway` if join operation fails
+**Errors:**  
+- 400 Bad Request if `user_id` missing  
+- 502 Bad Gateway if fetching Slack channel fails
 
 ---
 
-### `GET /slack/start-oauth`
+### 2. **POST `/slack/send-message`**
 
-**Description**: Redirects the user to the Slack OAuth URL to initiate workspace authorization.
-- **Params**: None
-- **Response**: Redirects to Slack OAuth page
-- **Errors**:
-  - `500 Internal Server Error` if OAuth URL generation fails
+**Description:**  
+Send a message to the user's Slack channel.
+
+**Request Body:**  
+```json
+{
+  "user_id": "string",
+  "message": "string"
+}
+```
+
+**Response:**  
+```json
+{
+  "success": true,
+  "message": "Message sent to Slack successfully"
+}
+```
+
+**Errors:**  
+- 400 Bad Request if message body missing  
+- 502 Bad Gateway if sending message fails
 
 ---
 
-### `GET /slack/oauth`
+### 3. **GET `/slack/channels/:user_id`**
 
-**Description**: Handles Slack OAuth callback by exchanging code for an access token.
-- **Params**:
-  - `code` (string): Authorization code from Slack
-  - `state` (string): Must match the user ID
-- **Response**: Redirects to `/api` on success
-- **Errors**:
-  - `400 Bad Request` if code is missing or invalid
-  - `502 Bad Gateway` if token exchange fails
+**Description:**  
+List public Slack channels for the user.
 
+**URL Parameters:**  
+- `user_id` (string, required): User ID.
 
-## 🔐 Environment Variables Used
+**Response:**  
+```json
+{
+  "channels": [ /* array of channel objects */ ]
+}
+```
 
-| Variable             | Description                                        |
-|----------------------|----------------------------------------------------|
-| `SLACK_CLIENT_ID`     | Client ID for the Slack App                        |
-| `SLACK_CLIENT_SECRET` | Client secret for the Slack App                    |
-| `SLACK_REDIRECT_URL`  | Redirect URI configured in the Slack App settings |
+**Errors:**  
+- 400 Bad Request if `user_id` missing  
+- 401 Unauthorized if Slack credentials invalid  
+- 502 Bad Gateway if fetching Slack channels fails
+
+---
+
+### 4. **POST `/slack/join-channel`**
+
+**Description:**  
+Join a user to a Slack channel.
+
+**Request Body:**  
+```json
+{
+  "user_id": "string",
+  "channel": "string"
+}
+```
+
+**Response:**  
+```json
+{
+  "channel": { /* Slack API channel object */ }
+}
+```
+
+**Errors:**  
+- 400 Bad Request if body missing  
+- 502 Bad Gateway if Slack API error
+
+---
+
+### 5. **GET `/slack/start-oauth/:user_id`**
+
+**Description:**  
+Redirect user to Slack OAuth URL to authorize app.
+
+**URL Parameters:**  
+- `user_id` (string, required): User ID.
+
+**Response:**  
+- Redirects to Slack OAuth URL.
+
+**Errors:**  
+- 400 Bad Request if `user_id` missing  
+- 500 Internal Server Error if URL generation fails
+
+---
+
+### 6. **GET `/slack/oauth`**
+
+**Description:**  
+Handle Slack OAuth callback, exchange code for access token.
+
+**Query Parameters:**  
+- `code` (string, required): Slack OAuth code  
+- `state` (string, required): User ID (used as state)
+
+**Response:**  
+```json
+{
+  "success": true
+}
+```
+
+**Errors:**  
+- 400 Bad Request if code missing or invalid  
+- 502 Bad Gateway if token exchange fails
+
+---
+
+# DTOs Summary
+
+| DTO Name         | Fields                           | Validation                       |
+|------------------|---------------------------------|---------------------------------|
+| `SlackOauthConnect` | `code: string`, `state: string` | Required, non-empty strings      |
+| `SlackInsert`    | `user_id: string`, `token: string`, `channel?: string` | Required for user_id and token  |
+| `UserMessage`    | `user_id: string`, `message: string` | Required, non-empty strings      |
+| `UserChannel`    | `user_id: string`, `channel: string` | Required, non-empty strings      |
+
+---
+
+# Service Behavior Summary
+
+- **exchangeCodeForToken(slackOauthConnect)**:  
+  Exchanges Slack OAuth code for access token and stores it linked to user.
+
+- **getChannels(user_id)**:  
+  Fetches list of public Slack channels for the user.
+
+- **getOAuthUrl(user_id)**:  
+  Generates Slack OAuth URL with required scopes and user state.
+
+- **joinChannel(userChannel)**:  
+  Makes the user join the specified Slack channel and updates DB.
+
+- **getSlackChannel(user_id)**:  
+  Gets the Slack channel info (name) linked to the user.
+
+- **sendMessage(userMessage)**:  
+  Sends a text message to the user's linked Slack channel.

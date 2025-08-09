@@ -1,64 +1,152 @@
-# 📧 Email Module — Features & API
 
-This module enables email confirmation and scheduled alert email notifications for users, using MailerSend. It supports email confirmation, time-based email scheduling, and alert digest generation.
+# Features Documentation
 
----
-
-## ✅ Features
-
-### 1. **Email Confirmation Flow**
-- Generate a unique confirmation token and email it to the user.
-- Store confirmation tokens with expiry metadata.
-- Verify and confirm user emails when they click the confirmation link.
-- Periodically clean up expired confirmation tokens.
-
-### 2. **Email Notification Scheduling**
-- Users can register their email frequency preferences (e.g., every week or month).
-- Emails are automatically sent out with top 10 recent alerts since the last sent time.
-- Alerts are ranked and displayed in order of severity (critical > moderate > mild).
-- After sending, the system updates the next email send time.
-
-### 3. **Alert Digest Emails**
-- Aggregates security alerts for a user since the last email.
-- Alerts are fetched from associated watchlists.
-- Only the top 10 alerts are included in the email content.
-
-### 4. **Scheduled Tasks**
-- `checkEmailTime()` (every 3 mins): Sends digest emails when scheduled.
-- `cleanupExpiredData()` (every 15 mins): Deletes expired confirmation tokens.
+## Base Route: `/email`
 
 ---
 
-# 🌐 API Endpoints
+### 1. **POST `/email/send-confirmation`**
 
-### POST `/email/send-confirmation`
+**Description:**  
+Send a confirmation email to a user.
 
-- **Description**: Send an email confirmation to the associated user.
-- **Body**:
-  - `user_id` (string): The ID of the user to associate a sent email to.
+**Request Body:**  
+```json
+{
+  "user_id": "string"   // Required: the ID of the user to send confirmation email to
+}
+```
 
-### GET `/email/confirm-email?token=string`
+**Response:**  
+```json
+{
+  "success": true,
+  "message": "Confirmation email sent"
+}
+```
 
-- **Description**: Add the email to the confirmed list to send emails to.
-- **Params**:
-  - `token` (string): Token received via email link.
-- **Response**: `200 OK` on success.
+**Errors:**  
+- 400 Bad Request if `user_id` missing  
+- 502 Bad Gateway if email sending fails
 
-### Post `/email/add-time`
+---
 
-- **Description**: Add the email to the confirmed list to send emails to.
-- **Body**:
-  - `id` (string): The user_id.
-  - `wait_unit` (string): Frequency unit count.
-  - `wait_value` (string): `DAY` \| `WEEK` \| `MONTH` \| `YEAR`.
-  - `first_email_time` (string): Start time for the first email.
+### 2. **GET `/email/check-confirmation/:user_id`**
 
-- **Response**: `200 OK` on success.
+**Description:**  
+Check if the user’s email is confirmed.
 
-# 🔐 Environment Variables Used
+**URL Parameters:**  
+- `user_id` (string, required): ID of the user.
 
-| Variable            | Description                              |
-| ------------------- | ---------------------------------------- |
-| `EMAIL_API_KEY`     | MailerSend API key                        |
-| `FROM_EMAIL`        | Sender email address (e.g., noreply@...) |
-| `EMAIL_CONFIRM_URL` | Base URL for email confirmation links     |
+**Response:**  
+```json
+{
+  "email_confirmed": true | false | null
+}
+```
+
+**Errors:**  
+- 400 Bad Request if `user_id` missing  
+- 502 Bad Gateway if check fails
+
+---
+
+### 3. **GET `/email/email-time/:user_id`**
+
+**Description:**  
+Retrieve the email timing info for the user.
+
+**URL Parameters:**  
+- `user_id` (string, required): ID of the user.
+
+**Response:**  
+```json
+{
+  "id": "string",
+  "last_email_time": "Date string",
+  "next_email_time": "Date string",
+  "wait_value": "DAY" | "WEEK" | "MONTH" | "YEAR",
+  "wait_unit": number
+}
+```
+
+**Errors:**  
+- 400 Bad Request if `user_id` missing  
+- 502 Bad Gateway if retrieval fails
+
+---
+
+### 4. **GET `/email/confirm-email?token=xxx`**
+
+**Description:**  
+Confirm a user’s email using a token.
+
+**Query Parameters:**  
+- `token` (string, required): Confirmation token.
+
+**Response:**  
+- **No content (void)** on success.
+
+**Errors:**  
+- 400 Bad Request if `token` missing  
+- 502 Bad Gateway if confirmation fails
+
+---
+
+### 5. **POST `/email/add-time`**
+
+**Description:**  
+Add or update a user’s email timing info.
+
+**Request Body:**  
+```json
+{
+  "id": "string",               // Required
+  "first_email_time": "Date",  // Required
+  "wait_value": "DAY" | "WEEK" | "MONTH" | "YEAR",  // Required
+  "wait_unit": "number"           // Required, minimum 1
+}
+```
+
+**Response:**  
+Returns the updated or created email timing object (shape matches EmailTime).
+
+**Errors:**  
+- 400 Bad Request if required fields missing  
+- 502 Bad Gateway if update fails
+
+---
+
+# DTOs Summary
+
+| DTO Name        | Fields                                         | Validation                                   |
+|-----------------|------------------------------------------------|----------------------------------------------|
+| `User`          | `user_id: string`                              | Required, non-empty string                    |
+| `EmailTimeInput`| `id: string`, `first_email_time: Date`, `wait_value: enum`, `wait_unit: number` | All required, `wait_unit` ≥ 1                  |
+| `EmailTime`     | `id: string`, `last_email_time: Date`, `next_email_time: Date`, `wait_value: enum`, `wait_unit: number` | -                                            |
+| `ConfirmTokenInsert` | `user_id: string`, `token: string`, `expires_at: Date` | -                                            |
+| `UpdateEmailTime`| `user_id: string`, `next_email_time: Date`   | -                                            |
+| `GetAlertsSince` | `user_id: string`, `last_email_time: Date`   | -                                            |
+
+---
+
+# Service Behavior Summary
+
+- **sendConfirmation(user_id)**:  
+  Generates a confirmation token, stores it, and emails the confirmation link to the user.
+
+- **checkConfirmation(user_id)**:  
+  Returns whether the user’s email is confirmed.
+
+- **getUserEmailTime(user_id)**:  
+  Retrieves the user’s email timing info.
+
+- **confirmEmail(token)**:  
+  Validates token, marks user email confirmed, deletes token.
+
+- **addEmailTime(emailTimeInput)**:  
+  Adds or updates email timing info for the user.
+
+- **sendTimedEmails (cron every 3 minutes)**:  
+  Checks users whose `next_email_time` is due, fetches top 10 alerts, sends alert emails, and updates next email time.
