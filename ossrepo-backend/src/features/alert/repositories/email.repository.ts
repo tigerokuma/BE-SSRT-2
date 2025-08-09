@@ -8,8 +8,15 @@ export class EmailRepository {
     constructor(private readonly prisma: PrismaService) {}
 
     async InsertToken(confirmTokenInsert: ConfirmTokenInsert) {
-        return this.prisma.emailConfirmation.create({
-            data: {
+        return this.prisma.emailConfirmation.upsert({
+            where: { user_id: confirmTokenInsert.user_id },
+            
+            update: { 
+                token: confirmTokenInsert.token,
+                expires_at: confirmTokenInsert.expires_at 
+            },
+
+            create: {
                 user_id: confirmTokenInsert.user_id,
                 token: confirmTokenInsert.token,
                 expires_at: confirmTokenInsert.expires_at
@@ -45,20 +52,27 @@ export class EmailRepository {
         })
     }
 
-    async InsertEmailTime(emailTime: EmailTime) {
-        this.prisma.emailTime.upsert({
-            where: { id: emailTime.id }, 
+    async CheckConfirmation(userId: string) {
+        return await this.prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { email_confirmed: true}
+        })
+    }
+
+    async InsertEmailTime(emailTimeDto: EmailTime) {
+        return await this.prisma.emailTime.upsert({
+            where: { id: emailTimeDto.id }, 
             update: {
-                last_email_time: emailTime.last_email_time,
-                wait_value: emailTime.wait_value,
-                wait_unit: emailTime.wait_unit,
+                next_email_time: emailTimeDto.next_email_time,
+                wait_value: emailTimeDto.wait_value,
+                wait_unit: emailTimeDto.wait_unit,
             },
             create: {
-                id: emailTime.id, 
-                last_email_time: emailTime.last_email_time,
-                next_email_time: emailTime.next_email_time,
-                wait_value: emailTime.wait_value,
-                wait_unit: emailTime.wait_unit,
+                id: emailTimeDto.id, 
+                last_email_time: emailTimeDto.last_email_time,
+                next_email_time: emailTimeDto.next_email_time,
+                wait_value: emailTimeDto.wait_value,
+                wait_unit: emailTimeDto.wait_unit,
             },
         });
 
@@ -72,6 +86,12 @@ export class EmailRepository {
                 },
             },
             select: { id: true, last_email_time: true, wait_unit: true, wait_value: true }
+        });
+    }
+
+    async getUserEmailTime(userId: string) {
+        return await this.prisma.emailTime.findUnique({
+            where: {id: userId},
         });
     }
 

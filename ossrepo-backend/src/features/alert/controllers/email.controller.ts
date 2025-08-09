@@ -1,6 +1,6 @@
-import { Controller, Post, Body, Get, Query } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query, Param } from '@nestjs/common';
 import { EmailService } from  '../services/email.service'; 
-import { EmailTimeInput } from '../dto/email.dto';
+import { EmailTimeInput, User } from '../dto/email.dto';
 
 @Controller('email')
 export class EmailController {
@@ -8,8 +8,18 @@ export class EmailController {
 
 
   @Post('send-confirmation')
-  sendConfirmation(@Body() user_id: string) {
-    return this.service.sendConfirmation(user_id);
+  sendConfirmation(@Body() body: User) {
+    return this.service.sendConfirmation(body.user_id);
+  }
+
+  @Get('check-confimation/:user_id')
+  async checkConfimation(@Param('user_id') user_id: string) {
+    return await this.service.checkConfirmation(user_id);
+  }
+
+  @Get('email-time/:user_id')
+  async getEmailTime(@Param('user_id') user_id: string) {
+    return await this.service.getUserEmailTime(user_id);
   }
 
   @Get('confirm-email')

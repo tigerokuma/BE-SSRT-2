@@ -25,3 +25,7 @@ export class EmailTimeInput {
     wait_value: WaitValue;
     wait_unit: number;
 }
+
+export class User {
+    user_id: string
+}

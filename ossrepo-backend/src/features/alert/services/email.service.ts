@@ -44,7 +44,9 @@ export class EmailService{
     if(!email){
       throw new Error("Recipient email not defined");
     }
-    const recipients = [ new Recipient(email?.email, user_id) ];
+    const recipients = [ new Recipient(
+      "ehebaldstephen@gmail.com",//email?.email, 
+      user_id) ];
 
     const emailParams = new EmailParams()
     .setFrom(this.sentFrom)                  
@@ -59,10 +61,19 @@ export class EmailService{
     try{
       await this.mailerSend.email.send(emailParams);
     }
-    catch{
-      console.log('email sent');
+    catch (error){
+      console.log(error);
     }
 
+  }
+
+  async checkConfirmation(user_id: string) {
+    return await this.emailRepository.CheckConfirmation(user_id);
+  }
+
+  async getUserEmailTime(user_id: string) {
+    
+    return await this.emailRepository.getUserEmailTime(user_id);
   }
 
   async confirmEmail(token: string) {
@@ -147,7 +158,7 @@ export class EmailService{
     emailTime.last_email_time = new Date();
 
     
-    await this.emailRepository.InsertEmailTime(emailTime);
+    const temp = await this.emailRepository.InsertEmailTime(emailTime);
   }
     
 }
