@@ -8,7 +8,7 @@ on:
 env:
   NODE_VERSION: '20'
   APP_NAME: 'nestjs-api'
-  DEPLOY_PATH: '~/BE-SSRT-2/ossrepo-backend'  # This matches your server structure
+  DEPLOY_PATH: '~/BE-SSRT-2/ossrepo-backend'
 
 jobs:
   validate:
@@ -26,31 +26,38 @@ jobs:
       run: |
         echo "Repository structure:"
         ls -la
-        echo "Package files:"
-        ls -la package*.json || echo "No package files found"
+        echo "Package files before conversion:"
+        ls -la package*.json pnpm-lock.yaml 2>/dev/null || echo "Some files may not exist"
         
     - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: 'ossrepo-backend/package-lock.json'
+        # No cache initially since we're converting from pnpm to npm
     
-    - name: 📦 Install Dependencies
+    - name: 🔄 Convert from pnpm to npm
       run: |
-        echo "::group::📦 Installing NPM packages"
-        # Use the same package manager as your server (you have both package-lock.json and pnpm-lock.yaml)
-        if [ -f "package-lock.json" ]; then
-          echo "Using npm ci with package-lock.json"
-          npm ci
-        elif [ -f "pnpm-lock.yaml" ]; then
-          echo "Using pnpm install with pnpm-lock.yaml"
-          npm install -g pnpm
-          pnpm install --frozen-lockfile
-        else
-          echo "Using npm install"
-          npm install
+        echo "::group::🔄 Converting project from pnpm to npm"
+        
+        # Remove pnpm lock file if it exists
+        if [ -f "pnpm-lock.yaml" ]; then
+          echo "Removing pnpm-lock.yaml"
+          rm pnpm-lock.yaml
         fi
+        
+        # Clean any existing node_modules
+        if [ -d "node_modules" ]; then
+          echo "Cleaning existing node_modules"
+          rm -rf node_modules
+        fi
+        
+        # Create package-lock.json with npm install
+        echo "Creating package-lock.json with npm install"
+        npm install
+        
+        echo "✅ Successfully converted to npm"
+        echo "Package files after conversion:"
+        ls -la package*.json
         echo "::endgroup::"
     
     - name: 🔧 Generate Prisma Client
@@ -66,6 +73,13 @@ jobs:
         npm run build
         echo "✅ Application built successfully"
         echo "::endgroup::"
+    
+    - name: 📤 Upload package-lock.json
+      uses: actions/upload-artifact@v4
+      with:
+        name: package-lock
+        path: ossrepo-backend/package-lock.json
+        retention-days: 1
 
   deploy:
     name: 🚀 Production Deployment
@@ -77,11 +91,17 @@ jobs:
     - name: 📥 Checkout Repository
       uses: actions/checkout@v4
     
+    - name: 📥 Download package-lock.json
+      uses: actions/download-artifact@v4
+      with:
+        name: package-lock
+        path: ossrepo-backend/
+    
     - name: 🚀 Deploy to GCP Server
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}  # Should be 'okcom' based on your server
+        username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT || '22' }}
         timeout: 300s
@@ -112,31 +132,15 @@ jobs:
           log_info "Server: $(hostname)"
           log_info "User: $(whoami)"
           
-          # Step 1: Verify server structure
-          log_step "Verifying server directory structure"
-          if [ ! -d "~/BE-SSRT-2" ]; then
-            log_error "BE-SSRT-2 directory not found in home directory"
-            exit 1
-          fi
-          
-          if [ ! -d "~/BE-SSRT-2/ossrepo-backend" ]; then
-            log_error "ossrepo-backend directory not found"
-            exit 1
-          fi
-          
-          log_success "Server directory structure verified"
-          
-          # Step 2: Navigate to project directory
+          # Step 1: Navigate to project directory
           log_step "Navigating to project directory"
           cd ~/BE-SSRT-2/ossrepo-backend || {
             log_error "Failed to navigate to ~/BE-SSRT-2/ossrepo-backend"
             exit 1
           }
           log_success "Current directory: $(pwd)"
-          log_info "Directory contents:"
-          ls -la
           
-          # Step 3: Create backup
+          # Step 2: Create backup
           log_step "Creating deployment backup"
           BACKUP_DIR="backups/$(date +%Y%m%d_%H%M%S)"
           mkdir -p "$BACKUP_DIR"
@@ -147,24 +151,22 @@ jobs:
             log_warning "No dist directory found to backup"
           fi
           
-          # Step 4: Configure Git
+          # Step 3: Configure Git
           log_step "Configuring Git for deployment"
           git config pull.rebase false
           git config --global --add safe.directory $(pwd)
           log_success "Git configuration updated"
           
-          # Step 5: Update source code
+          # Step 4: Update source code
           log_step "Updating source code from repository"
-          log_info "Current branch: $(git branch --show-current)"
           log_info "Current commit: $(git rev-parse --short HEAD)"
           
-          # Fetch latest changes
+          # Fetch and update
           git fetch origin main || {
             log_error "Failed to fetch from origin"
             exit 1
           }
           
-          # Check for updates
           LOCAL_COMMIT=$(git rev-parse HEAD)
           REMOTE_COMMIT=$(git rev-parse origin/main)
           
@@ -180,6 +182,23 @@ jobs:
           
           log_success "Code updated to: $(git rev-parse --short HEAD)"
           
+          # Step 5: Convert to npm if needed
+          log_step "Converting project to npm (if needed)"
+          
+          # Remove pnpm files if they exist
+          if [ -f "pnpm-lock.yaml" ]; then
+            log_info "Removing pnpm-lock.yaml"
+            rm pnpm-lock.yaml
+          fi
+          
+          # Clean node_modules for fresh npm install
+          if [ -d "node_modules" ]; then
+            log_info "Cleaning existing node_modules for npm conversion"
+            rm -rf node_modules
+          fi
+          
+          log_success "Project prepared for npm"
+          
           # Step 6: Check runtime environment
           log_step "Verifying runtime environment"
           NODE_VERSION=$(node --version)
@@ -187,44 +206,28 @@ jobs:
           log_info "Node.js: $NODE_VERSION"
           log_info "NPM: $NPM_VERSION"
           
-          # Verify package files
-          if [ -f "package-lock.json" ]; then
-            log_info "Found: package-lock.json"
-            PACKAGE_MANAGER="npm"
-          elif [ -f "pnpm-lock.yaml" ]; then
-            log_info "Found: pnpm-lock.yaml"
-            PACKAGE_MANAGER="pnpm"
-          else
-            log_warning "No lock file found, using npm"
-            PACKAGE_MANAGER="npm"
-          fi
+          # Step 7: Install dependencies with npm
+          log_step "Installing dependencies with npm"
+          log_info "Using npm for package management"
           
-          # Step 7: Install dependencies
-          log_step "Installing application dependencies"
-          case $PACKAGE_MANAGER in
-            "npm")
-              log_info "Using npm for package management"
-              npm ci --only=production || {
-                log_warning "npm ci failed, trying npm install"
-                npm install --only=production || {
-                  log_error "Failed to install dependencies"
-                  exit 1
-                }
-              }
-              ;;
-            "pnpm")
-              log_info "Using pnpm for package management"
-              if ! command -v pnpm &> /dev/null; then
-                log_info "Installing pnpm globally"
-                npm install -g pnpm
-              fi
-              pnpm install --prod --frozen-lockfile || {
-                log_error "Failed to install dependencies with pnpm"
+          if [ -f "package-lock.json" ]; then
+            log_info "Found package-lock.json, using npm ci"
+            npm ci --only=production || {
+              log_warning "npm ci failed, trying npm install"
+              npm install --only=production || {
+                log_error "Failed to install dependencies"
                 exit 1
               }
-              ;;
-          esac
-          log_success "Dependencies installed successfully"
+            }
+          else
+            log_info "No package-lock.json found, using npm install"
+            npm install --only=production || {
+              log_error "Failed to install dependencies"
+              exit 1
+            }
+          fi
+          
+          log_success "Dependencies installed successfully with npm"
           
           # Step 8: Generate Prisma client
           log_step "Generating Prisma database client"
@@ -258,7 +261,6 @@ jobs:
             exit 1
           }
           
-          # Verify build output
           if [ -d "dist" ]; then
             BUILD_SIZE=$(du -sh dist | cut -f1)
             log_success "Application built successfully (Size: $BUILD_SIZE)"
@@ -268,7 +270,7 @@ jobs:
           fi
           
           # Step 11: Application service management
-          log_step "Managing application service"
+          log_step "Managing application service with PM2"
           
           # Check if PM2 is installed
           if ! command -v pm2 &> /dev/null; then
@@ -276,18 +278,15 @@ jobs:
             npm install -g pm2
           fi
           
-          # Check current application status
+          # Restart or start application
           if pm2 describe ${{ env.APP_NAME }} > /dev/null 2>&1; then
-            log_info "Application is currently running"
-            pm2 describe ${{ env.APP_NAME }} | grep -E "(status|uptime|cpu|memory)"
-            
-            log_info "Restarting application..."
+            log_info "Restarting existing application"
             pm2 restart ${{ env.APP_NAME }} || {
               log_error "Failed to restart application"
               exit 1
             }
           else
-            log_info "Application not running, starting new instance"
+            log_info "Starting new application instance"
             if [ -f "ecosystem.config.js" ]; then
               pm2 start ecosystem.config.js || {
                 log_error "Failed to start with ecosystem config"
@@ -301,42 +300,37 @@ jobs:
             fi
           fi
           
-          # Step 12: Post-deployment verification
-          log_step "Performing post-deployment health check"
+          # Step 12: Health check
+          log_step "Performing health check"
           sleep 5
           
           if pm2 describe ${{ env.APP_NAME }} | grep -q "online"; then
             log_success "Application is running and healthy"
-            
-            # Display current status
-            log_info "Current Application Status:"
             pm2 list | grep ${{ env.APP_NAME }}
             
-            # Test health endpoint if available
+            # Test API if possible
             if command -v curl &> /dev/null; then
-              for endpoint in "health" "" "api/health"; do
-                if curl -f -s http://localhost:3000/$endpoint > /dev/null 2>&1; then
-                  log_success "Health check passed: /$endpoint"
-                  break
-                fi
-              done
+              if curl -f -s http://localhost:3000/health > /dev/null 2>&1; then
+                log_success "API health check passed"
+              elif curl -f -s http://localhost:3000/ > /dev/null 2>&1; then
+                log_success "API is responding"
+              else
+                log_warning "API health check failed, but application is running"
+              fi
             fi
           else
             log_error "Application health check failed"
-            pm2 logs ${{ env.APP_NAME }} --lines 20
+            pm2 logs ${{ env.APP_NAME }} --lines 10
             exit 1
           fi
           
           # Step 13: Cleanup
-          log_step "Performing cleanup"
+          log_step "Cleaning up old backups"
           if [ -d "backups" ]; then
             cd backups
-            BACKUP_COUNT=$(ls -1 | wc -l)
-            if [ $BACKUP_COUNT -gt 5 ]; then
+            if [ $(ls -1 | wc -l) -gt 5 ]; then
               ls -t | tail -n +6 | xargs rm -rf
-              log_success "Old backups cleaned up, 5 retained"
-            else
-              log_info "$BACKUP_COUNT backups retained"
+              log_success "Old backups cleaned up"
             fi
             cd ..
           fi
@@ -344,13 +338,14 @@ jobs:
           # Final summary
           log_header "DEPLOYMENT COMPLETED SUCCESSFULLY"
           log_success "Deployment finished at $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          log_success "Package Manager: npm (converted from pnpm)"
           log_success "Application: ${{ env.APP_NAME }}"
           log_success "Commit: $(git rev-parse --short HEAD)"
           log_success "Node.js: $NODE_VERSION"
-          log_success "Package Manager: $PACKAGE_MANAGER"
           
           echo -e "\n${GREEN}════════════════════════════════════════════════════════════${NC}"
           echo -e "${GREEN}🎉 PRODUCTION DEPLOYMENT SUCCESSFUL! 🎉${NC}"
+          echo -e "${GREEN}Your application is now running with npm! 🚀${NC}"
           echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}\n"
 
   notify:
@@ -364,16 +359,10 @@ jobs:
       run: |
         if [ "${{ needs.deploy.result }}" == "success" ]; then
           echo "✅ Production deployment completed successfully!"
-          echo "🚀 Application is live at: ${{ secrets.HOST }}"
-          echo "📊 Node.js version: ${{ env.NODE_VERSION }}"
-          echo "📦 Application: ${{ env.APP_NAME }}"
+          echo "📦 Converted from pnpm to npm"
+          echo "🚀 Application is live and running"
         else
           echo "❌ Production deployment failed!"
-          echo "🔧 Please check the deployment logs and fix any issues"
-          echo "📋 Common fixes:"
-          echo "   - Check server connectivity"
-          echo "   - Verify environment variables"
-          echo "   - Check database connectivity"
-          echo "   - Review application logs"
+          echo "🔧 Check logs for troubleshooting"
           exit 1
         fi
