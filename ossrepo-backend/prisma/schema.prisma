@@ -66,10 +66,20 @@ model OsvVulnerability {
   published     DateTime?
   modified      DateTime?
   
+  // Enhanced filtering fields
+  fixed_versions          Json?    // Array of fixed version strings
+  introduced_versions     Json?    // Array of introduced version strings
+  last_affected_versions  Json?    // Array of last affected version strings
+  is_patched             Boolean  @default(false)
+  patch_age_days         Int?     // Days since patch was released
+  
   // Relations
   npmPackage    NpmPackage @relation(fields: [package_name], references: [package_name])
   
   @@index([package_name])
+  @@index([is_patched])
+  @@index([patch_age_days])
+  @@index([published])
   @@map("osv_vulnerabilities")
 }
 
