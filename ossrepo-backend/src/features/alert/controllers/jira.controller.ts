@@ -1,10 +1,15 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
-import { JiraService } from  '../services/jira.service';
+import { 
+  Body, Controller, Get, Param, Post, Query, Res, 
+  BadGatewayException, BadRequestException, InternalServerErrorException, UnauthorizedException, Logger 
+} from '@nestjs/common';
+import { JiraService } from '../services/jira.service';
 import { Response } from 'express';
-import { JiraIssue } from '../dto/jira.dto';
+import { CheckJira, TempJiraInfo, JiraIssue, LinkJira } from '../dto/jira.dto';
 
 @Controller('jira')
 export class JiraController {
+  private readonly logger = new Logger(JiraController.name);
+
   constructor(private readonly jiraService: JiraService) {}
 
   @Get('oAuth/:user_id')
@@ -13,71 +18,72 @@ export class JiraController {
     @Param('user_id') user_id: string,
     @Res() res: Response
   ) {
-    const record = await this.jiraService.checkTempJiraInfo(code);
-    if (record==null) {
-      console.log("expir");
-      return res.status(410).send('Code expired.');
-    }
-  
-
-    if (!user_id) {
-      // Not logged in: Redirect to login page
-      const redirectAfterLogin = `/jira/oAuth?code=${code}`;
-      return res.redirect(`/auth/login?redirectUrl=${encodeURIComponent(redirectAfterLogin)}`);
+    if (!code) {
+      this.logger.warn(`Missing Jira authorization code for user: ${user_id}`);
+      throw new BadRequestException('Missing Jira authorization code');
     }
 
-    const insertJira = { user_id, code };
-    await this.jiraService.linkProject(insertJira);
+    const link_jira: LinkJira = { user_id, code };
 
-    return res.json({ id: user_id });
+    try {
+      await this.jiraService.linkProject(link_jira);
+      return res.json({ id: user_id });
+    } catch (err) {
+      this.logger.error(`Failed to link Jira project for user: ${user_id}`, err.stack);
+      throw new BadGatewayException('Failed to link Jira project');
+    }
   }
 
   @Get('gen-code')
-  async genCode(){
-    return await this.jiraService.generateCode();
-  }
-
-  @Post('link')
-  async linkJira(
-    @Body('insertJira') insertJira: { user_id: string, code: string}
-  ) {
-    return this.jiraService.linkProject(insertJira)
-  }
-
-  @Post('insert-code')
-  async codeJira(
-    @Body() jiraInfo: { code: string, projectKey: string, webtriggerUrl: string }) 
-  {
-    try{
-      return this.jiraService.addTempUrl(jiraInfo);
-    } catch(err) {
-      console.error('connectJira error: ', err);
+  async genCode() {
+    try {
+      return await this.jiraService.generateCode();
+    } catch (err) {
+      this.logger.error('Failed to generate Jira code', err.stack);
+      throw new InternalServerErrorException('Failed to generate Jira code');
     }
   }
 
-  @Post('issue')
-  createJiraIssue(@Body() jiraIssue: {userID: string, summary: string, description: string}) 
-  {
-    try{
-      return this.jiraService.createIssue(jiraIssue);
-    } catch(err) {
-      console.error('createJiraIssue error: ', err);
+  @Post('insert-code')
+  async codeJira(@Body() temp_jira_info: TempJiraInfo) {
+    try {
+      return await this.jiraService.addTempUrl(temp_jira_info);
+    } catch (err) {
+      this.logger.error('Failed to insert Jira code', err.stack);
+      throw new BadGatewayException('Failed to insert Jira code');
+    }
+  }
+
+  @Post('create-issue')
+  async createJiraIssue(@Body() jira_issue: JiraIssue) {
+    try {
+      return await this.jiraService.createIssue(jira_issue);
+    } catch (err) {
+      this.logger.error('Failed to create Jira issue', err.stack);
+      throw new BadGatewayException('Failed to create Jira issue');
     }
   }
 
   @Get('user-info/:user_id')
   async getJiraInfo(@Param('user_id') user_id: string) {
-    return await this.jiraService.getUserInfo(user_id);
-  }
-
-  @Post('check-link')
-  async checkJiraLink(@Body() checkJira: { projectKey: string, webtrigger_url: string} )
-  {
-    try{
-      return await this.jiraService.linkExists(checkJira);
-    } catch(err) {
-      console.error('checkJiraLink error: ', err);
+    try {
+      return await this.jiraService.getUserInfo(user_id);
+    } catch (err) {
+      this.logger.error(`Failed to fetch Jira user info for user: ${user_id}`, err.stack);
+      if (err.response?.status === 401) {
+        throw new UnauthorizedException('Invalid Jira credentials');
+      }
+      throw new BadGatewayException('Failed to fetch Jira user info');
     }
   }
 
+  @Post('check-link')
+  async checkJiraLink(@Body() check_jira: CheckJira) {
+    try {
+      return await this.jiraService.linkExists(check_jira);
+    } catch (err) {
+      this.logger.error('Failed to check Jira link', err.stack);
+      throw new BadGatewayException('Failed to check Jira link');
+    }
+  }
 }

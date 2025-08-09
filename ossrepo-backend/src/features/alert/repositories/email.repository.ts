@@ -1,38 +1,38 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { ConfirmTokenInsert, EmailTime } from '../dto/email.dto';
+import { ConfirmTokenInsert, EmailTime, GetAlertsSince, UpdateEmailTime } from '../dto/email.dto';
 import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class EmailRepository {
     constructor(private readonly prisma: PrismaService) {}
 
-    async InsertToken(confirmTokenInsert: ConfirmTokenInsert) {
+    async InsertToken(confirm_token_insert: ConfirmTokenInsert) {
         return this.prisma.emailConfirmation.upsert({
-            where: { user_id: confirmTokenInsert.user_id },
+            where: { user_id: confirm_token_insert.user_id },
             
             update: { 
-                token: confirmTokenInsert.token,
-                expires_at: confirmTokenInsert.expires_at 
+                token: confirm_token_insert.token,
+                expires_at: confirm_token_insert.expires_at 
             },
 
             create: {
-                user_id: confirmTokenInsert.user_id,
-                token: confirmTokenInsert.token,
-                expires_at: confirmTokenInsert.expires_at
+                user_id: confirm_token_insert.user_id,
+                token: confirm_token_insert.token,
+                expires_at: confirm_token_insert.expires_at
             }
         });
     }
 
-    async DeleteFromToken(conToken: string) {
+    async DeleteFromToken(con_token: string) {
         return await this.prisma.emailConfirmation.delete({
-            where: { token: conToken },
+            where: { token: con_token },
         });
     }
 
-    async GetEmail(userId: string) {
+    async GetEmail(user_id: string) {
         return await this.prisma.user.findUnique({
-            where: { user_id: userId },
+            where: { user_id: user_id },
             select: { email: true },
         });
     }
@@ -45,37 +45,36 @@ export class EmailRepository {
 
     }
 
-    async UpdateConfirmation(userId: string) {
+    async UpdateConfirmation(user_id: string) {
         return await this.prisma.user.update({
-            where: { user_id: userId },
+            where: { user_id: user_id },
             data: { email_confirmed: true },
         })
     }
 
-    async CheckConfirmation(userId: string) {
+    async CheckConfirmation(user_id: string) {
         return await this.prisma.user.findUnique({
-            where: { user_id: userId },
+            where: { user_id: user_id },
             select: { email_confirmed: true}
         })
     }
 
-    async InsertEmailTime(emailTimeDto: EmailTime) {
+    async InsertEmailTime(email_time: EmailTime) {
         return await this.prisma.emailTime.upsert({
-            where: { id: emailTimeDto.id }, 
+            where: { id: email_time.id }, 
             update: {
-                next_email_time: emailTimeDto.next_email_time,
-                wait_value: emailTimeDto.wait_value,
-                wait_unit: emailTimeDto.wait_unit,
+                next_email_time: email_time.next_email_time,
+                wait_value: email_time.wait_value,
+                wait_unit: email_time.wait_unit,
             },
             create: {
-                id: emailTimeDto.id, 
-                last_email_time: emailTimeDto.last_email_time,
-                next_email_time: emailTimeDto.next_email_time,
-                wait_value: emailTimeDto.wait_value,
-                wait_unit: emailTimeDto.wait_unit,
+                id: email_time.id, 
+                last_email_time: email_time.last_email_time,
+                next_email_time: email_time.next_email_time,
+                wait_value: email_time.wait_value,
+                wait_unit: email_time.wait_unit,
             },
         });
-
     }
 
     async getEmailTimes() {
@@ -89,23 +88,23 @@ export class EmailRepository {
         });
     }
 
-    async getUserEmailTime(userId: string) {
+    async getUserEmailTime(user_id: string) {
         return await this.prisma.emailTime.findUnique({
-            where: {id: userId},
+            where: {id: user_id},
         });
     }
 
-    async updateEmailTime(userId: string, next_email_time: Date) {
+    async updateEmailTime(update_email_time: UpdateEmailTime) {
         this.prisma.emailTime.update({
-            where: {id: userId},
-            data: {next_email_time: next_email_time}
+            where: {id: update_email_time.user_id},
+            data: {next_email_time: update_email_time.next_email_time}
         });
     }
 
 
-    async getAlerts(userId: string, last_email_time: Date) {
+    async getAlerts(get_alerts_since: GetAlertsSince) {
         const uwlId = await this.prisma.userWatchlist.findMany({
-            where: { user_id: userId },
+            where: { user_id: get_alerts_since.user_id },
             select: { id: true }
         });
 
@@ -117,7 +116,7 @@ export class EmailRepository {
                 in: uwlIds,
                 },
                 created_at: {
-                gt: last_email_time,
+                gt: get_alerts_since.last_email_time,
                 },
             },
             select: {

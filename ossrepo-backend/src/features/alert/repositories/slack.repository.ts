@@ -9,13 +9,13 @@ export class SlackRepository {
 
   async insertSlackInfo(slackInsert: SlackInsert) {
     return this.prisma.slack.upsert({
-        where: {id: slackInsert.userId},
+        where: {id: slackInsert.user_id},
         update: {
             slack_token: slackInsert.token,
             slack_channel: slackInsert.channel
         },
         create: {
-            id: slackInsert.userId,
+            id: slackInsert.user_id,
             slack_token: slackInsert.token,
             slack_channel: slackInsert.channel
         }
@@ -23,7 +23,9 @@ export class SlackRepository {
   }
 
   async getUserById(state: string) {
-      return await this.prisma.user.findUnique({ where: { user_id: state } });
+      return await this.prisma.user.findUnique({ 
+        where: { user_id: state } 
+      });
   }
 
   async getSlackInfo(userId: string) {

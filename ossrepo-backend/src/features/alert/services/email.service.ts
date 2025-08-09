@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
-import { ConfirmTokenInsert, EmailTime, EmailTimeInput } from '../dto/email.dto';
+import { EmailTimeInput } from '../dto/email.dto';
 import { randomUUID } from 'crypto';
 import { EmailRepository } from '../repositories/email.repository';
 import { Cron } from '@nestjs/schedule';
@@ -29,42 +29,61 @@ export class EmailService{
     );
   }
 
-  async sendConfirmation(user_id) {
-    const newToken = randomUUID();
-    const confirmTokenInsert = new ConfirmTokenInsert();
-    confirmTokenInsert.user_id = user_id;
-    confirmTokenInsert.token = newToken;
-    confirmTokenInsert.expires_at = new Date();
-
-    this.emailRepository.InsertToken(confirmTokenInsert);
-
-    const confirmUrlBase = process.env.EMAIL_CONFIRM_URL;
-    const confirmUrl = `${confirmUrlBase}?token=${encodeURIComponent(newToken)}`;
+  private async sendEmail(
+    user_id: string,
+    subject: string,
+    html: string,
+    text: string
+  ) {
+    // get the email from the user_id
     const email = await this.emailRepository.GetEmail(user_id);
     if(!email){
       throw new Error("Recipient email not defined");
     }
     const recipients = [ new Recipient(
-      "ehebaldstephen@gmail.com",//email?.email, 
+      email?.email, 
       user_id) ];
 
+    if(!recipients) {
+      throw new Error('Unknown recipient')
+    }
+
+    // send the email
     const emailParams = new EmailParams()
     .setFrom(this.sentFrom)                  
     .setTo(recipients)                    
     .setReplyTo(this.sentFrom)              
-    .setSubject('Confirm your email')        
-    .setHtml(`
+    .setSubject(subject)        
+    .setHtml(html)                                       
+    .setText(text);
+    
+    await this.mailerSend.email.send(emailParams);
+
+  }
+
+  async sendConfirmation(user_id) {
+    const newToken = randomUUID();
+    const confirmTokenInsert = {
+      user_id: user_id,
+      token: newToken,
+      expires_at: new Date()
+    };
+
+    this.emailRepository.InsertToken(confirmTokenInsert);
+
+    // Generate the confirmation link
+    const confirmUrlBase = process.env.EMAIL_CONFIRM_URL;
+    const confirmUrl = `${confirmUrlBase}?token=${encodeURIComponent(newToken)}`;
+
+    const subject = 'Confirm your email';
+    const text = `Hi ${user_id},\nConfirm your email: ${confirmUrl}`;
+
+    const html = `
       <p>Hi ${user_id},</p>
       <p>Click <a href="${confirmUrl}">here</a> to confirm your email.</p>
-    `)                                       
-    .setText(`Hi ${user_id},\nConfirm your email: ${confirmUrl}`);
-    try{
-      await this.mailerSend.email.send(emailParams);
-    }
-    catch (error){
-      console.log(error);
-    }
+    `;
 
+    this.sendEmail(user_id, subject, html, text);
   }
 
   async checkConfirmation(user_id: string) {
@@ -72,7 +91,6 @@ export class EmailService{
   }
 
   async getUserEmailTime(user_id: string) {
-    
     return await this.emailRepository.getUserEmailTime(user_id);
   }
 
@@ -85,47 +103,19 @@ export class EmailService{
     await this.emailRepository.DeleteFromToken(token);
   }
 
-  @Cron('*/3 * * * *')
-  private async checkEmailTime() {
-    const emailTimes = await this.emailRepository.getEmailTimes();
-    for (const emailTime of emailTimes) {
-      const alerts = await this.emailRepository.getAlerts(
-        emailTime.id,
-        emailTime.last_email_time
-      );
-
-      const severityRank = { critical: 3, moderate: 2, mild: 1 };
-
-      const topAlerts = alerts.sort((a, b) => severityRank[b.alert_level] - severityRank[a.alert_level]).slice(0, 10);
-
-      // Format alerts into HTML
-      const alertHtml = topAlerts.map( (alert, index) => `<li><strong>Level ${alert.alert_level}</strong>: ${alert.description}</li>` ).join('');
-
-      const alertSectionHtml = `
-        <p>You have new security alerts since your last email:</p>
-        <ul>${alertHtml}</ul>`;
-
-      // Text fallback
-      const alertText = topAlerts.map((alert, index) => `• Level ${alert.alert_level}: ${alert.description}`).join('\n');
-
-      
-      const recipients = (await this.emailRepository.GetEmail(emailTime.id))
-      const emailParams = new EmailParams()
-      .setFrom(this.sentFrom)                  
-      .setTo(recipients ? [recipients] : [])                    
-      .setReplyTo(this.sentFrom)              
-      .setSubject(`Top 10 Security Alerts from ${emailTime.last_email_time} `)        
-      .setHtml(alertSectionHtml)                                       
-      .setText(`Top 10 Alerts:\n\n${alertText}`);
-      await this.mailerSend.email.send(emailParams);
-      
-      this.emailRepository.updateEmailTime(emailTime.id, this.updateEmailTime(emailTime))
-    }
-
+  async addEmailTime(emailTimeInput: EmailTimeInput) {
+    const emailTime = {
+      id : emailTimeInput.id,
+      wait_unit : emailTimeInput.wait_unit,
+      wait_value : emailTimeInput.wait_value,
+      next_email_time : emailTimeInput.first_email_time,
+      last_email_time : new Date(),
+    };
+    
+    await this.emailRepository.InsertEmailTime(emailTime);
   }
 
   private updateEmailTime(emailTime){
-    
     const result = new Date(emailTime.last_email_time);
 
     switch (emailTime.wait_value) {
@@ -145,20 +135,48 @@ export class EmailService{
       default:
         throw new Error(`Unsupported unit: ${emailTime.wait_value}`);
     }
-
     return result;
   }
 
-  async addEmailTime(emailTimeInput: EmailTimeInput) {
-    const emailTime = new EmailTime();
-    emailTime.id = emailTimeInput.id;
-    emailTime.wait_unit = emailTimeInput.wait_unit;
-    emailTime.wait_value = emailTimeInput.wait_value;
-    emailTime.next_email_time = emailTimeInput.first_email_time;
-    emailTime.last_email_time = new Date();
 
-    
-    const temp = await this.emailRepository.InsertEmailTime(emailTime);
+  // Checks every 3 minutes to see if there are any emails to send
+  @Cron('*/3 * * * *')
+  private async sendTimedEmails() {
+    const emailTimes = await this.emailRepository.getEmailTimes();
+
+    for (const emailTime of emailTimes) {
+      // Get the top 10 most severe alerts and send them with the email
+
+      const alerts = await this.emailRepository.getAlerts({
+        user_id: emailTime.id,
+        last_email_time: emailTime.last_email_time
+      });
+      
+      const severityRank = { critical: 3, moderate: 2, mild: 1 };
+
+      // Top 10 alerts sorted by alert_level
+      const topAlerts = alerts.sort((a, b) => severityRank[b.alert_level] - severityRank[a.alert_level]).slice(0, 10);
+
+      // Format alerts into HTML
+      const alertHtml = topAlerts.map( (alert, index) => `<li><strong>Level ${alert.alert_level}</strong>: ${alert.description}</li>` ).join('');
+      const alertSectionHtml = `
+        <p>You have new security alerts since your last email:</p>
+        <ul>${alertHtml}</ul>`;
+
+      // Text fallback
+      const alertText = topAlerts.map((alert, index) => `• Level ${alert.alert_level}: ${alert.description}`).join('\n');
+      const alertSectionText = `Top 10 Alerts:\n\n${alertText}`;
+      
+      const subject = 'Top 10 Security Alerts from ${emailTime.last_email_time}';
+
+      this.sendEmail(emailTime.id, subject, alertSectionHtml, alertSectionText);
+      
+      this.emailRepository.updateEmailTime({
+        user_id: emailTime.id, 
+        next_email_time: this.updateEmailTime(emailTime)
+      })
+    }
+
   }
     
 }

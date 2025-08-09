@@ -16,7 +16,7 @@ export class SlackInsert {
   @IsString()
   @IsNotEmpty()
   @IsDefined()
-  userId: string;
+  user_id: string;
 
   @IsString()
   @IsNotEmpty()
@@ -27,19 +27,26 @@ export class SlackInsert {
   channel?: string;
 }
 
-export class SlackOauthSend {
-  @IsString()
-  @IsString()
-  @IsNotEmpty()
-  code: string;
-
-  client_id: string;
-
-  client_secret: string;
-
-  @IsString()
+export class UserMessage {
   @IsString()
   @IsNotEmpty()
-  redirect_uri: string;
+  @IsDefined()
+  user_id: string;
 
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  message: string;
+}
+
+export class UserChannel {
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  user_id: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsDefined()
+  channel: string;
 }
