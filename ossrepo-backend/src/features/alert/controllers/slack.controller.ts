@@ -1,21 +1,30 @@
-import { Controller, Get, Post, Res, Body, Redirect, Query } from '@nestjs/common'; 
+import { Controller, Get, Post, Res, Body, Query, Param } from '@nestjs/common'; 
 import { BadGatewayException, BadRequestException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common'; 
 import { SlackService } from '../services/slack.service';
 import { SlackOauthConnect } from '../dto/slack.dto';
-import { ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 
 @Controller('slack')
 export class SlackController {
   private readonly id: string; // change this when a user login system has been implemented
-  constructor(private readonly slackService: SlackService) {
-    this.id = 'user_watchlist_henry_watchlist_clerk_javascript_1752958451379';
+  constructor(private readonly slackService: SlackService) {}
+
+  @Get('slack-channel/:user_id')
+  async checkConnection(@Param('user_id') user_id: string) {
+    return await this.slackService.getSlackChannel(user_id);
   }
 
-  @Get('channels')
-  async listChannels() {
+  @Get('send-message/:user_id')
+  async sendMessage(@Param('user_id') user_id: string, message: string) {
+    return await this.slackService.sendMessage(user_id, message);
+  }
+
+  @Get('channels/:user_id')
+  async listChannels(@Param('user_id') user_id: string) {
     try {
-      return await this.slackService.getChannels(this.id);
+      const temp= await this.slackService.getChannels(user_id);
+      console.log(temp);
+      return temp;
     } catch (err) {
       console.error('Slack listChannels error:', err);
 
@@ -28,25 +37,19 @@ export class SlackController {
   }
 
   @Post('join-channel')
-  async joinChannel(
-    @Body('channel') channel: string) {
+  async joinChannel(@Body() body: { user_id: string; channel: string }) {
     try {
-      return await this.slackService.joinChannel(this.id, channel);
+      return await this.slackService.joinChannel(body.user_id, body.channel);
     } catch (err) {
       throw new BadGatewayException(`Slack API error: ${err.message}`);
     }
   }
 
-  @Get('start-oauth')
-  @ApiOperation({ 
-    summary: 'Get Slack OAuth URL for current user' ,
-    description: 'Click <a href="/slack/start-oauth" target="_blank" rel="noopener noreferrer">Authorize Slack App</a> to open in a new tab.'
-  }) //temporarily has this to interact with the swagger api
-  startSlackOAuth(
-    @Res() res: Response
-    ) {
+  @Get('start-oauth/:user_id')
+  startSlackOAuth(@Res() res: Response, @Param('user_id') user_id: string) {
+    console.log(user_id);
     try{
-      const slackUrl = this.slackService.getOAuthUrl(this.id);
+      const slackUrl = this.slackService.getOAuthUrl(user_id);
       return res.redirect(slackUrl) ;
     } catch (err) {
       console.error('startSlackOAuth error:', err);
@@ -55,14 +58,12 @@ export class SlackController {
   }
 
   @Get('oauth')
-  @Redirect('/api', 302)
   async handleOAuthCallback(@Query() slackOauthConnect: SlackOauthConnect) {
     if (!slackOauthConnect.code) {
       throw new BadRequestException('Missing code from Slack');
     }
-
     try {
-      await this.slackService.exchangeCodeForToken(this.id, slackOauthConnect.code, slackOauthConnect.state);
+      await this.slackService.exchangeCodeForToken(slackOauthConnect.code, slackOauthConnect.state);
     } catch (err) {
       console.error('OAuth exchange failed:', err);
 

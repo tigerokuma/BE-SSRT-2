@@ -4,6 +4,7 @@ import { SlackInsert } from '../dto/slack.dto';
 
 @Injectable()
 export class SlackRepository {
+  
   constructor(private readonly prisma: PrismaService) {}
 
   async insertSlackInfo(slackInsert: SlackInsert) {
@@ -19,6 +20,10 @@ export class SlackRepository {
             slack_channel: slackInsert.channel
         }
     });
+  }
+
+  async getUserById(state: string) {
+      return await this.prisma.user.findUnique({ where: { user_id: state } });
   }
 
   async getSlackInfo(userId: string) {

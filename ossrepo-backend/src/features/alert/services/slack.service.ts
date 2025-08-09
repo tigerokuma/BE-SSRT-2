@@ -9,15 +9,17 @@ export class SlackService{
     private readonly clientSecret: string;
     private readonly redirectUrl: string;
 
-    constructor(private slackRepository: SlackRepository) {
+    constructor(
+        private slackRepository: SlackRepository,
+    ) {
         this.clientId = process.env.SLACK_CLIENT_ID!;
         this.clientSecret = process.env.SLACK_CLIENT_SECRET!;
         this.redirectUrl = process.env.SLACK_REDIRECT_URL!;
     }
 
-    async exchangeCodeForToken(uwlId: string, code: string, state: string): Promise<string> {
+    async exchangeCodeForToken(code: string, state: string): Promise<string> {
         try {
-            if (uwlId !== state) {
+            if (!(await this.slackRepository.getUserById(state))) {
                 throw new Error('Invalid or expired state token');
             }
 
@@ -40,7 +42,7 @@ export class SlackService{
             }
             
             this.slackRepository.insertSlackInfo({
-                userId: uwlId,
+                userId: state,
                 token: response.data.access_token,
             })
 
@@ -114,6 +116,29 @@ export class SlackService{
             console.error('Failed to join Slack channel:', err.message);
         }
 
+    }
+
+    async getSlackChannel(user_id: string) {
+        try {
+            const slackInfo = await this.slackRepository.getSlackInfo(user_id);
+            const response = await axios.get('https://slack.com/api/conversations.info', {
+                headers: {
+                Authorization: `Bearer ${slackInfo?.slack_token}`,
+                },
+                params: {
+                    channel: slackInfo?.slack_channel,
+                },
+
+            });
+
+            if (!response.data.ok) {
+                throw new Error(`Slack API error: ${response.data.error}`);
+            }
+            console.log(response.data.channel.name);
+            return { name: response.data.channel.name };
+        } catch (error) {
+            throw new Error(`Error fetching channel name: ${error.message}`);
+        }
     }
 
     async sendMessage(uwlId: string, text: string) {
