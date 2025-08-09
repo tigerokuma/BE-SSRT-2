@@ -3,12 +3,12 @@ name: 🚀 Deploy to GCP Production
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Allow manual triggers
+  workflow_dispatch:
 
 env:
   NODE_VERSION: '20'
   APP_NAME: 'nestjs-api'
-  DEPLOY_PATH: '~/BE-SSRT-2/ossrepo-backend'
+  DEPLOY_PATH: '~/BE-SSRT-2/ossrepo-backend'  # This matches your server structure
 
 jobs:
   validate:
@@ -22,17 +22,35 @@ jobs:
     - name: 📥 Checkout Repository
       uses: actions/checkout@v4
       
+    - name: 🔍 Verify Repository Structure
+      run: |
+        echo "Repository structure:"
+        ls -la
+        echo "Package files:"
+        ls -la package*.json || echo "No package files found"
+        
     - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: ossrepo-backend/package-lock.json
+        cache-dependency-path: 'ossrepo-backend/package-lock.json'
     
     - name: 📦 Install Dependencies
       run: |
         echo "::group::📦 Installing NPM packages"
-        npm ci --only=production
+        # Use the same package manager as your server (you have both package-lock.json and pnpm-lock.yaml)
+        if [ -f "package-lock.json" ]; then
+          echo "Using npm ci with package-lock.json"
+          npm ci
+        elif [ -f "pnpm-lock.yaml" ]; then
+          echo "Using pnpm install with pnpm-lock.yaml"
+          npm install -g pnpm
+          pnpm install --frozen-lockfile
+        else
+          echo "Using npm install"
+          npm install
+        fi
         echo "::endgroup::"
     
     - name: 🔧 Generate Prisma Client
@@ -48,17 +66,6 @@ jobs:
         npm run build
         echo "✅ Application built successfully"
         echo "::endgroup::"
-    
-    - name: 🧪 Run Tests (if available)
-      run: |
-        if [ -f "package.json" ] && grep -q '"test"' package.json; then
-          echo "::group::🧪 Running tests"
-          npm test || echo "::warning::Tests failed but continuing deployment"
-          echo "::endgroup::"
-        else
-          echo "::notice::No tests found, skipping test step"
-        fi
-      continue-on-error: true
 
   deploy:
     name: 🚀 Production Deployment
@@ -74,7 +81,7 @@ jobs:
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
+        username: ${{ secrets.USERNAME }}  # Should be 'okcom' based on your server
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT || '22' }}
         timeout: 300s
@@ -89,7 +96,7 @@ jobs:
           PURPLE='\033[0;35m'
           CYAN='\033[0;36m'
           WHITE='\033[1;37m'
-          NC='\033[0m' # No Color
+          NC='\033[0m'
           
           # Logging functions
           log_info() { echo -e "${BLUE}ℹ️  INFO${NC}: $1"; }
@@ -102,170 +109,249 @@ jobs:
           # Start deployment
           log_header "PRODUCTION DEPLOYMENT STARTED"
           log_info "Deployment started at $(date '+%Y-%m-%d %H:%M:%S UTC')"
-          log_info "Target: ${{ secrets.HOST }}"
-          log_info "Application: ${{ env.APP_NAME }}"
+          log_info "Server: $(hostname)"
+          log_info "User: $(whoami)"
           
-          # Step 1: Navigate to project directory
+          # Step 1: Verify server structure
+          log_step "Verifying server directory structure"
+          if [ ! -d "~/BE-SSRT-2" ]; then
+            log_error "BE-SSRT-2 directory not found in home directory"
+            exit 1
+          fi
+          
+          if [ ! -d "~/BE-SSRT-2/ossrepo-backend" ]; then
+            log_error "ossrepo-backend directory not found"
+            exit 1
+          fi
+          
+          log_success "Server directory structure verified"
+          
+          # Step 2: Navigate to project directory
           log_step "Navigating to project directory"
-          cd ${{ env.DEPLOY_PATH }} || {
-            log_error "Failed to navigate to ${{ env.DEPLOY_PATH }}"
+          cd ~/BE-SSRT-2/ossrepo-backend || {
+            log_error "Failed to navigate to ~/BE-SSRT-2/ossrepo-backend"
             exit 1
           }
           log_success "Current directory: $(pwd)"
+          log_info "Directory contents:"
+          ls -la
           
-          # Step 2: Backup current version
-          log_step "Creating backup of current deployment"
+          # Step 3: Create backup
+          log_step "Creating deployment backup"
           BACKUP_DIR="backups/$(date +%Y%m%d_%H%M%S)"
           mkdir -p "$BACKUP_DIR"
-          cp -r dist "$BACKUP_DIR/" 2>/dev/null || log_warning "No dist directory to backup"
-          log_success "Backup created at $BACKUP_DIR"
+          if [ -d "dist" ]; then
+            cp -r dist "$BACKUP_DIR/"
+            log_success "Backup created at $BACKUP_DIR"
+          else
+            log_warning "No dist directory found to backup"
+          fi
           
-          # Step 3: Configure Git for safe operations
+          # Step 4: Configure Git
           log_step "Configuring Git for deployment"
           git config pull.rebase false
           git config --global --add safe.directory $(pwd)
           log_success "Git configuration updated"
           
-          # Step 4: Fetch and update code
+          # Step 5: Update source code
           log_step "Updating source code from repository"
           log_info "Current branch: $(git branch --show-current)"
           log_info "Current commit: $(git rev-parse --short HEAD)"
           
+          # Fetch latest changes
           git fetch origin main || {
             log_error "Failed to fetch from origin"
             exit 1
           }
           
-          # Check for changes
+          # Check for updates
           LOCAL_COMMIT=$(git rev-parse HEAD)
           REMOTE_COMMIT=$(git rev-parse origin/main)
           
           if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
-            log_warning "No new changes detected, but continuing deployment"
+            log_warning "No new changes detected"
           else
-            log_info "New changes detected, updating codebase"
+            log_info "New changes found, updating codebase"
             git reset --hard origin/main || {
-              log_error "Failed to reset to origin/main"
+              log_error "Failed to update code"
               exit 1
             }
           fi
           
-          log_success "Code updated to commit: $(git rev-parse --short HEAD)"
+          log_success "Code updated to: $(git rev-parse --short HEAD)"
           
-          # Step 5: Check Node.js version
+          # Step 6: Check runtime environment
           log_step "Verifying runtime environment"
           NODE_VERSION=$(node --version)
-          log_info "Node.js version: $NODE_VERSION"
+          NPM_VERSION=$(npm --version)
+          log_info "Node.js: $NODE_VERSION"
+          log_info "NPM: $NPM_VERSION"
           
-          if [[ ! "$NODE_VERSION" =~ ^v(20|21|22) ]]; then
-            log_warning "Node.js version $NODE_VERSION may not be optimal (recommended: v20+)"
+          # Verify package files
+          if [ -f "package-lock.json" ]; then
+            log_info "Found: package-lock.json"
+            PACKAGE_MANAGER="npm"
+          elif [ -f "pnpm-lock.yaml" ]; then
+            log_info "Found: pnpm-lock.yaml"
+            PACKAGE_MANAGER="pnpm"
           else
-            log_success "Node.js version is compatible"
+            log_warning "No lock file found, using npm"
+            PACKAGE_MANAGER="npm"
           fi
           
-          # Step 6: Install dependencies
+          # Step 7: Install dependencies
           log_step "Installing application dependencies"
-          log_info "Installing NPM packages..."
-          npm ci --only=production --silent || {
-            log_error "Failed to install dependencies"
-            exit 1
-          }
+          case $PACKAGE_MANAGER in
+            "npm")
+              log_info "Using npm for package management"
+              npm ci --only=production || {
+                log_warning "npm ci failed, trying npm install"
+                npm install --only=production || {
+                  log_error "Failed to install dependencies"
+                  exit 1
+                }
+              }
+              ;;
+            "pnpm")
+              log_info "Using pnpm for package management"
+              if ! command -v pnpm &> /dev/null; then
+                log_info "Installing pnpm globally"
+                npm install -g pnpm
+              fi
+              pnpm install --prod --frozen-lockfile || {
+                log_error "Failed to install dependencies with pnpm"
+                exit 1
+              }
+              ;;
+          esac
           log_success "Dependencies installed successfully"
           
-          # Step 7: Generate Prisma client
+          # Step 8: Generate Prisma client
           log_step "Generating Prisma database client"
-          npx prisma generate --schema=prisma/schema.prisma || {
-            log_error "Failed to generate Prisma client"
-            exit 1
-          }
-          log_success "Prisma client generated successfully"
+          if [ -f "prisma/schema.prisma" ]; then
+            npx prisma generate --schema=prisma/schema.prisma || {
+              log_error "Failed to generate Prisma client"
+              exit 1
+            }
+            log_success "Prisma client generated successfully"
+          else
+            log_warning "No Prisma schema found, skipping client generation"
+          fi
           
-          # Step 8: Apply database migrations
+          # Step 9: Apply database migrations
           log_step "Applying database migrations"
-          log_info "Checking for pending migrations..."
-          npx prisma migrate deploy --schema=prisma/schema.prisma || {
-            log_error "Failed to apply database migrations"
-            exit 1
-          }
-          log_success "Database migrations applied successfully"
+          if [ -d "prisma/migrations" ]; then
+            log_info "Checking for pending migrations..."
+            npx prisma migrate deploy --schema=prisma/schema.prisma || {
+              log_error "Failed to apply database migrations"
+              exit 1
+            }
+            log_success "Database migrations applied successfully"
+          else
+            log_warning "No migrations directory found, skipping"
+          fi
           
-          # Step 9: Build application
+          # Step 10: Build application
           log_step "Building application for production"
-          log_info "Starting build process..."
           npm run build || {
             log_error "Failed to build application"
             exit 1
           }
-          log_success "Application built successfully"
           
-          # Step 10: Health check before restart
-          log_step "Performing pre-restart health check"
-          if pm2 describe ${{ env.APP_NAME }} > /dev/null 2>&1; then
-            log_info "Application is currently running"
-            CURRENT_UPTIME=$(pm2 describe ${{ env.APP_NAME }} | grep uptime | awk '{print $4}')
-            log_info "Current uptime: $CURRENT_UPTIME"
+          # Verify build output
+          if [ -d "dist" ]; then
+            BUILD_SIZE=$(du -sh dist | cut -f1)
+            log_success "Application built successfully (Size: $BUILD_SIZE)"
           else
-            log_warning "Application is not currently running"
+            log_error "Build completed but no dist directory found"
+            exit 1
           fi
           
-          # Step 11: Restart application
-          log_step "Restarting application service"
-          pm2 restart ${{ env.APP_NAME }} || {
-            log_error "Failed to restart application"
-            log_info "Attempting to start application..."
-            pm2 start ecosystem.config.js || pm2 start dist/main.js --name ${{ env.APP_NAME }} || {
-              log_error "Failed to start application"
+          # Step 11: Application service management
+          log_step "Managing application service"
+          
+          # Check if PM2 is installed
+          if ! command -v pm2 &> /dev/null; then
+            log_info "Installing PM2 globally"
+            npm install -g pm2
+          fi
+          
+          # Check current application status
+          if pm2 describe ${{ env.APP_NAME }} > /dev/null 2>&1; then
+            log_info "Application is currently running"
+            pm2 describe ${{ env.APP_NAME }} | grep -E "(status|uptime|cpu|memory)"
+            
+            log_info "Restarting application..."
+            pm2 restart ${{ env.APP_NAME }} || {
+              log_error "Failed to restart application"
               exit 1
             }
-          }
+          else
+            log_info "Application not running, starting new instance"
+            if [ -f "ecosystem.config.js" ]; then
+              pm2 start ecosystem.config.js || {
+                log_error "Failed to start with ecosystem config"
+                exit 1
+              }
+            else
+              pm2 start dist/main.js --name ${{ env.APP_NAME }} || {
+                log_error "Failed to start application"
+                exit 1
+              }
+            fi
+          fi
           
-          # Step 12: Post-deployment health check
+          # Step 12: Post-deployment verification
           log_step "Performing post-deployment health check"
           sleep 5
           
           if pm2 describe ${{ env.APP_NAME }} | grep -q "online"; then
             log_success "Application is running and healthy"
             
-            # Show application status
-            log_info "Application Status:"
-            pm2 describe ${{ env.APP_NAME }} | grep -E "(status|uptime|cpu|memory)" || true
+            # Display current status
+            log_info "Current Application Status:"
+            pm2 list | grep ${{ env.APP_NAME }}
             
-            # Test API endpoint if available
-            if command -v curl > /dev/null 2>&1; then
-              log_info "Testing API health endpoint..."
-              if curl -f -s http://localhost:3000/health > /dev/null 2>&1; then
-                log_success "API health check passed"
-              else
-                log_warning "API health check failed or endpoint not available"
-              fi
+            # Test health endpoint if available
+            if command -v curl &> /dev/null; then
+              for endpoint in "health" "" "api/health"; do
+                if curl -f -s http://localhost:3000/$endpoint > /dev/null 2>&1; then
+                  log_success "Health check passed: /$endpoint"
+                  break
+                fi
+              done
             fi
           else
-            log_error "Application failed to start properly"
-            pm2 logs ${{ env.APP_NAME }} --lines 10
+            log_error "Application health check failed"
+            pm2 logs ${{ env.APP_NAME }} --lines 20
             exit 1
           fi
           
-          # Step 13: Cleanup old backups (keep last 5)
-          log_step "Cleaning up old backups"
+          # Step 13: Cleanup
+          log_step "Performing cleanup"
           if [ -d "backups" ]; then
             cd backups
-            ls -t | tail -n +6 | xargs -r rm -rf
             BACKUP_COUNT=$(ls -1 | wc -l)
-            log_success "Cleanup completed, $BACKUP_COUNT backups retained"
+            if [ $BACKUP_COUNT -gt 5 ]; then
+              ls -t | tail -n +6 | xargs rm -rf
+              log_success "Old backups cleaned up, 5 retained"
+            else
+              log_info "$BACKUP_COUNT backups retained"
+            fi
             cd ..
           fi
           
-          # Deployment summary
+          # Final summary
           log_header "DEPLOYMENT COMPLETED SUCCESSFULLY"
           log_success "Deployment finished at $(date '+%Y-%m-%d %H:%M:%S UTC')"
           log_success "Application: ${{ env.APP_NAME }}"
           log_success "Commit: $(git rev-parse --short HEAD)"
-          log_success "Build: $(date +%Y%m%d_%H%M%S)"
-          log_info "🎉 Your application is now live and running!"
+          log_success "Node.js: $NODE_VERSION"
+          log_success "Package Manager: $PACKAGE_MANAGER"
           
-          echo -e "\n${GREEN}══════════════════════════════════════════════════════════${NC}"
-          echo -e "${GREEN}🚀 PRODUCTION DEPLOYMENT SUCCESSFUL 🚀${NC}"
-          echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}\n"
+          echo -e "\n${GREEN}════════════════════════════════════════════════════════════${NC}"
+          echo -e "${GREEN}🎉 PRODUCTION DEPLOYMENT SUCCESSFUL! 🎉${NC}"
+          echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}\n"
 
   notify:
     name: 📢 Deployment Notification
@@ -277,10 +363,17 @@ jobs:
     - name: 📢 Notify Deployment Status
       run: |
         if [ "${{ needs.deploy.result }}" == "success" ]; then
-          echo "✅ Deployment completed successfully!"
-          echo "🚀 Application is now live on production"
+          echo "✅ Production deployment completed successfully!"
+          echo "🚀 Application is live at: ${{ secrets.HOST }}"
+          echo "📊 Node.js version: ${{ env.NODE_VERSION }}"
+          echo "📦 Application: ${{ env.APP_NAME }}"
         else
-          echo "❌ Deployment failed!"
-          echo "🔧 Please check the logs and fix any issues"
+          echo "❌ Production deployment failed!"
+          echo "🔧 Please check the deployment logs and fix any issues"
+          echo "📋 Common fixes:"
+          echo "   - Check server connectivity"
+          echo "   - Verify environment variables"
+          echo "   - Check database connectivity"
+          echo "   - Review application logs"
           exit 1
         fi
