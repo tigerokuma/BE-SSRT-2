@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Param, Query } from '@nestjs/common';
 import { SbomBuilderService } from '../services/sbom-builder.service';
 import { SbomQueryService } from '../services/sbom-query.service';
+import { GraphParamsDto, SearchParamsDto } from '../dto/sbom.dto';
 
 @Controller('sbom')
 export class SbomController {
@@ -28,32 +29,32 @@ export class SbomController {
   }
 
   @Get('graph-dependencies/:watchlist_id/:node_id')
-  async getWatchGraphDependencies(@Param() params: { watchlist_id: string; node_id: string }, @Query('vulns') vulns?: string) {
+  async getWatchGraphDependencies(@Param() params: GraphParamsDto, @Query('vulns') vulns?: string) {
     const vulnerablePackages = vulns ? vulns.split(',') : [];
-    const sbom = (await this.sbomQueryService.getWatchSbom(params.watchlist_id))?.sbom;
+    const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
     return this.sbomQueryService.getNodeDeps(sbomText, params.node_id, vulnerablePackages);
   }
 
   @Get('user-graph-dependencies/:user_id/:node_id')
-  async getUserGraphDependencies(@Param() params: { user_id: string; node_id: string }, @Query('vulns') vulns?: string) {
+  async getUserGraphDependencies(@Param() params: GraphParamsDto, @Query('vulns') vulns?: string) {
     const vulnerablePackages = vulns ? vulns.split(',') : [];
-    const sbom = (await this.sbomQueryService.getUserSbom(params.user_id))?.sbom;
+    const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
     const temp =  this.sbomQueryService.getNodeDeps(sbomText, params.node_id, vulnerablePackages);
     return temp;
   }
 
   @Get('search/:watchlist_id/:search')
-  async searchWatchGraphDependencies(@Param() params: { watchlist_id: string; search: string }) {
-    const sbom = (await this.sbomQueryService.getWatchSbom(params.watchlist_id))?.sbom;
+  async searchWatchGraphDependencies(@Param() params: SearchParamsDto) {
+    const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
     return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
   }
 
   @Get('user-search/:user_id/:search')
-  async searchUserGraphDependencies(@Param() params: { user_id: string; search: string }) {
-    const sbom = (await this.sbomQueryService.getUserSbom(params.user_id))?.sbom;
+  async searchUserGraphDependencies(@Param() params: SearchParamsDto) {
+    const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
     return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
   }

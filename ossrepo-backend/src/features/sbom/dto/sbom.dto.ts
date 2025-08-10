@@ -18,3 +18,19 @@ export class UpdateSbomDto {
   updated_at: Date;
 }
 
+export class GraphParamsDto {
+  @IsString()
+  id: string;
+
+  @IsString()
+  node_id: string;
+}
+
+export class SearchParamsDto {
+  @IsString()
+  id: string;
+
+  @IsString()
+  search: string;
+}
+
