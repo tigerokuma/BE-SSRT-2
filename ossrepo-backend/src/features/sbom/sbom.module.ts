@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { SbomRepository } from './repositories/sbom.repository';
-import { SbomService } from './services/sbom.service';
+import { SbomBuilderService } from './services/sbom-builder.service';
+import { SbomQueryService } from './services/sbom-query.service';
 import { SbomController } from './controllers/sbom.controller';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 @Module({
-  providers: [SbomRepository, SbomService, PrismaService],
+  providers: [SbomRepository, SbomBuilderService, SbomQueryService, PrismaService],
   controllers: [SbomController],
-  exports: [SbomService],
+  exports: [SbomBuilderService, SbomQueryService],
 })
 export class SbomModule {} 
