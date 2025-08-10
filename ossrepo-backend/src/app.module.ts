@@ -6,6 +6,7 @@ import {GraphModule} from './features/graph/graph.module';
 import {ConfigModule} from '@nestjs/config';
 import {PackagesModule} from './features/packages/packages.module';
 import { UserModule } from './features/user/user.module';
+import { AlertModule } from './features/alert/alert.module';
 
 @Module({
     imports: [
@@ -15,6 +16,7 @@ import { UserModule } from './features/user/user.module';
         ConfigModule,
         PackagesModule,
         WatchlistModule,
+        AlertModule,
         PrismaModule,
         GraphModule,
         UserModule
