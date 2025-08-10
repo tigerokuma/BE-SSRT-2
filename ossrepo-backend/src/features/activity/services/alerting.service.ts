@@ -23,9 +23,8 @@ interface AlertConfig {
   ancestry_breaks?: {
     enabled: boolean;
   };
-  unusual_author_activity?: {
+  suspicious_author_timestamps?: {
     enabled: boolean;
-    percentage_outside_range: number;
   };
   ai_powered_anomaly_detection?: {
     enabled: boolean;
@@ -158,13 +157,12 @@ export class AlertingService {
         );
       }
 
-      // Check unusual author activity
-      if (alertConfig.unusual_author_activity?.enabled) {
-        await this.checkUnusualAuthorActivityAlert(
+      // Check suspicious author timestamps
+      if (alertConfig.suspicious_author_timestamps?.enabled) {
+        await this.checkSuspiciousAuthorTimestampsAlert(
           userWatchlist.id,
           watchlistId,
           commitData,
-          alertConfig.unusual_author_activity,
           contributorStats,
         );
       }
@@ -399,35 +397,48 @@ export class AlertingService {
   /**
    * Check unusual author activity alerts
    */
-  private async checkUnusualAuthorActivityAlert(
+  private async checkSuspiciousAuthorTimestampsAlert(
     userWatchlistId: string,
     watchlistId: string,
     commitData: CommitData,
-    config: AlertConfig['unusual_author_activity'],
     contributorStats: any,
   ): Promise<void> {
-    if (!config || !contributorStats) return;
+    if (!contributorStats) return;
 
-    // Check if commit time is outside contributor's typical hours
+    // Simple logic: Check if commit time is way outside contributor's typical hours
     const commitHour = commitData.date.getHours();
     const timeHistogram = contributorStats.commit_time_histogram as Record<string, number>;
     
-    if (timeHistogram) {
-      const totalCommits = Object.values(timeHistogram).reduce((sum, count) => sum + count, 0);
-      const commitsAtHour = timeHistogram[commitHour.toString()] || 0;
-      const percentageAtHour = (commitsAtHour / totalCommits) * 100;
+    if (timeHistogram && Object.keys(timeHistogram).length > 0) {
+      // Find the hours where the contributor typically commits (has commits)
+      const activeHours = Object.entries(timeHistogram)
+        .filter(([hour, count]) => count > 0)
+        .map(([hour]) => parseInt(hour))
+        .sort((a, b) => a - b);
       
-      if (percentageAtHour < config.percentage_outside_range) {
-        await this.createAlert(
-          userWatchlistId,
-          watchlistId,
-          commitData,
-          'unusual_author_activity',
-          'percentage_outside_range',
-          percentageAtHour,
-          config.percentage_outside_range,
-          `Commit at ${commitHour}:00 (${percentageAtHour.toFixed(1)}% of contributor's activity) is unusual`,
-        );
+      if (activeHours.length > 0) {
+        // Check if current commit hour is way outside the typical range
+        const minHour = Math.min(...activeHours);
+        const maxHour = Math.max(...activeHours);
+        const range = maxHour - minHour;
+        
+        // If the commit is more than 6 hours outside their typical range, it's suspicious
+        const suspiciousThreshold = 6;
+        const isOutsideRange = commitHour < (minHour - suspiciousThreshold) || commitHour > (maxHour + suspiciousThreshold);
+        
+        if (isOutsideRange) {
+          const typicalRange = `${minHour}:00-${maxHour}:00`;
+          await this.createAlert(
+            userWatchlistId,
+            watchlistId,
+            commitData,
+            'suspicious_author_timestamps',
+            'outside_typical_range',
+            commitHour,
+            suspiciousThreshold,
+            `Commit at ${commitHour}:00 is outside contributor's typical hours (${typicalRange})`,
+          );
+        }
       }
     }
   }

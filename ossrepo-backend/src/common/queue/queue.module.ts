@@ -31,6 +31,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       {
         name: 'polling',
       },
+      {
+        name: 'vulnerability-check',
+      },
+      {
+        name: 'health-check',
+      },
     ),
   ],
   exports: [BullModule],

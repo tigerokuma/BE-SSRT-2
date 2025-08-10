@@ -485,6 +485,150 @@ curl -X POST http://localhost:3000/activity/trigger-polling
 
 ---
 
+## 🔒 Weekly Vulnerability Checking System
+
+The activity module now includes a comprehensive vulnerability checking system that automatically monitors repositories for new critical vulnerabilities and creates alerts.
+
+### Architecture
+
+- **Weekly Vulnerability Check Job**: BullMQ job with delay that runs once weekly to check all repositories for new vulnerabilities
+- **GitHub Security Advisories**: Uses GitHub's Security Advisories API to fetch vulnerability data
+- **Alert System**: Creates alerts in the `alert_triggered` table when new critical vulnerabilities are detected
+- **Self-Scheduling**: Each weekly vulnerability check job schedules the next one for next week
+
+### How It Works
+
+1. **Initialization**: When the application starts, it schedules the first weekly vulnerability check job for next week
+2. **Weekly Trigger**: A BullMQ job with delay triggers vulnerability checking weekly
+3. **Repository Discovery**: Finds all repositories with `status: 'ready'` in the watchlist
+4. **Vulnerability Fetching**: For each repository, fetches latest vulnerabilities from GitHub Security Advisories API
+5. **Comparison**: Compares new vulnerability count with previously stored count
+6. **Alert Creation**: If new critical vulnerabilities are found, creates alerts for all users watching the repository
+7. **Database Update**: Stores new vulnerability data in the database
+8. **Next Schedule**: Schedules the next weekly vulnerability check job for next week
+
+### API Endpoints
+
+#### Initialize Vulnerability Check Schedule
+```bash
+POST /activity/initialize-vulnerability-check
+```
+
+Initializes the weekly vulnerability check schedule and makes the queue visible in BullMQ.
+
+### BullMQ Jobs
+
+#### `vulnerability-check` Queue
+- **`weekly-vulnerability-check`**: Weekly vulnerability check trigger job
+  - Parameters: None
+  - Delay: Scheduled for next week
+  - Retries: 1 (no retry if fails)
+  - Self-scheduling: Schedules next weekly check after completion
+
+- **`check-single-repository`**: Individual repository vulnerability check job
+  - Parameters: `watchlistId`
+  - Retries: 3 with exponential backoff
+
+### Database Updates
+
+The vulnerability checking system updates:
+- `vulnerabilities`: New vulnerability records with full metadata
+- `vulnerability_summaries`: Updated vulnerability summary statistics
+- `alert_triggered`: New alert records when critical vulnerabilities are detected
+
+### Alert Details
+
+When a critical vulnerability is detected, the system creates alerts with:
+- **Alert Level**: `critical`
+- **Metric**: `critical_vulnerability_detected`
+- **Contributor**: `security-system`
+- **Commit SHA**: `vulnerability-check` (special identifier)
+- **Description**: Includes vulnerability title and repository name
+- **Details**: Full vulnerability information including CVE ID, description, affected versions, etc.
+
+### Error Handling
+
+- **GitHub API Failures**: Logs warning and skips repository
+- **Database Failures**: Logs error but doesn't fail the entire process
+- **Rate Limiting**: Includes delays between API calls to avoid rate limiting
+
+### Configuration
+
+The system uses the same GitHub token (`GITHUB_TOKEN`) as other GitHub API operations for authentication.
+
+---
+
+## 🏥 Monthly Health Checking System
+
+The activity module now includes a comprehensive health checking system that automatically analyzes repository health using Scorecard every 2 months.
+
+### Architecture
+
+- **Monthly Health Check Job**: BullMQ job with delay that runs every 2 months to check all repositories for health
+- **Scorecard Integration**: Uses OpenSSF Scorecard CLI to analyze repository health metrics
+- **Health Data Storage**: Stores health analysis results in the `health_data` table
+- **Self-Scheduling**: Each monthly health check job schedules the next one for 2 months later
+
+### How It Works
+
+1. **Initialization**: When manually triggered, it schedules the first monthly health check job for 2 months from now
+2. **Monthly Trigger**: A BullMQ job with delay triggers health checking every 2 months
+3. **Repository Discovery**: Finds all repositories with `status: 'ready'` in the watchlist
+4. **Health Analysis**: For each repository, runs Scorecard analysis on the latest commit
+5. **Data Storage**: Stores health metrics and overall health score in the database
+6. **Next Schedule**: Schedules the next monthly health check job for 2 months later
+
+### API Endpoints
+
+#### Initialize Health Check Schedule
+```bash
+POST /activity/initialize-health-check
+```
+
+Initializes the monthly health check schedule and makes the queue visible in BullMQ.
+
+### BullMQ Jobs
+
+#### `health-check` Queue
+- **`monthly-health-check`**: Monthly health check trigger job
+  - Parameters: None
+  - Delay: Scheduled for 2 months from now
+  - Retries: 1 (no retry if fails)
+  - Self-scheduling: Schedules next monthly check after completion
+
+- **`check-single-repository-health`**: Individual repository health check job
+  - Parameters: `watchlistId`
+  - Retries: 3 with exponential backoff
+
+### Database Updates
+
+The health checking system updates:
+- `health_data`: New health analysis records with Scorecard metrics and overall health score
+
+### Health Metrics
+
+The system analyzes and stores:
+- **Overall Health Score**: 0-10 scale based on Scorecard results
+- **Scorecard Metrics**: Detailed check results including:
+  - Security checks (SAST, Code Review, etc.)
+  - Maintenance checks (CI/CD, Dependencies, etc.)
+  - License checks
+  - Documentation checks
+- **Commit Information**: SHA and date of analyzed commit
+- **Analysis Metadata**: Timestamp and source information
+
+### Error Handling
+
+- **Scorecard Failures**: Logs warning and skips repository
+- **Database Failures**: Logs error but doesn't fail the entire process
+- **Rate Limiting**: Includes delays between repositories to avoid overwhelming the system
+
+### Configuration
+
+The system uses the Scorecard CLI path configured via `SCORECARD_PATH` environment variable.
+
+---
+
 ## ✅ Development Checklist
 
 - [x] `activity.module.ts` created and configured

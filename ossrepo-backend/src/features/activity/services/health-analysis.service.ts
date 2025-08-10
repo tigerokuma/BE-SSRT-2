@@ -477,8 +477,19 @@ export class HealthAnalysisService {
     result: HealthAnalysisResult,
   ): Promise<void> {
     try {
-      // For now, we'll just log the results
-      // TODO: Implement proper storage when we have the health analysis table schema
+      await this.prisma.healthData.create({
+        data: {
+          watchlist_id: result.watchlistId,
+          commit_sha: result.commitSha,
+          commit_date: result.commitDate,
+          scorecard_metrics: result.scorecardMetrics as any || undefined,
+          overall_health_score: result.overallHealthScore,
+          analysis_date: result.analysisDate,
+          source: 'scorecard',
+        },
+      });
+
+      this.logger.log(`✅ Health results stored for watchlist ${result.watchlistId} - Score: ${result.overallHealthScore}`);
     } catch (error) {
       this.logger.error(`❌ Failed to store health results: ${error.message}`);
       throw error;

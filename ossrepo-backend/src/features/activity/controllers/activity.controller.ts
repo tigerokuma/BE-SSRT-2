@@ -22,6 +22,8 @@ import { HealthAnalysisService } from '../services/health-analysis.service';
 import { RateLimitManagerService } from '../services/rate-limit-manager.service';
 import { GitHubApiService } from '../services/github-api.service';
 import { PollingProcessor } from '../processors/polling.processor';
+import { VulnerabilityCheckProcessor } from '../processors/vulnerability-check.processor';
+import { HealthCheckProcessor } from '../processors/health-check.processor';
 import { AlertingService } from '../services/alerting.service';
 import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.service';
 import { AISummaryService } from '../services/ai-summary.service';
@@ -43,6 +45,8 @@ export class ActivityController {
     private readonly rateLimitManager: RateLimitManagerService,
     private readonly githubApiService: GitHubApiService,
     private readonly pollingProcessor: PollingProcessor,
+    private readonly vulnerabilityCheckProcessor: VulnerabilityCheckProcessor,
+    private readonly healthCheckProcessor: HealthCheckProcessor,
     private readonly alertingService: AlertingService,
     private readonly aiAnomalyDetection: AIAnomalyDetectionService,
     private readonly aiSummaryService: AISummaryService,
@@ -872,6 +876,60 @@ export class ActivityController {
     }
   }
 
+  @Post('initialize-vulnerability-check')
+  @ApiOperation({
+    summary: 'Initialize the weekly vulnerability check schedule (makes queue visible in BullMQ)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Vulnerability check schedule initialized successfully',
+  })
+  async initializeVulnerabilityCheckSchedule() {
+    this.logger.log(`🚀 Initializing vulnerability check schedule`);
+
+    try {
+      await this.vulnerabilityCheckProcessor.initializeVulnerabilityCheckSchedule();
+
+      return {
+        message: 'Vulnerability check schedule initialized successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(`Error initializing vulnerability check schedule: ${error.message}`);
+      throw new HttpException(
+        `Failed to initialize vulnerability check schedule: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('initialize-health-check')
+  @ApiOperation({
+    summary: 'Initialize the monthly health check schedule (makes queue visible in BullMQ)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Health check schedule initialized successfully',
+  })
+  async initializeHealthCheckSchedule() {
+    this.logger.log(`🚀 Initializing health check schedule`);
+
+    try {
+      await this.healthCheckProcessor.initializeHealthCheckSchedule();
+
+      return {
+        message: 'Health check schedule initialized successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(`Error initializing health check schedule: ${error.message}`);
+      throw new HttpException(
+        `Failed to initialize health check schedule: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('test-bus-factor/:watchlistId')
   async testBusFactor(@Param('watchlistId') watchlistId: string) {
     try {
@@ -970,6 +1028,203 @@ export class ActivityController {
       );
     }
   }
+
+  @Get('alerts/:userWatchlistId')
+  @ApiOperation({
+    summary: 'Get alerts for a specific user watchlist',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Alerts retrieved successfully',
+  })
+  async getAlerts(@Param('userWatchlistId') userWatchlistId: string) {
+    this.logger.log(`📝 Getting alerts for user watchlist ${userWatchlistId}`);
+
+    try {
+      // Verify the user watchlist exists
+      const userWatchlist = await this.prisma.userWatchlist.findUnique({
+        where: { id: userWatchlistId },
+        include: {
+          watchlist: {
+            include: {
+              package: true
+            }
+          }
+        }
+      });
+
+      if (!userWatchlist) {
+        throw new HttpException(
+          `User watchlist not found: ${userWatchlistId}`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Get all alerts for this user watchlist
+      const alerts = await this.prisma.alertTriggered.findMany({
+        where: { user_watchlist_id: userWatchlistId },
+        include: {
+          watchlist: {
+            include: {
+              package: true
+            }
+          }
+        },
+        orderBy: { created_at: 'desc' }
+      });
+
+      return {
+        alerts,
+        count: alerts.length,
+        userWatchlistId
+      };
+    } catch (error) {
+      this.logger.error(`Error fetching alerts: ${error.message}`);
+      throw new HttpException(
+        `Failed to fetch alerts: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('insert-sample-lines-alerts')
+  @ApiOperation({
+    summary: 'Insert sample lines added/deleted alerts for testing',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Sample lines alerts created successfully',
+  })
+  async insertSampleLinesAlerts() {
+    this.logger.log('📝 Inserting sample lines added/deleted alerts');
+    try {
+      // Find the specific user watchlist
+      const userWatchlistId = "user_watchlist_user-123_watchlist_expressjs_express_1754171072961";
+      
+      const userWatchlist = await this.prisma.userWatchlist.findUnique({
+        where: { id: userWatchlistId },
+        include: {
+          watchlist: {
+            include: {
+              package: true
+            }
+          }
+        }
+      });
+
+      if (!userWatchlist) {
+        throw new HttpException(
+          `User watchlist not found: ${userWatchlistId}`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      const watchlistId = userWatchlist.watchlist_id;
+      const alerts: any[] = [];
+
+      // Sample 1: High lines changed alert
+      const alert1 = await this.prisma.alertTriggered.create({
+        data: {
+          user_watchlist_id: userWatchlistId,
+          watchlist_id: watchlistId,
+          commit_sha: "sample_commit_123456789",
+          contributor: "jane_developer",
+          metric: "lines_added_deleted",
+          value: 2500,
+          alert_level: "high",
+          threshold_type: "hardcoded_threshold",
+          threshold_value: 1000,
+          description: "Total lines changed (2500) exceeds hardcoded threshold (1000). This commit made extensive changes across multiple files including core functionality updates and new feature implementations.",
+          details_json: {
+            linesAdded: 1800,
+            linesDeleted: 700,
+            filesChanged: ["src/core/engine.js", "src/features/auth.js", "src/utils/helpers.js"],
+            commitMessage: "feat: major refactor and new authentication system",
+            contributor: "jane_developer",
+            timestamp: new Date().toISOString()
+          },
+          created_at: new Date(),
+        },
+      });
+      alerts.push(alert1);
+
+      // Sample 2: Contributor variance alert
+      const alert2 = await this.prisma.alertTriggered.create({
+        data: {
+          user_watchlist_id: userWatchlistId,
+          watchlist_id: watchlistId,
+          commit_sha: "sample_commit_987654321",
+          contributor: "new_contributor",
+          metric: "lines_added_deleted",
+          value: 800,
+          alert_level: "medium",
+          threshold_type: "contributor_variance",
+          threshold_value: 450,
+          description: "Total lines changed (800) exceeds contributor's normal range (450.0). This is significantly more than the contributor's typical commit size, indicating unusual activity.",
+          details_json: {
+            linesAdded: 600,
+            linesDeleted: 200,
+            filesChanged: ["src/components/UI.js", "src/styles/main.css"],
+            commitMessage: "feat: add new UI components and styling",
+            contributor: "new_contributor",
+            timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2 hours ago
+          },
+          created_at: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        },
+      });
+      alerts.push(alert2);
+
+      // Sample 3: Repository variance alert
+      const alert3 = await this.prisma.alertTriggered.create({
+        data: {
+          user_watchlist_id: userWatchlistId,
+          watchlist_id: watchlistId,
+          commit_sha: "sample_commit_555666777",
+          contributor: "senior_dev",
+          metric: "lines_added_deleted",
+          value: 1200,
+          alert_level: "medium",
+          threshold_type: "repository_variance",
+          threshold_value: 800,
+          description: "Total lines changed (1200) exceeds repository average by 1.5x (800.0). This commit is larger than typical for this repository.",
+          details_json: {
+            linesAdded: 900,
+            linesDeleted: 300,
+            filesChanged: ["src/api/endpoints.js", "src/database/models.js", "tests/integration.js"],
+            commitMessage: "feat: implement new API endpoints and database models",
+            contributor: "senior_dev",
+            timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString() // 4 hours ago
+          },
+          created_at: new Date(Date.now() - 4 * 60 * 60 * 1000),
+        },
+      });
+      alerts.push(alert3);
+
+      return {
+        success: true,
+        message: 'Sample lines added/deleted alerts created successfully',
+        alerts: alerts.map(alert => ({
+          id: alert.id,
+          metric: alert.metric,
+          value: alert.value,
+          description: alert.description,
+          created_at: alert.created_at
+        }))
+      };
+    } catch (error) {
+      this.logger.error(`Error creating sample lines alerts: ${error.message}`);
+      throw new HttpException(
+        `Failed to create sample lines alerts: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+
+
+
+
+
 
   @Get('scorecard/local-test')
   @ApiOperation({
@@ -1179,6 +1434,8 @@ export class ActivityController {
       );
     }
   }
+
+
 
 
 }
