@@ -418,7 +418,7 @@ export class BusFactorService {
   ): Promise<void> {
     try {
       // For now, we'll just log the results
-      // TODO: Implement proper storage when we have the bus factor table schema
+      // Note: Bus factor table schema not yet implemented - results are logged for monitoring
       this.logger.log(
         `📊 Bus factor results for ${watchlistId}: ${results.busFactor} (${results.riskLevel})`,
       );

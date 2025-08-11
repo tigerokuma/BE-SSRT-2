@@ -1,4 +1,4 @@
-# 🔄 Activity Module
+# 🔄 Activity Module Documentation
 
 This module handles all logic related to the `activity` feature of the OSS Repository Tracker.
 
@@ -151,29 +151,6 @@ Statistics are automatically calculated during the repository setup process:
 3. **Data Storage**: Results are stored in the respective tables
 4. **Real-time Updates**: Statistics are updated whenever new commits are processed
 
-### API Endpoints
-
-#### Get Contributor Statistics
-```bash
-GET /activity/watchlist/{watchlistId}/contributor-stats
-```
-
-Returns detailed statistics for all contributors in a watchlist, ordered by total commits.
-
-#### Get Repository Statistics
-```bash
-GET /activity/watchlist/{watchlistId}/repo-stats
-```
-
-Returns overall repository statistics including averages and patterns.
-
-#### Manually Trigger Stats Calculation
-```bash
-POST /activity/watchlist/{watchlistId}/calculate-stats
-```
-
-Manually triggers the calculation of statistics for a watchlist (useful for existing repositories).
-
 ### Implementation Details
 
 #### GitManagerService Methods
@@ -305,19 +282,20 @@ The activity module now includes a comprehensive alerting system that monitors c
 
 The system supports multiple types of alerts based on the actual alert configuration schema:
 
-#### **Metrics Monitored**
+#### **Commit-Based Alerts**
 - **Lines Added/Deleted**: Total lines changed in a commit
 - **Files Changed**: Number of files modified in a commit
-- **High Churn**: High lines-to-files ratio indicating potential issues
-- **Unusual Author Activity**: Commits outside contributor's typical patterns
-- **Ancestry Breaks**: Complex git history analysis (not implemented in basic version)
+- **Suspicious Author Timestamps**: Commits outside contributor's typical time patterns
+- **AI-Powered Anomaly Detection**: AI analysis of commit patterns for suspicious activity
+
+#### **System Alerts**
+- **New Vulnerabilities Detected**: When new critical vulnerabilities are found in the repository
+- **Health Score Decreases**: When repository health score decreases significantly
 
 #### **Threshold Types**
 - **Hardcoded Threshold**: Fixed numeric threshold (e.g., > 1000 lines)
 - **Contributor Variance**: Exceeds contributor's average + N standard deviations
 - **Repository Variance**: Exceeds repository average by N multiplier
-- **High Churn Multiplier**: Exceeds repository churn ratio by N multiplier
-- **Unusual Activity Percentage**: Commits outside contributor's typical time patterns
 
 ### User Configuration
 
@@ -328,26 +306,27 @@ Users can configure alerts by setting the `alerts` field in the `UserWatchlist` 
   "lines_added_deleted": {
     "enabled": true,
     "contributor_variance": 2.5,
-    "repository_variance": 3,
+    "repository_variance": 3.0,
     "hardcoded_threshold": 1000
   },
   "files_changed": {
     "enabled": true,
-    "contributor_variance": 2,
+    "contributor_variance": 2.0,
     "repository_variance": 2.5,
     "hardcoded_threshold": 20
   },
-  "high_churn": {
-    "enabled": true,
-    "multiplier": 2.5,
-    "hardcoded_threshold": 10
-  },
-  "ancestry_breaks": {
+  "suspicious_author_timestamps": {
     "enabled": true
   },
-  "unusual_author_activity": {
+  "new_vulnerabilities_detected": {
+    "enabled": true
+  },
+  "health_score_decreases": {
     "enabled": true,
-    "percentage_outside_range": 80
+    "minimum_health_change": 1.0
+  },
+  "ai_powered_anomaly_detection": {
+    "enabled": true
   }
 }
 ```
@@ -396,51 +375,6 @@ The activity module now includes a comprehensive polling system that automatical
 10. **Statistics Update**: Updates contributor and repository statistics
 11. **Cleanup**: Removes temporary repository clones
 
-### API Endpoints
-
-#### Generate Commit Summary
-```bash
-POST /activity/watchlist/{watchlistId}/commit-summary
-```
-
-Generates an AI-powered summary of recent commits for a repository.
-
-**Request Body:**
-```json
-{
-  "watchlistId": "watchlist_owner_repo_1234567890",
-  "commitCount": 10
-}
-```
-
-**Response:**
-```json
-{
-  "summary": "Recent commits show active development on the authentication system, with 3 commits adding new login features and 2 commits fixing security vulnerabilities.",
-  "commitCount": 10,
-  "dateRange": "2024-01-01 to 2024-01-15",
-  "totalLinesAdded": 1250,
-  "totalLinesDeleted": 450,
-  "totalFilesChanged": 25,
-  "authors": ["john.doe@example.com", "jane.smith@example.com"],
-  "generatedAt": "2024-01-15T10:30:00Z"
-}
-```
-
-#### Trigger Daily Polling
-```bash
-POST /activity/trigger-polling
-```
-
-Manually triggers the daily polling process for all ready repositories.
-
-#### Get User Alerts
-```bash
-GET /activity/alerts/{userWatchlistId}
-```
-
-Retrieves all triggered alerts for a specific user watchlist.
-
 ### BullMQ Jobs
 
 #### `polling` Queue
@@ -471,18 +405,6 @@ The polling system updates:
 - **Statistics Failures**: Logs error but doesn't fail the entire process
 - **Database Failures**: Throws error to trigger job retry
 
-### Testing
-
-Test the polling system:
-
-```bash
-# Trigger daily polling manually
-curl -X POST http://localhost:3000/activity/trigger-polling
-
-# Check BullMQ dashboard
-# Visit: http://localhost:3000/admin/queues
-```
-
 ---
 
 ## 🔒 Weekly Vulnerability Checking System
@@ -506,15 +428,6 @@ The activity module now includes a comprehensive vulnerability checking system t
 6. **Alert Creation**: If new critical vulnerabilities are found, creates alerts for all users watching the repository
 7. **Database Update**: Stores new vulnerability data in the database
 8. **Next Schedule**: Schedules the next weekly vulnerability check job for next week
-
-### API Endpoints
-
-#### Initialize Vulnerability Check Schedule
-```bash
-POST /activity/initialize-vulnerability-check
-```
-
-Initializes the weekly vulnerability check schedule and makes the queue visible in BullMQ.
 
 ### BullMQ Jobs
 
@@ -578,15 +491,6 @@ The activity module now includes a comprehensive health checking system that aut
 5. **Data Storage**: Stores health metrics and overall health score in the database
 6. **Next Schedule**: Schedules the next monthly health check job for 2 months later
 
-### API Endpoints
-
-#### Initialize Health Check Schedule
-```bash
-POST /activity/initialize-health-check
-```
-
-Initializes the monthly health check schedule and makes the queue visible in BullMQ.
-
 ### BullMQ Jobs
 
 #### `health-check` Queue
@@ -628,26 +532,3 @@ The system analyzes and stores:
 The system uses the Scorecard CLI path configured via `SCORECARD_PATH` environment variable.
 
 ---
-
-## ✅ Development Checklist
-
-- [x] `activity.module.ts` created and configured
-- [x] Module registered in `AppModule`
-- [x] Controller created with CRUD endpoints
-- [x] Service created with business logic
-- [x] Repository created for data access
-- [x] DTOs defined for different activity types
-- [x] Entity models created for activities and events
-- [x] Activity aggregation service implemented
-- [x] Activity filtering and querying implemented
-- [x] Statistics endpoints created
-- [x] Basic error handling implemented
-- [x] Repository setup processor implemented
-- [x] Repository polling processor implemented
-- [x] BullMQ job queues configured
-- [x] AI commit summary endpoint implemented
-- [x] API endpoints tested manually
-- [x] Documentation updated
-
----
- 

@@ -75,7 +75,7 @@ export class RepositorySetupProcessor {
         },
       });
 
-      // TODO: Rate limiting logic commented out for simplification - will optimize later
+      // Rate limiting logic commented out for simplification - will optimize later
       // const strategy = await this.rateLimitManager.getProcessingStrategy();
       // const rateLimit = await this.rateLimitManager.getRateLimitStatus();
       // this.logger.log(`🎯 Using ${strategy.reason.split('(')[0].trim()} (${rateLimit.remaining}/${rateLimit.limit} remaining)`);
@@ -104,7 +104,7 @@ export class RepositorySetupProcessor {
         error?: any;
       }>[] = [];
 
-      // TODO: GitHub API commit fetching commented out - always using local cloning
+      // GitHub API commit fetching commented out - always using local cloning for better reliability
       // if (shouldUseApiForCommits) {
       //   this.logger.log(`📡 Fetching commits via GitHub API (max: ${maxCommits || 2000})`);
       //   parallelOperations.push(
@@ -128,7 +128,7 @@ export class RepositorySetupProcessor {
       // Wait for parallel operations to complete
       const results = await Promise.all(parallelOperations);
 
-      // TODO: GitHub API commit processing commented out - always using local cloning
+      // GitHub API commit processing commented out - always using local cloning for better reliability
       // const commitResult = results.find(r => r.type === 'commits');
       // if (commitResult && !commitResult.error) {
       //   commitsResult = commitResult.data;
@@ -609,7 +609,7 @@ export class RepositorySetupProcessor {
               model: aiSummaryResult.modelUsed,
             }
           : null,
-        strategy: 'local-cloning-only', // TODO: strategy.reason commented out
+        strategy: 'local-cloning-only', // Using local cloning strategy for better reliability
         usedApiForCommits: false, // Always using local cloning now
         usedLocalCloning: true, // Always using local cloning now
         duration: `${duration}s`,

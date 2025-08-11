@@ -1,6 +1,0 @@
-warning: in the working copy of 'ossrepo-backend/src/features/activity/processors/vulnerability-check.processor.ts', LF will be replaced by CRLF the next time Git touches it
-ossrepo-backend/src/features/activity/dto/add-to-watchlist.dto.ts
-ossrepo-backend/src/features/activity/processors/health-check.processor.ts
-ossrepo-backend/src/features/activity/processors/polling.processor.ts
-ossrepo-backend/src/features/activity/processors/vulnerability-check.processor.ts
-ossrepo-backend/src/features/activity/services/alerting.service.ts

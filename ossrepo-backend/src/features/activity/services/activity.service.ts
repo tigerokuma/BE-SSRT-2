@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, NotFoundException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -7,6 +7,8 @@ import { GitHubApiService } from './github-api.service';
 
 @Injectable()
 export class ActivityService {
+  private readonly logger = new Logger(ActivityService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('repository-setup')
@@ -159,15 +161,15 @@ export class ActivityService {
       if (error instanceof HttpException) {
         // Log user-friendly message for expected errors
         if (error.getStatus() === HttpStatus.CONFLICT) {
-          console.log(
+          this.logger.log(
             `📝 Duplicate repository in watchlist: ${dto.repo_url} (${dto.added_by})`,
           );
         } else {
-          console.error('Error adding to watchlist:', error.message);
+          this.logger.error('Error adding to watchlist:', error.message);
         }
         throw error;
       }
-      console.error('Error adding to watchlist:', error.message);
+      this.logger.error('Error adding to watchlist:', error.message);
       throw new HttpException(
         `Failed to add repository to watchlist: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -191,12 +193,12 @@ export class ActivityService {
             name: userId, // Use userId as name
           },
         });
-        console.log(`Created new user: ${userId}`);
+        this.logger.log(`Created new user: ${userId}`);
       }
 
       return user;
     } catch (error) {
-      console.error('Error ensuring user exists:', error);
+      this.logger.error('Error ensuring user exists:', error);
       throw new HttpException(
         `Failed to create/find user: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -383,11 +385,11 @@ export class ActivityService {
       const optionsStr =
         options.length > 0 ? `, options: ${options.join(', ')}` : '';
 
-      console.log(
+      this.logger.log(
         `Queued repository setup job for ${owner}/${repo} (watchlist: ${watchlistId}, large: ${isLargeRepo}, size: ${repoSizeKB}KB, maxCommits: ${maxCommits || 'default'}${optionsStr})`,
       );
     } catch (error) {
-      console.error(
+      this.logger.error(
         `Failed to queue repository setup job for ${owner}/${repo}:`,
         error,
       );
@@ -476,7 +478,7 @@ export class ActivityService {
 
     // If this was the only user watching this watchlist, clean up all related data
     if (watchlistUserCount === 1) {
-      console.log(`🧹 Cleaning up all data for watchlist ${watchlistId} as this was the only user watching it`)
+      this.logger.log(`🧹 Cleaning up all data for watchlist ${watchlistId} as this was the only user watching it`)
 
       // Delete all vulnerabilities for this watchlist
       await this.prisma.vulnerability.deleteMany({
@@ -596,6 +598,6 @@ export class ActivityService {
       })
     }
 
-    console.log(`✅ Successfully removed repository ${userWatchlist.watchlist.package.repo_name} from watchlist for user ${userId}`)
+    this.logger.log(`✅ Successfully removed repository ${userWatchlist.watchlist.package.repo_name} from watchlist for user ${userId}`)
   }
 }

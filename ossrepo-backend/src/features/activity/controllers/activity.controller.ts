@@ -29,7 +29,7 @@ import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.serv
 import { AISummaryService } from '../services/ai-summary.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiResponse } from '@nestjs/swagger'; 
 import { BusFactorService } from '../services/bus-factor.service';
 import { VulnerabilityService } from '../services/vulnerability.service';
 
@@ -71,9 +71,6 @@ export class ActivityController {
   }
 
   @Put('user-watchlist-alerts/:userWatchlistId')
-  @ApiOperation({
-    summary: 'Update alert settings for a user watchlist',
-  })
   @ApiResponse({
     status: 200,
     description: 'Alert settings updated successfully',
@@ -109,291 +106,13 @@ export class ActivityController {
 
 
 
-  @Get('rate-limit/status')
-  @ApiOperation({
-    summary: 'Get GitHub API rate limit status and processing strategy',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Rate limit status and strategy retrieved successfully',
-  })
-  async getRateLimitStatus() {
-    this.logger.log(`📊 Getting GitHub API rate limit status`);
 
-    const rateLimit = await this.rateLimitManager.getRateLimitStatus();
-    const strategy = await this.rateLimitManager.getProcessingStrategy();
-    const timeUntilReset = await this.rateLimitManager.getTimeUntilReset();
-    const isApproachingLimit = await this.rateLimitManager.isApproachingLimit();
 
-    return {
-      rateLimit,
-      strategy,
-      timeUntilReset,
-      isApproachingLimit,
-      message: `Current strategy: ${strategy.reason}`,
-    };
-  }
 
-  @Get('rate-limit/token-strategy')
-  @ApiOperation({
-    summary: 'Get detailed token strategy and cloning thresholds',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Token strategy summary retrieved successfully',
-  })
-  async getTokenStrategySummary() {
-    this.logger.log(`📊 Getting token strategy summary`);
 
-    const summary = await this.rateLimitManager.getTokenStrategySummary();
 
-    return {
-      ...summary,
-      message: `Current token strategy: ${summary.strategy} - Cloning repos > ${summary.cloningThresholdMB}MB`,
-      explanation: {
-        strategy: summary.strategy,
-        cloningThreshold: `${summary.cloningThresholdMB}MB (${summary.cloningThresholdKB}KB)`,
-        apiUsage: summary.shouldUseApiForCommits
-          ? 'Will use API for commits'
-          : 'Will use local cloning for commits',
-        tokenStatus: `${summary.remainingTokens}/${summary.totalTokens} tokens remaining (${summary.percentageUsed}% used)`,
-      },
-    };
-  }
-
-  @Post('test-setup')
-  @ApiOperation({
-    summary: 'Test repository setup with different configurations',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Test repository setup job queued successfully',
-  })
-  async testRepositorySetup(
-    @Body() dto: AddToWatchlistDto,
-    @Query('forceLocalCloning') forceLocalCloning?: boolean,
-    @Query('forceLocalHealthAnalysis') forceLocalHealthAnalysis?: boolean,
-    @Query('maxCommits') maxCommits?: number,
-  ) {
-    this.logger.log(
-      `🧪 Testing repository setup for ${dto.repo_url} with options: localCloning=${forceLocalCloning}, localHealth=${forceLocalHealthAnalysis}, maxCommits=${maxCommits || 'default'}`,
-    );
-
-    // Extract owner and repo name from GitHub URL
-    const { owner, repo } = this.parseGitHubUrl(dto.repo_url);
-
-    // Fetch repository info from GitHub API
-    const repoInfo = await this.fetchGitHubRepoInfo(owner, repo);
-
-    // Ensure user exists (create if not)
-    const user = await this.ensureUserExists(dto.added_by);
-
-    // Generate package name for lookup
-    const packageName = `${owner}/${repo}`;
-
-    // Create test watchlist entry
-    const packageId = `package_${owner}_${repo}_${Date.now()}`;
-    const watchlistId = `watchlist_${owner}_${repo}_${Date.now()}`;
-
-    // Create or update package entry
-    const packageEntry = await this.prisma.package.upsert({
-      where: { package_name: packageName },
-      update: {
-        repo_url: dto.repo_url,
-        repo_name: repo,
-      },
-      create: {
-        package_id: packageId,
-        package_name: packageName,
-        repo_url: dto.repo_url,
-        repo_name: repo,
-      },
-    });
-
-    // Create new watchlist entry with processing status
-    const watchlistEntry = await this.prisma.watchlist.create({
-      data: {
-        watchlist_id: watchlistId,
-        alert_cve_ids: [],
-        updated_at: new Date(),
-        default_branch: repoInfo.default_branch,
-        latest_commit_sha: undefined,
-        commits_since_last_health_update: 0,
-        package_id: packageEntry.package_id,
-        status: 'processing',
-        processing_started_at: new Date(),
-      },
-    });
-
-    // Queue test job with specified options
-    await this.activityService.queueRepositorySetupJob(
-      watchlistEntry.watchlist_id,
-      owner,
-      repo,
-      repoInfo.default_branch,
-      repoInfo.is_large_repo,
-      repoInfo.size,
-      maxCommits,
-      forceLocalCloning,
-      forceLocalHealthAnalysis,
-    );
-
-    return {
-      message: 'Test repository setup job queued successfully',
-      watchlist_id: watchlistId,
-      options: {
-        forceLocalCloning: !!forceLocalCloning,
-        forceLocalHealthAnalysis: !!forceLocalHealthAnalysis,
-        maxCommits: maxCommits || 'default',
-      },
-      repository_info: {
-        owner,
-        repo,
-        default_branch: repoInfo.default_branch,
-        size: repoInfo.size,
-        is_large_repo: repoInfo.is_large_repo,
-      },
-    };
-  }
-
-  @Get('ai-summary/test')
-  @ApiOperation({ summary: 'Test AI summary generation for a repository' })
-  @ApiResponse({
-    status: 200,
-    description: 'AI summary generated successfully',
-  })
-  async testAISummary(
-    @Query('owner') owner: string,
-    @Query('repo') repo: string,
-  ) {
-    this.logger.log(`🤖 Testing AI summary generation for ${owner}/${repo}`);
-
-    try {
-      const result = await this.repositorySummaryService.testSummaryGeneration(
-        owner,
-        repo,
-      );
-
-      return {
-        success: result.success,
-        summary: result.summary
-          ? {
-              text: result.summary.summary,
-              confidence: result.summary.confidence,
-              model: result.summary.modelUsed,
-              generatedAt: result.summary.generatedAt,
-            }
-          : null,
-        error: result.error,
-        message: result.success
-          ? `✅ AI summary generated successfully for ${owner}/${repo}`
-          : `❌ Failed to generate AI summary for ${owner}/${repo}: ${result.error}`,
-      };
-    } catch (error) {
-      this.logger.error(
-        `Error testing AI summary for ${owner}/${repo}:`,
-        error,
-      );
-      return {
-        success: false,
-        error: error.message,
-        message: `❌ Error testing AI summary for ${owner}/${repo}`,
-      };
-    }
-  }
-
-  @Get('ai-anomaly-detection/test')
-  @ApiOperation({ summary: 'Test AI anomaly detection for a commit' })
-  @ApiResponse({
-    status: 200,
-    description: 'AI anomaly detection test completed',
-  })
-  async testAIAnomalyDetection(
-    @Query('owner') owner: string,
-    @Query('repo') repo: string,
-  ) {
-    this.logger.log(`🤖 Testing AI anomaly detection for ${owner}/${repo}`);
-
-    try {
-      // Test the AI model connection first
-      const modelConnected = await this.aiAnomalyDetection.testModelConnection();
-      
-      if (!modelConnected) {
-        return {
-          success: false,
-          error: 'AI model not available',
-          message: '❌ AI model (Gemma2:2b) is not available. Please ensure Ollama is running and the model is downloaded.',
-        };
-      }
-
-      // Create a test commit with suspicious characteristics
-      const testCommitData = {
-        sha: 'test123456789',
-        author: 'Test User',
-        email: 'test@example.com',
-        message: 'WIP: massive refactor - removing all security checks',
-        date: new Date(),
-        linesAdded: 1500,
-        linesDeleted: 800,
-        filesChanged: ['src/security/auth.js', 'src/security/permissions.js', 'src/config/database.js', 'src/api/endpoints.js'],
-        contributorStats: {
-          avgLinesAdded: 50,
-          avgLinesDeleted: 20,
-          avgFilesChanged: 2,
-          stddevLinesAdded: 30,
-          stddevLinesDeleted: 15,
-          stddevFilesChanged: 1,
-          totalCommits: 25,
-          commitTimeHistogram: { '9': 5, '10': 8, '11': 6, '14': 4, '15': 2 },
-        },
-        repoStats: {
-          avgLinesAdded: 80,
-          avgLinesDeleted: 30,
-          avgFilesChanged: 3,
-          totalCommits: 1500,
-          totalContributors: 45,
-        },
-      };
-
-      const result = await this.aiAnomalyDetection.analyzeCommitForAnomalies(testCommitData);
-
-      return {
-        success: true,
-        testCommit: {
-          sha: testCommitData.sha,
-          author: testCommitData.author,
-          message: testCommitData.message,
-          linesChanged: testCommitData.linesAdded + testCommitData.linesDeleted,
-          filesChanged: testCommitData.filesChanged.length,
-        },
-        analysis: {
-          isAnomalous: result.isAnomalous,
-          confidence: result.confidence,
-          reasoning: result.reasoning,
-          riskLevel: result.riskLevel,
-          suspiciousFactors: result.suspiciousFactors,
-        },
-        message: result.isAnomalous
-          ? `🚨 AI detected suspicious activity in test commit (confidence: ${(result.confidence * 100).toFixed(1)}%)`
-          : `✅ AI analysis completed - no anomalies detected in test commit`,
-      };
-    } catch (error) {
-      this.logger.error(
-        `Error testing AI anomaly detection for ${owner}/${repo}:`,
-        error,
-      );
-      return {
-        success: false,
-        error: error.message,
-        message: `❌ Error testing AI anomaly detection for ${owner}/${repo}`,
-      };
-    }
-  }
 
   @Post('watchlist/:watchlistId/commit-summary')
-  @ApiOperation({
-    summary: 'Generate AI summary of recent commits for a watchlist',
-  })
   @ApiResponse({
     status: 200,
     description: 'Commit summary generated successfully',
@@ -535,154 +254,13 @@ export class ActivityController {
     }
   }
 
-  @Get('health-data/test')
-  @ApiOperation({
-    summary: 'Test health data retrieval for a watchlist',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Health data retrieved successfully',
-  })
-  async testHealthData() {
-    this.logger.log(`🔍 Testing health data retrieval`);
 
-    const healthData = await this.prisma.healthData.findMany({
-      take: 5,
-      orderBy: { created_at: 'desc' },
-      include: {
-        watchlist: {
-          include: {
-            package: true,
-          },
-        },
-      },
-    });
 
-    return {
-      count: healthData.length,
-      data: healthData.map((item) => ({
-        id: item.id,
-        watchlist_id: item.watchlist_id,
-        repo_name: item.watchlist.package.repo_name,
-        commit_sha: item.commit_sha,
-        overall_health_score: item.overall_health_score,
-        analysis_date: item.analysis_date,
-        source: item.source,
-        created_at: item.created_at,
-      })),
-    };
-  }
 
-  @Get('watchlist/:watchlistId/contributor-stats')
-  @ApiOperation({
-    summary: 'Get contributor statistics for a watchlist',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Contributor statistics retrieved successfully',
-  })
-  async getContributorStats(@Param('watchlistId') watchlistId: string) {
-    this.logger.log(`📊 Getting contributor stats for watchlist ${watchlistId}`);
 
-    // First, try to find the UserWatchlist record to get the actual watchlist_id
-    let actualWatchlistId = watchlistId;
-    
-    // Check if this is a user watchlist ID
-    if (watchlistId.includes('user_watchlist_')) {
-      const userWatchlist = await this.prisma.userWatchlist.findUnique({
-        where: { id: watchlistId },
-        select: { watchlist_id: true },
-      });
 
-      if (userWatchlist) {
-        actualWatchlistId = userWatchlist.watchlist_id;
-        this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
-      } else {
-        this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
-      }
-    }
-
-    this.logger.log(`🔍 Looking for contributor stats with watchlist ID: ${actualWatchlistId}`);
-
-    const contributorStats = await this.prisma.contributorStats.findMany({
-      where: { watchlist_id: actualWatchlistId },
-      orderBy: { total_commits: 'desc' },
-    });
-
-    return {
-      watchlist_id: watchlistId,
-      count: contributorStats.length,
-      contributors: contributorStats.map((stat) => ({
-        author_email: stat.author_email,
-        author_name: stat.author_name,
-        total_commits: stat.total_commits,
-        avg_lines_added: stat.avg_lines_added,
-        avg_lines_deleted: stat.avg_lines_deleted,
-        avg_files_changed: stat.avg_files_changed,
-        last_commit_date: stat.last_commit_date,
-        typical_days_active: stat.typical_days_active,
-      })),
-    };
-  }
-
-  @Get('watchlist/:watchlistId/repo-stats')
-  @ApiOperation({
-    summary: 'Get repository statistics for a watchlist',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Repository statistics retrieved successfully',
-  })
-  async getRepoStats(@Param('watchlistId') watchlistId: string) {
-    this.logger.log(`📊 Getting repo stats for watchlist ${watchlistId}`);
-
-    // First, try to find the UserWatchlist record to get the actual watchlist_id
-    let actualWatchlistId = watchlistId;
-    
-    // Check if this is a user watchlist ID
-    if (watchlistId.includes('user_watchlist_')) {
-      const userWatchlist = await this.prisma.userWatchlist.findUnique({
-        where: { id: watchlistId },
-        select: { watchlist_id: true },
-      });
-
-      if (userWatchlist) {
-        actualWatchlistId = userWatchlist.watchlist_id;
-        this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
-      } else {
-        this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
-      }
-    }
-
-    this.logger.log(`🔍 Looking for repo stats with watchlist ID: ${actualWatchlistId}`);
-
-    const repoStats = await this.prisma.repoStats.findUnique({
-      where: { watchlist_id: actualWatchlistId },
-    });
-
-    if (!repoStats) {
-      throw new HttpException(
-        'Repository statistics not found for this watchlist',
-        HttpStatus.NOT_FOUND,
-      );
-    }
-
-    return {
-      watchlist_id: watchlistId,
-      total_commits: repoStats.total_commits,
-      avg_lines_added: repoStats.avg_lines_added,
-      avg_lines_deleted: repoStats.avg_lines_deleted,
-      avg_files_changed: repoStats.avg_files_changed,
-      commit_time_histogram: repoStats.commit_time_histogram,
-      typical_days_active: repoStats.typical_days_active,
-      last_updated: repoStats.last_updated,
-    };
-  }
 
   @Get('watchlist/:watchlistId/commits')
-  @ApiOperation({
-    summary: 'Get recent commits for a watchlist',
-  })
   @ApiResponse({
     status: 200,
     description: 'Recent commits retrieved successfully',
@@ -814,150 +392,9 @@ export class ActivityController {
     }
   }
 
-  @Post('watchlist/:watchlistId/calculate-stats')
-  @ApiOperation({
-    summary: 'Manually trigger calculation of repository and contributor statistics',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Statistics calculation completed successfully',
-  })
-  async calculateStats(@Param('watchlistId') watchlistId: string) {
-    this.logger.log(`📊 Manually triggering stats calculation for watchlist ${watchlistId}`);
 
-    try {
-      // Import GitManagerService here to avoid circular dependency
-      const { GitManagerService } = await import('../services/git-manager.service');
-      const gitManager = new GitManagerService(
-        this.configService,
-        this.prisma,
-      );
 
-      await gitManager.updateContributorStats(watchlistId);
 
-      return {
-        watchlist_id: watchlistId,
-        message: 'Statistics calculation completed successfully',
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      this.logger.error(`❌ Failed to calculate stats: ${error.message}`);
-      throw new HttpException(
-        `Failed to calculate statistics: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Post('trigger-polling')
-  @ApiOperation({
-    summary: 'Manually trigger daily polling for all repositories',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Daily polling triggered successfully',
-  })
-  async triggerPolling() {
-    this.logger.log(`🔍 Manually triggering daily polling`);
-
-    try {
-      await this.pollingProcessor.triggerPolling();
-
-      return {
-        message: 'Daily polling triggered successfully',
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      this.logger.error(`Error triggering polling: ${error.message}`);
-      throw new HttpException(
-        `Failed to trigger polling: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Post('initialize-vulnerability-check')
-  @ApiOperation({
-    summary: 'Initialize the weekly vulnerability check schedule (makes queue visible in BullMQ)',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Vulnerability check schedule initialized successfully',
-  })
-  async initializeVulnerabilityCheckSchedule() {
-    this.logger.log(`🚀 Initializing vulnerability check schedule`);
-
-    try {
-      await this.vulnerabilityCheckProcessor.initializeVulnerabilityCheckSchedule();
-
-      return {
-        message: 'Vulnerability check schedule initialized successfully',
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      this.logger.error(`Error initializing vulnerability check schedule: ${error.message}`);
-      throw new HttpException(
-        `Failed to initialize vulnerability check schedule: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Post('initialize-health-check')
-  @ApiOperation({
-    summary: 'Initialize the monthly health check schedule (makes queue visible in BullMQ)',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Health check schedule initialized successfully',
-  })
-  async initializeHealthCheckSchedule() {
-    this.logger.log(`🚀 Initializing health check schedule`);
-
-    try {
-      await this.healthCheckProcessor.initializeHealthCheckSchedule();
-
-      return {
-        message: 'Health check schedule initialized successfully',
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      this.logger.error(`Error initializing health check schedule: ${error.message}`);
-      throw new HttpException(
-        `Failed to initialize health check schedule: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Post('test-bus-factor/:watchlistId')
-  async testBusFactor(@Param('watchlistId') watchlistId: string) {
-    try {
-      const result = await this.busFactorService.calculateBusFactor(watchlistId);
-      return {
-        message: 'Bus factor calculation test',
-        result: {
-          busFactor: result.busFactor,
-          totalContributors: result.totalContributors,
-          topContributors: result.topContributors.map(c => ({
-            author: c.author,
-            totalCommits: c.totalCommits,
-            totalLinesAdded: c.totalLinesAdded,
-            totalLinesDeleted: c.totalLinesDeleted,
-            totalFilesChanged: c.totalFilesChanged,
-          })),
-          riskLevel: result.riskLevel,
-          riskReason: result.riskReason,
-        }
-      };
-    } catch (error) {
-      this.logger.error('Error testing bus factor:', error);
-      throw new HttpException(
-        `Failed to test bus factor calculation: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
 
   @Delete('user-watchlist/:userWatchlistId')
   async removeFromWatchlist(
@@ -976,9 +413,6 @@ export class ActivityController {
   }
 
   @Patch('alerts/:alertId/acknowledge')
-  @ApiOperation({
-    summary: 'Acknowledge an alert',
-  })
   @ApiResponse({
     status: 200,
     description: 'Alert acknowledged successfully',
@@ -1003,9 +437,6 @@ export class ActivityController {
   }
 
   @Patch('alerts/:alertId/resolve')
-  @ApiOperation({
-    summary: 'Resolve an alert',
-  })
   @ApiResponse({
     status: 200,
     description: 'Alert resolved successfully',
@@ -1030,9 +461,6 @@ export class ActivityController {
   }
 
   @Get('alerts/:userWatchlistId')
-  @ApiOperation({
-    summary: 'Get alerts for a specific user watchlist',
-  })
   @ApiResponse({
     status: 200,
     description: 'Alerts retrieved successfully',
@@ -1087,138 +515,6 @@ export class ActivityController {
     }
   }
 
-  @Post('insert-sample-lines-alerts')
-  @ApiOperation({
-    summary: 'Insert sample lines added/deleted alerts for testing',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Sample lines alerts created successfully',
-  })
-  async insertSampleLinesAlerts() {
-    this.logger.log('📝 Inserting sample lines added/deleted alerts');
-    try {
-      // Find the specific user watchlist
-      const userWatchlistId = "user_watchlist_user-123_watchlist_expressjs_express_1754171072961";
-      
-      const userWatchlist = await this.prisma.userWatchlist.findUnique({
-        where: { id: userWatchlistId },
-        include: {
-          watchlist: {
-            include: {
-              package: true
-            }
-          }
-        }
-      });
-
-      if (!userWatchlist) {
-        throw new HttpException(
-          `User watchlist not found: ${userWatchlistId}`,
-          HttpStatus.NOT_FOUND,
-        );
-      }
-
-      const watchlistId = userWatchlist.watchlist_id;
-      const alerts: any[] = [];
-
-      // Sample 1: High lines changed alert
-      const alert1 = await this.prisma.alertTriggered.create({
-        data: {
-          user_watchlist_id: userWatchlistId,
-          watchlist_id: watchlistId,
-          commit_sha: "sample_commit_123456789",
-          contributor: "jane_developer",
-          metric: "lines_added_deleted",
-          value: 2500,
-          alert_level: "high",
-          threshold_type: "hardcoded_threshold",
-          threshold_value: 1000,
-          description: "Total lines changed (2500) exceeds hardcoded threshold (1000). This commit made extensive changes across multiple files including core functionality updates and new feature implementations.",
-          details_json: {
-            linesAdded: 1800,
-            linesDeleted: 700,
-            filesChanged: ["src/core/engine.js", "src/features/auth.js", "src/utils/helpers.js"],
-            commitMessage: "feat: major refactor and new authentication system",
-            contributor: "jane_developer",
-            timestamp: new Date().toISOString()
-          },
-          created_at: new Date(),
-        },
-      });
-      alerts.push(alert1);
-
-      // Sample 2: Contributor variance alert
-      const alert2 = await this.prisma.alertTriggered.create({
-        data: {
-          user_watchlist_id: userWatchlistId,
-          watchlist_id: watchlistId,
-          commit_sha: "sample_commit_987654321",
-          contributor: "new_contributor",
-          metric: "lines_added_deleted",
-          value: 800,
-          alert_level: "medium",
-          threshold_type: "contributor_variance",
-          threshold_value: 450,
-          description: "Total lines changed (800) exceeds contributor's normal range (450.0). This is significantly more than the contributor's typical commit size, indicating unusual activity.",
-          details_json: {
-            linesAdded: 600,
-            linesDeleted: 200,
-            filesChanged: ["src/components/UI.js", "src/styles/main.css"],
-            commitMessage: "feat: add new UI components and styling",
-            contributor: "new_contributor",
-            timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2 hours ago
-          },
-          created_at: new Date(Date.now() - 2 * 60 * 60 * 1000),
-        },
-      });
-      alerts.push(alert2);
-
-      // Sample 3: Repository variance alert
-      const alert3 = await this.prisma.alertTriggered.create({
-        data: {
-          user_watchlist_id: userWatchlistId,
-          watchlist_id: watchlistId,
-          commit_sha: "sample_commit_555666777",
-          contributor: "senior_dev",
-          metric: "lines_added_deleted",
-          value: 1200,
-          alert_level: "medium",
-          threshold_type: "repository_variance",
-          threshold_value: 800,
-          description: "Total lines changed (1200) exceeds repository average by 1.5x (800.0). This commit is larger than typical for this repository.",
-          details_json: {
-            linesAdded: 900,
-            linesDeleted: 300,
-            filesChanged: ["src/api/endpoints.js", "src/database/models.js", "tests/integration.js"],
-            commitMessage: "feat: implement new API endpoints and database models",
-            contributor: "senior_dev",
-            timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString() // 4 hours ago
-          },
-          created_at: new Date(Date.now() - 4 * 60 * 60 * 1000),
-        },
-      });
-      alerts.push(alert3);
-
-      return {
-        success: true,
-        message: 'Sample lines added/deleted alerts created successfully',
-        alerts: alerts.map(alert => ({
-          id: alert.id,
-          metric: alert.metric,
-          value: alert.value,
-          description: alert.description,
-          created_at: alert.created_at
-        }))
-      };
-    } catch (error) {
-      this.logger.error(`Error creating sample lines alerts: ${error.message}`);
-      throw new HttpException(
-        `Failed to create sample lines alerts: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
 
 
 
@@ -1226,43 +522,8 @@ export class ActivityController {
 
 
 
-  @Get('scorecard/local-test')
-  @ApiOperation({
-    summary: 'Test local Scorecard CLI functionality',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Local Scorecard test completed',
-  })
-  async testLocalScorecard(
-    @Query('owner') owner: string,
-    @Query('repo') repo: string,
-  ) {
-    this.logger.log(`🔍 Testing local Scorecard CLI for ${owner}/${repo}`);
 
-    try {
-      // Test the health analysis service which uses local Scorecard CLI
-      const healthScore = await this.healthAnalysisService.analyzeRepository(
-        'test-watchlist-id',
-        owner,
-        repo,
-        'main',
-      );
 
-      return {
-        success: true,
-        healthScore,
-        message: `✅ Local Scorecard CLI working for ${owner}/${repo}`,
-      };
-    } catch (error) {
-      this.logger.error(`❌ Local Scorecard test failed: ${error.message}`);
-      return {
-        success: false,
-        error: error.message,
-        message: `❌ Local Scorecard CLI failed for ${owner}/${repo}`,
-      };
-    }
-  }
 
   // Helper methods (copied from ActivityService for testing)
   private parseGitHubUrl(url: string): { owner: string; repo: string } {
@@ -1412,28 +673,7 @@ export class ActivityController {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
-  @Get('test-github-vulnerabilities')
-  @ApiOperation({
-    summary: 'Test GitHub Security Advisories API for a repository',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'GitHub Security Advisories test completed',
-  })
-  async testGitHubVulnerabilities(@Query('repoUrl') repoUrl: string) {
-    this.logger.log(`🧪 Testing GitHub Security Advisories for: ${repoUrl}`);
-    
-    try {
-      await this.vulnerabilityService.testGitHubAPI(repoUrl);
-      return { message: 'GitHub API test completed - check logs for details' };
-    } catch (error) {
-      this.logger.error(`GitHub API test failed:`, error);
-      throw new HttpException(
-        `GitHub API test failed: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+
 
 
 
