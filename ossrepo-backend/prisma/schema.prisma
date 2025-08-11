@@ -26,6 +26,13 @@ model User {
   jira         Jira?
   emailTime    EmailTime?
   sbom              UserWatchlistSbom?
+  
+  // GitHub OAuth fields
+  github_id         String?            @unique
+  github_username   String?
+  access_token      String?
+  refresh_token     String?
+  last_login        DateTime?
 
   @@map("users")
 }

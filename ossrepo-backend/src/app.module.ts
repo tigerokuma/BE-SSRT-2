@@ -6,6 +6,7 @@ import {GraphModule} from './features/graph/graph.module';
 import {ConfigModule} from '@nestjs/config';
 import {PackagesModule} from './features/packages/packages.module';
 import { UserModule } from './features/user/user.module';
+import { AuthModule } from './features/auth/auth.module';
 
 @Module({
     imports: [
@@ -17,7 +18,8 @@ import { UserModule } from './features/user/user.module';
         WatchlistModule,
         PrismaModule,
         GraphModule,
-        UserModule
+        UserModule,
+        AuthModule
     ],
 })
 export class AppModule {
