@@ -1,20 +1,22 @@
 import {Injectable} from '@nestjs/common';
 import {GraphRepository} from '../repositories/graph.repository';
 import {
-    SaveNodeDto,
-    BatchSaveNodesDto,
-    UpdateNodeDto,
-    DeleteNodeDto,
+    CreateGraphNodeDto,
+    BatchCreateGraphNodeDto,
+    UpdateGraphNodeDto,
+    DeleteGraphNodeDto,
     DeleteNodesBySnapshotDto,
+    GraphNodeDto,
 } from '../dto/graph-node.dto';
 import {
-    SaveEdgeDto,
-    BatchSaveEdgesDto,
-    UpdateEdgeDto,
-    DeleteEdgeDto,
+    CreateGraphEdgeDto,
+    BatchCreateGraphEdgeDto,
+    UpdateGraphEdgeDto,
+    DeleteGraphEdgeDto,
     DeleteEdgesBySnapshotDto,
 } from '../dto/graph-edge.dto';
-import {CreateGraphSnapshotDto, UpdateGraphSnapshotDto} from '../dto/graph-snapshot.dto';
+import {CreateGraphSnapshotDto, GraphSnapshotDto, UpdateGraphSnapshotDto} from '../dto/graph-snapshot.dto';
+import {mapPrismaNodeToDto, mapPrismaSnapshotToDto} from '../utils/graph.mapper';
 
 @Injectable()
 export class GraphStorageService {
@@ -22,40 +24,46 @@ export class GraphStorageService {
     }
 
     // --- NODE methods ---
-    createNode(snapshotId: string, dto: SaveNodeDto) {
-        return this.repo.createNode(snapshotId, dto);
+    async createNode(snapshotId: string, dto: CreateGraphNodeDto): Promise<GraphNodeDto> {
+        const n = await this.repo.createNode(snapshotId, dto);
+        return mapPrismaNodeToDto(n);
     }
 
-    createNodes(batch: BatchSaveNodesDto) {
+    async createNodes(batch: BatchCreateGraphNodeDto): Promise<{ count: number }> {
+        // Prisma's createMany returns `{ count: number }`, not entities.
         return this.repo.createNodes(batch);
     }
 
-    getNode(nodeId: string) {
-        return this.repo.getNode(nodeId);
+    async getNode(nodeId: string): Promise<GraphNodeDto | null> {
+        const n = await this.repo.getNode(nodeId);
+        return n ? mapPrismaNodeToDto(n) : null;
     }
 
-    getNodesBySnapshot(snapshotId: string) {
-        return this.repo.getNodesBySnapshot(snapshotId);
+    async getNodesBySnapshot(snapshotId: string): Promise<GraphNodeDto[]> {
+        const nodes = await this.repo.getNodesBySnapshot(snapshotId);
+        return nodes.map(mapPrismaNodeToDto);
     }
 
-    updateNode(dto: UpdateNodeDto) {
-        return this.repo.updateNode(dto);
+    async updateNode(dto: UpdateGraphNodeDto): Promise<GraphNodeDto> {
+        const n = await this.repo.updateNode(dto);
+        return mapPrismaNodeToDto(n);
     }
 
-    deleteNode(dto: DeleteNodeDto) {
-        return this.repo.deleteNode(dto.node_id);
+    async deleteNode(dto: DeleteGraphNodeDto): Promise<GraphNodeDto> {
+        const n = await this.repo.deleteNode(dto.node_id);
+        return mapPrismaNodeToDto(n);
     }
 
-    deleteNodesBySnapshot(dto: DeleteNodesBySnapshotDto) {
+    async deleteNodesBySnapshot(dto: DeleteNodesBySnapshotDto): Promise<{ count: number }> {
         return this.repo.deleteNodesBySnapshot(dto);
     }
 
     // --- EDGE methods ---
-    createEdge(snapshotId: string, dto: SaveEdgeDto) {
+    createEdge(snapshotId: string, dto: CreateGraphEdgeDto) {
         return this.repo.createEdge(snapshotId, dto);
     }
 
-    createEdges(batch: BatchSaveEdgesDto) {
+    createEdges(batch: BatchCreateGraphEdgeDto) {
         return this.repo.createEdges(batch);
     }
 
@@ -67,11 +75,11 @@ export class GraphStorageService {
         return this.repo.getEdgesBySnapshot(snapshotId);
     }
 
-    updateEdge(dto: UpdateEdgeDto) {
+    updateEdge(dto: UpdateGraphEdgeDto) {
         return this.repo.updateEdge(dto);
     }
 
-    deleteEdge(dto: DeleteEdgeDto) {
+    deleteEdge(dto: DeleteGraphEdgeDto) {
         return this.repo.deleteEdge(dto.edge_id);
     }
 
@@ -79,31 +87,50 @@ export class GraphStorageService {
         return this.repo.deleteEdgesBySnapshot(dto);
     }
 
-    createGraphSnapshot(dto: CreateGraphSnapshotDto) {
-        return this.repo.createGraphSnapshot(dto);
+    // --- SNAPSHOT methods (unchanged) ---
+    async createGraphSnapshot(dto: CreateGraphSnapshotDto): Promise<GraphSnapshotDto> {
+        const row = await this.repo.createGraphSnapshot(dto);
+        return mapPrismaSnapshotToDto(row);
     }
 
-    getGraphSnapshotById(snapshotId: string) {
-        return this.repo.getGraphSnapshotById(snapshotId);
+    async getGraphSnapshotById(snapshotId: string): Promise<GraphSnapshotDto | null> {
+        const row = await this.repo.getGraphSnapshotById(snapshotId);
+        return row ? mapPrismaSnapshotToDto(row) : null;
     }
 
-    getSnapshotsBySubtask(subtaskId: string) {
-        return this.repo.getSnapshotsBySubtask(subtaskId);
+    async getSnapshotsBySubtask(subtaskId: string): Promise<GraphSnapshotDto[]> {
+        const rows = await this.repo.getSnapshotsBySubtask(subtaskId);
+        return rows.map(mapPrismaSnapshotToDto);
     }
 
-    getSnapshotsByRepo(repoId: string) {
-        return this.repo.getSnapshotsByRepo(repoId);
+    async getSnapshotsByRepo(repoId: string): Promise<GraphSnapshotDto[]> {
+        const rows = await this.repo.getSnapshotsByRepo(repoId);
+        return rows.map(mapPrismaSnapshotToDto);
     }
 
-    updateGraphSnapshot(dto: UpdateGraphSnapshotDto) {
-        return this.repo.updateGraphSnapshot(dto);
+    async updateGraphSnapshot(dto: UpdateGraphSnapshotDto): Promise<GraphSnapshotDto> {
+        const row = await this.repo.updateGraphSnapshot(dto);
+        return mapPrismaSnapshotToDto(row);
     }
 
-    deleteGraphSnapshot(snapshotId: string) {
-        return this.repo.deleteGraphSnapshot(snapshotId);
+    async deleteGraphSnapshot(snapshotId: string): Promise<GraphSnapshotDto> {
+        // Optionally return deleted snapshot, or void if you don't want to return anything
+        const row = await this.repo.deleteGraphSnapshot(snapshotId);
+        return mapPrismaSnapshotToDto(row);
     }
 
-    getSnapshotsByIds(ids: string[]) {
-        return this.repo.getSnapshotsByIds(ids);
+    async getSnapshotsByIds(ids: string[]): Promise<GraphSnapshotDto[]> {
+        const rows = await this.repo.getSnapshotsByIds(ids);
+        return rows.map(mapPrismaSnapshotToDto);
+    }
+
+    async queryNodes(filter: any) {
+        // Use Prisma or SQL to get nodes by filter
+        return this.repo.queryNodes(filter)
+    }
+
+    async queryEdges(filter: any) {
+        return this.repo.queryEdges(filter)
     }
 }
+
