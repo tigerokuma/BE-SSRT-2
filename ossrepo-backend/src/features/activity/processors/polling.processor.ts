@@ -242,15 +242,18 @@ export class PollingProcessor {
       );
 
       // Clone repository with smart depth adjustment and fallback deepening
-      repoPath = await this.ensureRepositoryWithSha(owner, repo, branch, storedLatestSha);
+      const cloneResult = await this.ensureRepositoryWithSha(owner, repo, branch, storedLatestSha);
       
-      if (!repoPath) {
+      if (!cloneResult) {
         this.logger.error(`Failed to clone repository ${owner}/${repo} with required depth for SHA ${storedLatestSha}`);
         return;
       }
 
+      repoPath = cloneResult.repoPath;
+      const cloneDepth = cloneResult.depth;
+
       // Get commits since the stored SHA
-      const newCommits = await this.getCommitsSinceSha(repoPath, storedLatestSha);
+      const newCommits = await this.getCommitsSinceSha(repoPath, storedLatestSha, cloneDepth);
       
       if (newCommits.length === 0) {
         this.logger.warn(`No commits found since ${storedLatestSha} for ${owner}/${repo}`);
@@ -260,12 +263,34 @@ export class PollingProcessor {
       }
 
       this.logger.log(`📝 Found ${newCommits.length} new commits for ${owner}/${repo}`);
+      
+      // Log commit details for debugging
+      newCommits.forEach((commit, index) => {
+        this.logger.log(`  Commit ${index + 1}: ${commit.sha.substring(0, 8)} by ${commit.author}`);
+        this.logger.log(`    Files: ${commit.filesChanged.length}, Lines: +${commit.linesAdded} -${commit.linesDeleted}`);
+        this.logger.log(`    Message: ${commit.message.substring(0, 100)}...`);
+      });
 
       // Log commits to database
       await this.logCommitsToDatabase(watchlistId, newCommits);
 
       // Check new commits for AI anomalies
-      await this.checkNewCommitsForAnomalies(watchlistId, newCommits);
+      // Transform commits to match the expected format for AI analysis
+      const commitsForAI = newCommits.map(commit => ({
+        actor: commit.author,
+        timestamp: commit.date,
+        payload: {
+          sha: commit.sha,
+          author: commit.author,
+          email: commit.email,
+          message: commit.message,
+          date: commit.date.toISOString(),
+          lines_added: commit.linesAdded,
+          lines_deleted: commit.linesDeleted,
+          files_changed: commit.filesChanged,
+        }
+      }));
+      await this.checkNewCommitsForAnomalies(watchlistId, commitsForAI);
 
       // Check for alerts on each commit
       for (const commit of newCommits) {
@@ -335,10 +360,11 @@ export class PollingProcessor {
     repo: string, 
     branch: string, 
     targetSha: string
-  ): Promise<string | null> {
-    // Use the same approach as repository setup - clone with --no-checkout to avoid Windows filename issues
-    const depths = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
-    const maxDepth = 1000; // Increased from 100 to allow deeper history
+  ): Promise<{ repoPath: string; depth: number } | null> {
+    // Start with a reasonable depth that should cover most recent commits
+    // We want to avoid the issue where the oldest commit in a shallow clone appears to create the entire repo
+    const depths = [5, 10, 20, 50, 100, 200, 500, 1000];
+    const maxDepth = 2000; // Increased to allow deeper history
     
     for (const depth of depths) {
       if (depth > maxDepth) {
@@ -357,7 +383,7 @@ export class PollingProcessor {
         
         if (shaExists) {
           this.logger.log(`✅ Found target SHA ${targetSha} with depth ${depth}`);
-          return repoPath;
+          return { repoPath, depth };
         } else {
           this.logger.log(`❌ Target SHA ${targetSha} not found with depth ${depth}, trying deeper...`);
           // Clean up this clone and try deeper
@@ -381,7 +407,7 @@ export class PollingProcessor {
       const shaExists = await this.checkShaExists(repoPath, targetSha);
       if (shaExists) {
         this.logger.log(`✅ Found target SHA ${targetSha} after deepening repository`);
-        return repoPath;
+        return { repoPath, depth: 2000 }; // Assume max depth after deepening
       } else {
         this.logger.error(`❌ Target SHA ${targetSha} still not found after deepening`);
         await this.gitManager.cleanupRepository(owner, repo);
@@ -429,12 +455,12 @@ export class PollingProcessor {
     repo: string, 
     branch: string, 
     targetSha: string
-  ): Promise<string | null> {
+  ): Promise<{ repoPath: string; depth: number } | null> {
     // First try to clone with smart depth
-    const repoPath = await this.cloneWithSmartDepth(owner, repo, branch, targetSha);
+    const cloneResult = await this.cloneWithSmartDepth(owner, repo, branch, targetSha);
     
-    if (repoPath) {
-      return repoPath;
+    if (cloneResult) {
+      return cloneResult;
     }
     
     // If that fails, try to clone shallow and then deepen
@@ -449,7 +475,7 @@ export class PollingProcessor {
       const shaExists = await this.checkShaExists(shallowRepoPath, targetSha);
       if (shaExists) {
         this.logger.log(`✅ Found target SHA ${targetSha} after deepening`);
-        return shallowRepoPath;
+        return { repoPath: shallowRepoPath, depth: 2000 }; // Assume max depth after deepening
       } else {
         this.logger.error(`❌ Target SHA ${targetSha} still not found after deepening`);
         await this.gitManager.cleanupRepository(owner, repo);
@@ -537,7 +563,7 @@ export class PollingProcessor {
     }
   }
 
-  private async getCommitsSinceSha(repoPath: string, sinceSha: string): Promise<any[]> {
+  private async getCommitsSinceSha(repoPath: string, sinceSha: string, cloneDepth?: number): Promise<any[]> {
     try {
       const { exec } = require('child_process');
       const { promisify } = require('util');
@@ -597,7 +623,16 @@ export class PollingProcessor {
       const commits: any[] = [];
       const lines = stdout.trim().split('\n');
       
-      for (const line of lines) {
+      // If clone depth is provided, limit the number of commits processed to depth - 1
+      // This prevents the oldest commit in a shallow clone from appearing to create the entire repo
+      const maxCommitsToProcess = cloneDepth ? cloneDepth - 1 : lines.length;
+      const linesToProcess = lines.slice(0, maxCommitsToProcess);
+      
+      if (cloneDepth && lines.length > maxCommitsToProcess) {
+        this.logger.log(`📝 Limiting commit processing to ${maxCommitsToProcess} commits (clone depth: ${cloneDepth}) to avoid shallow clone issues`);
+      }
+      
+      for (const line of linesToProcess) {
         const [sha, author, email, date, message] = line.split('|');
         
         // Get detailed commit statistics
@@ -615,14 +650,15 @@ export class PollingProcessor {
             this.logger.log(statsOutput);
           }
           
-          // Parse the stats output
+          // Parse the stats output - look for the summary line at the end
           const statsLines = statsOutput.split('\n');
-          for (const statLine of statsLines) {
+          const summaryLine = statsLines[statsLines.length - 2]; // Usually the second-to-last line
+          
+          if (summaryLine) {
             // Look for lines like " 5 files changed, 123 insertions(+), 45 deletions(-)"
-            // Also handle variations like "123 insertions, 45 deletions" or "123 insertions(+), 45 deletions(-)"
-            const fileMatch = statLine.match(/(\d+) files? changed/);
-            const insertionMatch = statLine.match(/(\d+) insertions?/);
-            const deletionMatch = statLine.match(/(\d+) deletions?/);
+            const fileMatch = summaryLine.match(/(\d+) files? changed/);
+            const insertionMatch = summaryLine.match(/(\d+) insertions?/);
+            const deletionMatch = summaryLine.match(/(\d+) deletions?/);
             
             if (insertionMatch) {
               linesAdded = parseInt(insertionMatch[1], 10);
@@ -630,12 +666,43 @@ export class PollingProcessor {
             if (deletionMatch) {
               linesDeleted = parseInt(deletionMatch[1], 10);
             }
+            
+            // Debug logging for the first few commits
+            if (commits.length < 3) {
+              this.logger.log(`📊 Parsed stats for ${sha}: ${linesAdded} added, ${linesDeleted} deleted, ${filesChanged.length} files`);
+            }
           }
           
           // Get list of changed files
           const filesCommand = `cd "${repoPath}" && git show --name-only --format="" ${sha}`;
           const { stdout: filesOutput } = await execAsync(filesCommand);
           filesChanged = filesOutput.trim().split('\n').filter(file => file.trim() !== '');
+          
+                     // Validate file count - if it seems unreasonable, log a warning
+           if (filesChanged.length > 100) {
+             this.logger.warn(`⚠️ Suspicious file count for commit ${sha}: ${filesChanged.length} files. This might be incorrect.`);
+             // Re-validate by checking if this is a merge commit or similar
+             if (message.toLowerCase().includes('merge') || message.toLowerCase().includes('revert')) {
+               this.logger.log(`📝 Commit ${sha} appears to be a merge/revert, high file count may be legitimate`);
+             } else {
+               // This might be the oldest commit in a shallow clone - check if it's the first commit
+               try {
+                 const { stdout: firstCommitOutput } = await execAsync(`cd "${repoPath}" && git log --reverse --format="%H" -1`);
+                 const firstCommitSha = firstCommitOutput.trim();
+                 if (sha === firstCommitSha) {
+                   this.logger.warn(`🚨 Commit ${sha} appears to be the first commit in a shallow clone. File count of ${filesChanged.length} may be inflated.`);
+                   // For the first commit in a shallow clone, we should be more conservative about the file count
+                   // Let's limit it to a reasonable number
+                   if (filesChanged.length > 50) {
+                     filesChanged = filesChanged.slice(0, 50);
+                     this.logger.log(`📝 Limited files changed to first 50 for first commit in shallow clone`);
+                   }
+                 }
+               } catch (firstCommitError) {
+                 this.logger.warn(`Could not verify if this is the first commit: ${firstCommitError.message}`);
+               }
+             }
+           }
           
         } catch (statsError) {
           this.logger.warn(`Could not get detailed stats for commit ${sha}: ${statsError.message}`);
@@ -670,15 +737,18 @@ export class PollingProcessor {
             actor: commit.author,
             timestamp: commit.date,
             event_hash: this.createEventHash(commit.sha + commit.author + commit.date.toISOString()),
+            lines_added: commit.linesAdded,
+            lines_deleted: commit.linesDeleted,
+            files_changed: commit.filesChanged.length,
             payload: {
               sha: commit.sha,
               author: commit.author,
               email: commit.email,
               message: commit.message,
               date: commit.date.toISOString(),
-              linesAdded: commit.linesAdded,
-              linesDeleted: commit.linesDeleted,
-              filesChanged: commit.filesChanged,
+              lines_added: commit.linesAdded,
+              lines_deleted: commit.linesDeleted,
+              files_changed: commit.filesChanged,
             },
           },
         });
@@ -918,15 +988,27 @@ export class PollingProcessor {
       // Process each new commit for AI anomaly detection
       for (const commit of newCommits) {
         try {
+          // Validate commit object
+          if (!commit || !commit.payload) {
+            this.logger.warn(`⚠️ Skipping invalid commit object for AI analysis`);
+            continue;
+          }
+
           const payload = commit.payload as any;
           
+          // Validate required fields
+          if (!payload.sha) {
+            this.logger.warn(`⚠️ Skipping commit without SHA for AI analysis`);
+            continue;
+          }
+
           // Prepare data for AI analysis
           const analysisData = {
             sha: payload.sha,
-            author: commit.actor,
+            author: commit.actor || 'unknown',
             email: payload.email || 'unknown@example.com',
-            message: payload.message,
-            date: commit.timestamp,
+            message: payload.message || '',
+            date: commit.timestamp || new Date(),
             linesAdded: payload.lines_added || 0,
             linesDeleted: payload.lines_deleted || 0,
             filesChanged: payload.files_changed || [],
@@ -955,7 +1037,7 @@ export class PollingProcessor {
           );
 
         } catch (error) {
-          this.logger.error(`Failed to analyze commit ${commit.event_id} for anomalies:`, error);
+          this.logger.error(`Failed to analyze commit ${commit?.event_id || 'unknown'} for anomalies:`, error);
           // Continue with other commits even if one fails
         }
       }

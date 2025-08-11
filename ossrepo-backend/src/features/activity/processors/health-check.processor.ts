@@ -166,9 +166,144 @@ export class HealthCheckProcessor {
       );
 
       this.logger.log(`✅ Health check completed for ${repoName} - Score: ${healthScore}`);
+
+      // Check for health score decreases and create alerts
+      await this.checkHealthScoreDecrease(watchlistId, healthScore, repoName);
     } catch (error) {
       this.logger.error(`Error checking health for ${repoName}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Check if health score has decreased and create alerts for users who have enabled them
+   */
+  private async checkHealthScoreDecrease(
+    watchlistId: string,
+    currentHealthScore: number,
+    repoName: string
+  ): Promise<void> {
+    try {
+      // Get the previous health score from the database
+      const previousHealthData = await this.prisma.healthData.findFirst({
+        where: { watchlist_id: watchlistId },
+        orderBy: { analysis_date: 'desc' },
+        select: { overall_health_score: true, analysis_date: true },
+      });
+
+      if (!previousHealthData) {
+        this.logger.log(`No previous health data found for ${repoName}, skipping health decrease check`);
+        return;
+      }
+
+      const previousHealthScore = Number(previousHealthData.overall_health_score);
+      const healthScoreDecrease = previousHealthScore - currentHealthScore;
+
+      if (healthScoreDecrease <= 0) {
+        this.logger.log(`Health score for ${repoName} has not decreased (${previousHealthScore} → ${currentHealthScore})`);
+        return;
+      }
+
+      this.logger.log(`📉 Health score decreased for ${repoName}: ${previousHealthScore} → ${currentHealthScore} (decrease: ${healthScoreDecrease.toFixed(1)})`);
+
+      // Get all users watching this repository with their alert settings
+      const userWatchlists = await this.prisma.userWatchlist.findMany({
+        where: { watchlist_id: watchlistId },
+        select: {
+          id: true,
+          user_id: true,
+          alerts: true, // Include alert settings
+        },
+      });
+
+      if (userWatchlists.length === 0) {
+        this.logger.log(`No users watching repository ${watchlistId}`);
+        return;
+      }
+
+      // Check each user's alert settings and create alerts if needed
+      for (const userWatchlist of userWatchlists) {
+        // Parse user's alert settings
+        let alertSettings;
+        try {
+          alertSettings = userWatchlist.alerts ? JSON.parse(userWatchlist.alerts) : {};
+        } catch (parseError) {
+          this.logger.warn(`Failed to parse alert settings for user ${userWatchlist.user_id}, using default settings`);
+          alertSettings = {};
+        }
+
+        // Check if user has enabled health score decrease alerts
+        if (alertSettings.health_score_decreases?.enabled) {
+          const userThreshold = alertSettings.health_score_decreases.minimum_health_change || 1.0;
+          
+          if (healthScoreDecrease >= userThreshold) {
+            await this.createHealthScoreDecreaseAlert(
+              userWatchlist.id,
+              watchlistId,
+              previousHealthScore,
+              currentHealthScore,
+              healthScoreDecrease,
+              repoName
+            );
+            this.logger.log(`✅ Health score decrease alert created for user ${userWatchlist.user_id} (decrease: ${healthScoreDecrease.toFixed(1)}, threshold: ${userThreshold})`);
+          } else {
+            this.logger.log(`⏭️ Health score decrease (${healthScoreDecrease.toFixed(1)}) below user threshold (${userThreshold}) for user ${userWatchlist.user_id}`);
+          }
+        } else {
+          this.logger.log(`⏭️ Skipping health score decrease alert for user ${userWatchlist.user_id} (alerts disabled)`);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error checking health score decrease for ${repoName}:`, error);
+    }
+  }
+
+  /**
+   * Create a health score decrease alert
+   */
+  private async createHealthScoreDecreaseAlert(
+    userWatchlistId: string,
+    watchlistId: string,
+    previousScore: number,
+    currentScore: number,
+    decrease: number,
+    repoName: string
+  ): Promise<void> {
+    try {
+      const details = {
+        healthScore: {
+          previousScore: previousScore,
+          currentScore: currentScore,
+          decrease: decrease,
+          decreasePercentage: ((decrease / previousScore) * 100).toFixed(1),
+        },
+        repository: {
+          name: repoName,
+          watchlistId: watchlistId,
+        },
+      };
+
+      await this.prisma.alertTriggered.create({
+        data: {
+          user_watchlist_id: userWatchlistId,
+          watchlist_id: watchlistId,
+          commit_sha: 'health-check', // Special identifier for health check alerts
+          contributor: 'health-system',
+          metric: 'health_score_decrease',
+          value: decrease,
+          alert_level: 'moderate',
+          threshold_type: 'health_score_decrease',
+          threshold_value: 0,
+          description: `Health score decreased by ${decrease.toFixed(1)} points in ${repoName} (${previousScore.toFixed(1)} → ${currentScore.toFixed(1)})`,
+          details_json: details,
+        },
+      });
+
+      this.logger.log(
+        `🚨 HEALTH SCORE DECREASE ALERT CREATED: ${repoName} - Decrease: ${decrease.toFixed(1)} points`,
+      );
+    } catch (error) {
+      this.logger.error(`Error creating health score decrease alert:`, error);
     }
   }
 

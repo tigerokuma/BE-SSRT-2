@@ -219,7 +219,7 @@ export class AlertingService {
     const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
     
     // Check hardcoded threshold
-    if (totalLines > config.hardcoded_threshold) {
+    if (totalLines >= config.hardcoded_threshold) {
       await this.createAlert(
         userWatchlistId,
         watchlistId,
@@ -288,7 +288,7 @@ export class AlertingService {
     const filesChanged = commitData.filesChanged?.length || 0;
     
     // Check hardcoded threshold
-    if (filesChanged > config.hardcoded_threshold) {
+    if (filesChanged >= config.hardcoded_threshold) {
       await this.createAlert(
         userWatchlistId,
         watchlistId,
@@ -360,7 +360,7 @@ export class AlertingService {
       const churnRatio = totalLines / filesChanged;
       
       // Check hardcoded threshold
-      if (churnRatio > config.hardcoded_threshold) {
+      if (churnRatio >= config.hardcoded_threshold) {
         await this.createAlert(
           userWatchlistId,
           watchlistId,
