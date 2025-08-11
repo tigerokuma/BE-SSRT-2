@@ -18,7 +18,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v3
       with:
-        node-version: '20'
+        node-version: '18'
     
     - name: Install dependencies
       run: npm install
@@ -38,13 +38,15 @@ jobs:
         script: |
           cd ~/BE-SSRT-2/ossrepo-backend
           
-          # Fix git pull issue - configure git to handle divergent branches
-          git config pull.rebase false
+          # Stash any local changes and clean working directory
+          git stash
+          git clean -fd
           
-          # Force pull to avoid conflicts
+          # Reset to match remote main branch exactly
           git fetch origin main
           git reset --hard origin/main
           
+          # Install dependencies
           npm install
           
           # Generate Prisma client with latest schema

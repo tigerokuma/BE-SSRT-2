@@ -26,6 +26,13 @@ model User {
   jira         Jira?
   emailTime    EmailTime?
   sbom              UserWatchlistSbom?
+  
+  // GitHub OAuth fields
+  github_id         String?            @unique
+  github_username   String?
+  access_token      String?
+  refresh_token     String?
+  last_login        DateTime?
 
   @@map("users")
 }
@@ -165,7 +172,7 @@ model Watchlist {
   repoStats                        RepoStats?
   alertTriggered                   AlertTriggered[]
   sbom                             WatchlistSbom?
-  aiAnomaliesDetected             AIAnomaliesDetected[]
+  aiAnomaliesDetected              AIAnomaliesDetected[]
   vulnerabilities                  Vulnerability[]
   vulnerabilitySummary             VulnerabilitySummary?
 }
@@ -549,6 +556,7 @@ model UserWatchlistSbom {
 
   user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   @@index([user_id])
+
 }
 
 model AIAnomaliesDetected {
