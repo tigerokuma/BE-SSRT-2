@@ -27,6 +27,9 @@ import {
     GraphExportDto,
 } from '../dto/graph-export.dto';
 import {LlmService} from "../services/llm.service";
+import {MemgraphService} from "../services/memgraph.service";
+import {iterAllValues} from '../utils/graph.mapper';
+import {isNode, isRelationship} from 'neo4j-driver';
 
 // ---- CONTROLLER ----
 @Controller('graph')
@@ -36,29 +39,177 @@ export class GraphController {
         private readonly graphBuilder: GraphBuilderService,
         private readonly graphStorage: GraphStorageService,
         private readonly llm: LlmService,
+        private readonly memgraph: MemgraphService,
     ) {
     }
+
 
     @Get('subgraph')
     async querySubgraph(
         @Query('repoId') repoId: string,
-        @Query('commitId') commitId: string,
+        @Query('commitId') commitId: string | undefined,
         @Query('q') q: string,
     ) {
-        // 1. Use LLM to convert user query string to a graph query (Cypher, SQL, Prisma, etc)
-        const { prismaQuery } = await this.llm.generateGraphQuery(q, repoId, commitId);
+        // 1) Resolve snapshot
+        const snap = await this.graphStorage.getSnapshotByRepoCommit
+            ? await (this.graphStorage as any).getSnapshotByRepoCommit(repoId, commitId || null)
+            : (() => {
+                throw new Error('Implement getSnapshotByRepoCommit(repoId, commitId) on GraphStorageService');
+            })();
+        if (!snap) throw new NotFoundException('Snapshot not found for repo/commit');
 
-        // 2. Execute the generated query (restrict by repo/commit if needed)
-        // If using Prisma:
-        const nodes = await this.graphStorage.queryNodes(prismaQuery);
-        const edges = await this.graphStorage.queryEdges(prismaQuery);
+        // 2) Ask LLM for Cypher
+        let {cypher} = await this.llm.generateGraphCypher(q, snap.snapshot_id);
 
-        // 3. Transform to Cytoscape format
-        const elements = [
-            ...nodes.map(n => ({ data: n })),
-            ...edges.map(e => ({ data: e })),
-        ];
-        return { elements };
+        // 3) Execute with a repair retry if Memgraph rejects it
+        let rows: any[];
+        try {
+            rows = await this.memgraph.run<any>(cypher, {snapshot_id: snap.snapshot_id});
+        } catch (err: any) {
+            const dbError = String(err?.message || err);
+            try {
+                if ((this.llm as any).repairCypher) {
+                    const repaired = await (this.llm as any).repairCypher(cypher, dbError);
+                    rows = await this.memgraph.run<any>(repaired, {snapshot_id: snap.snapshot_id});
+                    cypher = repaired;
+                } else {
+                    const fallback = `
+MATCH (n:ASTNode {snapshot_id: $snapshot_id})
+WITH n LIMIT 100
+OPTIONAL MATCH (n)-[r:CODE_EDGE]->(m)
+RETURN n, r, m LIMIT 100
+          `.trim();
+                    rows = await this.memgraph.run<any>(fallback, {snapshot_id: snap.snapshot_id});
+                    cypher = fallback;
+                }
+            } catch {
+                throw err;
+            }
+        }
+
+        // 4) Map rows to Cytoscape elements, then expand with contributors
+        const nodesMap = new Map<string, any>();
+        const edgesMap = new Map<string, any>();
+
+        const getProps = (x: any) => (x && (x as any).properties) ? (x as any).properties : x;
+
+        const addNode = (nodeVal: any) => {
+            if (!nodeVal) return;
+            const props = getProps(nodeVal);
+            const id = props?.local_id ?? props?.node_id ?? JSON.stringify(props);
+            if (nodesMap.has(id)) return;
+
+            const meta = props?.metadata;
+            const isContributor = (props?.type === 'Contributor');
+
+            const code = isContributor ? '' : (props?.snippet ?? meta?.snippet ?? null);
+            const sp = meta?.start_point;
+            const ep = meta?.end_point;
+
+            const s = Array.isArray(sp) ? Number(sp[0]) + 1 : undefined;
+            const e = Array.isArray(ep) ? Number(ep[0]) + 1 : undefined;
+            const location = isContributor
+                ? (props?.metadata?.email || '')
+                : (s && e ? `${props.file_path ?? ''}:L${s}-L${e}` : (props.file_path ?? ''));
+
+            let name = props?.name;
+            if (!name || !name.trim()) {
+                if (!isContributor && code) {
+                    const first = code.split(/\r?\n/).map((s: string) => s.trim()).find(Boolean);
+                    if (first) name = first.slice(0, 80);
+                }
+                if (!name) name = isContributor ? (props?.metadata?.email || 'Contributor') : `${props.type ?? 'Node'}${s ? `@L${s}` : ''}`;
+            }
+
+            nodesMap.set(id, {
+                data: {
+                    id,
+                    label: isContributor ? `👤 ${props?.name || name}` : (name || props.type || 'node'),
+                    type: props.type ?? null,        // 'Contributor' or AST kind
+                    name: props?.name ?? name ?? null,
+                    location,
+                    code,
+                    email: isContributor ? (props?.metadata?.email || null) : null,
+                },
+            });
+        };
+
+        const addEdgeFromRow = (row: Record<string, any>) => {
+            const n = row['n'];  // left node
+            const r = row['r'];  // rel
+            // NOTE: LLM query might use 'm' or 'c' for the right node
+            const m = row['m'] ?? row['c'];
+            if (!r) return;
+
+            const nProps = getProps(n);
+            const mProps = getProps(m);
+            const rProps = getProps(r);
+
+            const sid = rProps?.source_local_id ?? nProps?.local_id;
+            const tid = rProps?.target_local_id ?? mProps?.local_id;
+            if (!sid || !tid) return;
+
+            const rel = rProps?.relation ?? 'EDGE';
+            const id = `${sid}->${rel}->${tid}`;
+            if (edgesMap.has(id)) return;
+
+            const meta = (rProps as any)?.metadata || {};
+            edgesMap.set(id, {
+                data: {
+                    id,
+                    source: sid,
+                    target: tid,
+                    relation: rel,             // 'authored_by' | 'last_touched_by' | others
+                    role: rel,                 // for convenience in the UI
+                    sha: meta.sha ?? null,
+                    author_time: meta.author_time ?? null,
+                },
+            });
+        };
+
+        // First pass: whatever the LLM returned
+        for (const row of rows as Array<Record<string, any>>) {
+            const n = row['n'];
+            const r = row['r'];
+            const m = row['m'];
+            if (n) addNode(n);
+            if (m) addNode(m);
+            if (r) addEdgeFromRow(row);
+        }
+
+        // Expand with contributors for all AST nodes currently in the result
+        const astIds: string[] = [];
+        for (const [, el] of nodesMap) {
+            // only expand for AST nodes, not contributors
+            if (el?.data?.type && el.data.type !== 'Contributor') {
+                astIds.push(el.data.id);
+            }
+        }
+
+        if (astIds.length) {
+            const contribCypher = `
+UNWIND $ids AS lid
+MATCH (n:ASTNode {snapshot_id: $snapshot_id, local_id: lid})
+OPTIONAL MATCH (n)-[r:CODE_EDGE]->(c:Contributor {snapshot_id: $snapshot_id})
+RETURN n, r, c
+      `.trim();
+            const rows2 = await this.memgraph.run<any>(contribCypher, {
+                snapshot_id: snap.snapshot_id,
+                ids: astIds,
+            });
+
+            for (const row of rows2 as Array<Record<string, any>>) {
+                const n = row['n'];
+                const r = row['r'];
+                const c = row['c']; // contributor
+                if (n) addNode(n);
+                if (c) addNode(c);
+                if (r) addEdgeFromRow(row);
+            }
+        }
+
+        const elements = [...nodesMap.values(), ...edgesMap.values()];
+        return {snapshot_id: snap.snapshot_id, elements};
     }
 
     // --------- BUILD (PYTHON TRIGGER) -------------

@@ -1,8 +1,9 @@
 # memgraph_db.py
+import os
 
 from neo4j import GraphDatabase
 
-MEMGRAPH_URI = "bolt://localhost:7687"
+MEMGRAPH_URI = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
 
 _driver = None
 
