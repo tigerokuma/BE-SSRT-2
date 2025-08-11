@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
 import { EmailTimeInput } from '../dto/email.dto';
 import { randomUUID } from 'crypto';
@@ -12,21 +12,25 @@ export class EmailService{
 
   constructor(private emailRepository: EmailRepository) {
     const key = process.env.EMAIL_API_KEY;
-    if (!key) {
-      throw new Error('apiKey is not defined in environment variables');
-    }
-    this.mailerSend = new MailerSend({
-      apiKey: key,
-    });
+    try {
+      if (!key) {
+        throw new Error('apiKey is not defined in environment variables');
+      }
+      this.mailerSend = new MailerSend({
+        apiKey: key,
+      });
 
-    const fromEmail = process.env.FROM_EMAIL;
-    if (!fromEmail) {
-      throw new Error('from email is not defined in environment variables');
+      const fromEmail = process.env.FROM_EMAIL;
+      if (!fromEmail) {
+        throw new Error('from email is not defined in environment variables');
+      }
+      this.sentFrom = new Sender(
+        fromEmail,
+        'App',
+      );
+    } catch(err) {
+      Logger.error("EmailService not initialized: ", err)
     }
-    this.sentFrom = new Sender(
-      fromEmail,
-      'App',
-    );
   }
 
   private async sendEmail(
@@ -83,7 +87,7 @@ export class EmailService{
       <p>Click <a href="${confirmUrl}">here</a> to confirm your email.</p>
     `;
 
-    this.sendEmail(user_id, subject, html, text);
+    await this.sendEmail(user_id, subject, html, text);
   }
 
   async checkConfirmation(user_id: string) {
@@ -169,7 +173,7 @@ export class EmailService{
       
       const subject = 'Top 10 Security Alerts from ${emailTime.last_email_time}';
 
-      this.sendEmail(emailTime.id, subject, alertSectionHtml, alertSectionText);
+      await this.sendEmail(emailTime.id, subject, alertSectionHtml, alertSectionText);
       
       this.emailRepository.updateEmailTime({
         user_id: emailTime.id, 
