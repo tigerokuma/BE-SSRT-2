@@ -41,9 +41,13 @@ GITHUB_CLIENT_ID=your_github_client_id
 GITHUB_CLIENT_SECRET=your_github_client_secret
 JWT_SECRET=your_jwt_secret
 
-# Optional
+# Optional (Development)
 GITHUB_CALLBACK_URL=http://localhost:3000/auth/github/callback
 FRONTEND_URL=http://localhost:4200
+
+# Production Example
+# GITHUB_CALLBACK_URL=https://yourdomain.com/auth/github/callback
+# FRONTEND_URL=https://yourdomain.com
 ```
 
 ### 2. GitHub OAuth App Setup

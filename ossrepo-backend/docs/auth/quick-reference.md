@@ -59,9 +59,14 @@ GITHUB_CLIENT_ID=your_client_id
 GITHUB_CLIENT_SECRET=your_client_secret
 JWT_SECRET=your_jwt_secret
 
-# Optional
+# Optional (Development)
 GITHUB_CALLBACK_URL=http://localhost:3000/auth/github/callback
 FRONTEND_URL=http://localhost:4200
+
+# Production Examples:
+# GITHUB_CALLBACK_URL=https://yourdomain.com/auth/github/callback
+# GITHUB_CALLBACK_URL=http://192.168.1.100:3000/auth/github/callback
+# GITHUB_CALLBACK_URL=https://yourdomain.com:8080/auth/github/callback
 ```
 
 ## 🧪 Testing

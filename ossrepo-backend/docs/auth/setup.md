@@ -27,6 +27,11 @@ JWT_SECRET="your_jwt_secret_key"
 
 # Frontend URL (optional)
 FRONTEND_URL="http://localhost:4200"
+
+# ⚠️  IMPORTANT: Update these URLs for production deployment!
+# Production Example:
+# GITHUB_CALLBACK_URL="https://yourdomain.com/auth/github/callback"
+# FRONTEND_URL="https://yourdomain.com"
 ```
 
 ### Generate JWT Secret
@@ -182,6 +187,33 @@ GITHUB_CALLBACK_URL="https://yourdomain.com/auth/github/callback"
 JWT_SECRET="your_production_jwt_secret"
 FRONTEND_URL="https://yourdomain.com"
 ```
+
+### 2. URL Configuration Examples
+
+#### For Domain-Based Deployment:
+```bash
+GITHUB_CALLBACK_URL="https://myapp.com/auth/github/callback"
+FRONTEND_URL="https://myapp.com"
+```
+
+#### For IP-Based Deployment:
+```bash
+GITHUB_CALLBACK_URL="http://192.168.1.100:3000/auth/github/callback"
+FRONTEND_URL="http://192.168.1.100:4200"
+```
+
+#### For Port-Based Deployment:
+```bash
+GITHUB_CALLBACK_URL="http://yourdomain.com:8080/auth/github/callback"
+FRONTEND_URL="http://yourdomain.com:3000"
+```
+
+### 3. Important Production Notes
+
+- **HTTPS Required**: GitHub OAuth requires HTTPS for production
+- **Port Configuration**: If using custom ports, include them in the URLs
+- **IP vs Domain**: You can use either IP addresses or domain names
+- **Callback URL**: Must exactly match what's configured in GitHub OAuth App
 
 ### 2. GitHub OAuth App Production Settings
 
