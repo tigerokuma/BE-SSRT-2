@@ -16,7 +16,7 @@ export class SbomBuilderService {
     private readonly docker = new Docker.default();
 
     // Clone Git repo into a temp directory
-        async cloneRepo(gitUrl: string): Promise<string> {
+    async cloneRepo(gitUrl: string): Promise<string> {
         const targetDir = path.join(os.tmpdir(), 'sbom-repos');
         const uniqueDir = path.join(targetDir, randomUUID());
     

@@ -18,14 +18,14 @@ export class SbomController {
   async getWatchlistMetadataSbom(@Param('watchlist_id') watchlist_id: string) {
     const sbom = (await this.sbomQueryService.getWatchSbom(watchlist_id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomQueryService.getWatchMetadataSbom(sbomText);
+    return await this.sbomQueryService.getWatchMetadataSbom(sbomText);
   }
 
   @Get('user-watchlist-metadata/:user_id')
   async getUserWatchlistMetadataSbom(@Param('user_id') user_id: string) {
     const sbom = (await this.sbomQueryService.getUserSbom(user_id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomQueryService.getWatchMetadataSbom(sbomText);
+    return await this.sbomQueryService.getWatchMetadataSbom(sbomText);
   }
 
   @Get('graph-dependencies/:watchlist_id/:node_id')

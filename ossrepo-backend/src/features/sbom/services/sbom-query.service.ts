@@ -1,10 +1,5 @@
 import { Injectable, Logger, Body } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
-import { simpleGit } from 'simple-git';
-import { randomUUID } from 'crypto';
-import * as path from 'path';
-import * as os from 'os';
-
 
 
 
@@ -27,27 +22,8 @@ export class SbomQueryService {
     return sbomData;
   }
 
-  // Clone Git repo into a temp directory
-  async cloneRepo(gitUrl: string): Promise<string> {
-    const targetDir = path.join(os.tmpdir(), 'sbom-repos');
-    const uniqueDir = path.join(targetDir, randomUUID());
-
-    const clonePath = path.resolve(uniqueDir);
-    const git = simpleGit();
-
-    try {
-      console.log(`Cloning ${gitUrl} into ${clonePath}...`);
-      await git.clone(gitUrl, clonePath);
-      console.log('Clone complete.');
-    } catch (err) {
-      console.error('Error cloning repo:', err);
-      throw err;
-    }
-    return uniqueDir;
-  }
-
   // Generate summary stats for the selected sbom
-  getWatchMetadataSbom(sbom: string) {
+  async getWatchMetadataSbom(sbom: string) {
     const sbomJson = JSON.parse(sbom);
     const components = sbomJson.components || [];
 
@@ -68,16 +44,49 @@ export class SbomQueryService {
       // Count licenses
       const licenseId = comp?.licenses?.[0]?.license?.id || 'Unknown';
       licenseSummary[licenseId] = (licenseSummary[licenseId] || 0) + 1;
-
     }
+
+    // Prepare license IDs to query SPDX info
+    const licenseIds = Object.keys(licenseSummary);
+
+    // Fetch enriched license info from SPDX API
+    const enrichedLicenses = await this.getLicenseInfo(licenseIds);
+
+    // Merge counts into enriched licenses
+    const licenseDetails = enrichedLicenses.map(lic => ({
+        id: lic.id,
+        count: licenseSummary[lic.id] || 0,
+        link: lic.link,
+        category: lic.category,
+    }));
+
     return {
       sbomPackage,
       directDependencies,
       transitiveDependencies,
-      licenseSummary,
+      licenseSummary: licenseDetails,
     };
-
   }
+
+  async getLicenseInfo(licenses: string[]) {
+    const spdxUrl = "https://raw.githubusercontent.com/spdx/license-list-data/main/json/licenses.json";
+    const res = await fetch(spdxUrl);
+    const data = await res.json();
+
+    const results = licenses.map((id) => {
+      const match = data.licenses.find((l) => l.licenseId.toLowerCase() === id.toLowerCase());
+      if (!match) return { id, link: null, category: null };
+
+      return {
+        id: match.licenseId,
+        link: match.seeAlso[0] || null,
+        category: match.licenseCategory || (match.isOsiApproved ? "Permissive" : "Other")
+      };
+    });
+
+    return results;
+  }
+
 
   // Get the dependencies that are directly linked to the node
   getNodeDeps(sbomText: string, node_id: string, vulnerablePackages: string[]) {

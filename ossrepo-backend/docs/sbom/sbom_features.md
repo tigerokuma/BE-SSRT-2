@@ -42,7 +42,18 @@ Get metadata summary of a specific watchlist's SBOM.
   "sbomPackage": "string",
   "directDependencies": number,
   "transitiveDependencies": number,
-  "licenseSummary": { "MIT": number, "Apache-2.0": number, ... }
+  "licenseSummary": {
+      "id": "string",
+      "count": number,
+      "link": "string",
+      "category": "string"
+    },
+    {
+      "id": "string",
+      "count": number,
+      "link": "string",
+      "category": "string"
+    }
 }
 ```
 
