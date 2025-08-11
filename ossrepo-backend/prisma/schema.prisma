@@ -26,6 +26,13 @@ model User {
   jira         Jira?
   emailTime    EmailTime?
   sbom              UserWatchlistSbom?
+  
+  // GitHub OAuth fields
+  github_id         String?            @unique
+  github_username   String?
+  access_token      String?
+  refresh_token     String?
+  last_login        DateTime?
 
   @@map("users")
 }
@@ -66,10 +73,20 @@ model OsvVulnerability {
   published     DateTime?
   modified      DateTime?
   
+  // Enhanced filtering fields
+  fixed_versions          Json?    // Array of fixed version strings
+  introduced_versions     Json?    // Array of introduced version strings
+  last_affected_versions  Json?    // Array of last affected version strings
+  is_patched             Boolean  @default(false)
+  patch_age_days         Int?     // Days since patch was released
+  
   // Relations
   npmPackage    NpmPackage @relation(fields: [package_name], references: [package_name])
   
   @@index([package_name])
+  @@index([is_patched])
+  @@index([patch_age_days])
+  @@index([published])
   @@map("osv_vulnerabilities")
 }
 
@@ -155,7 +172,7 @@ model Watchlist {
   repoStats                        RepoStats?
   alertTriggered                   AlertTriggered[]
   sbom                             WatchlistSbom?
-  aiAnomaliesDetected             AIAnomaliesDetected[]
+  aiAnomaliesDetected              AIAnomaliesDetected[]
   vulnerabilities                  Vulnerability[]
   vulnerabilitySummary             VulnerabilitySummary?
 }
@@ -539,6 +556,7 @@ model UserWatchlistSbom {
 
   user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   @@index([user_id])
+
 }
 
 model AIAnomaliesDetected {
