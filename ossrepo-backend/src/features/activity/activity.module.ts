@@ -7,7 +7,7 @@ import { RepositorySetupProcessor } from './processors/repository-setup.processo
 import { PollingProcessor } from './processors/polling.processor';
 import { VulnerabilityCheckProcessor } from './processors/vulnerability-check.processor';
 import { HealthCheckProcessor } from './processors/health-check.processor';
-import { RateLimitManagerService } from './services/rate-limit-manager.service';
+
 import { GitHubApiService } from './services/github-api.service';
 import { BusFactorService } from './services/bus-factor.service';
 import { ActivityAnalysisService } from './services/activity-analysis.service';
@@ -40,7 +40,7 @@ import { ConfigModule } from '@nestjs/config';
             PollingProcessor,
         VulnerabilityCheckProcessor,
         HealthCheckProcessor,
-    RateLimitManagerService,
+
     GitHubApiService,
     BusFactorService,
     ActivityAnalysisService,

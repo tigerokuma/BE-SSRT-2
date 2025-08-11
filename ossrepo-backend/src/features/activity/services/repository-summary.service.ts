@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../common/prisma/prisma.service';
 import {
   AISummaryService,
   RepositoryData,
@@ -13,7 +12,6 @@ export class RepositorySummaryService {
   private readonly logger = new Logger(RepositorySummaryService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
     private readonly aiSummaryService: AISummaryService,
     private readonly githubApiService: GitHubApiService,
     private readonly busFactorService: BusFactorService,
@@ -27,7 +25,6 @@ export class RepositorySummaryService {
     try {
       this.logger.log(`🤖 Generating AI summary for ${owner}/${repo}`);
 
-      // Collect comprehensive repository data
       const repoData = await this.collectRepositoryData(
         owner,
         repo,
@@ -39,7 +36,6 @@ export class RepositorySummaryService {
         return null;
       }
 
-      // Generate AI summary
       const summary =
         await this.aiSummaryService.generateRepositorySummary(repoData);
 
@@ -47,8 +43,6 @@ export class RepositorySummaryService {
         `✅ Generated summary for ${owner}/${repo}: "${summary.summary.substring(0, 50)}..."`,
       );
 
-      // For now, we'll just return the summary
-      // Later when we add the database fields, we can store it
       return summary;
     } catch (error) {
       this.logger.error(
@@ -67,7 +61,6 @@ export class RepositorySummaryService {
         `🤖 Generating AI summary with provided data for ${repoData.name}`,
       );
 
-      // Generate AI summary using the provided data (no API calls)
       const summary =
         await this.aiSummaryService.generateRepositorySummary(repoData);
 
@@ -91,24 +84,30 @@ export class RepositorySummaryService {
     watchlistId: string,
   ): Promise<RepositoryData | null> {
     try {
-      // Get basic repository info from GitHub API
       const repoInfo = await this.githubApiService.getRepositoryInfo(
         owner,
         repo,
       );
 
-      // Get recent commits
       const recentCommits = await this.getRecentCommits(owner, repo);
-
-      // Get README content
       const readmeContent = await this.getReadmeContent(owner, repo);
-
-      // Calculate bus factor using watchlist ID
-      const busFactorResult =
-        await this.busFactorService.calculateBusFactor(watchlistId);
-
-      // Get commit count (approximate)
       const commitCount = await this.getCommitCount(owner, repo);
+
+      let busFactorResult;
+      try {
+        busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
+      } catch (error) {
+        this.logger.warn(`Failed to calculate bus factor for ${owner}/${repo}: ${error.message}`);
+        busFactorResult = {
+          busFactor: 0,
+          totalContributors: 0,
+          totalCommits: 0,
+          topContributors: [],
+          riskLevel: 'UNKNOWN',
+          riskReason: 'Calculation failed',
+          analysisDate: new Date(),
+        };
+      }
 
       const repoData: RepositoryData = {
         name: `${owner}/${repo}`,
@@ -116,14 +115,14 @@ export class RepositorySummaryService {
         stars: repoInfo.stargazers_count,
         forks: repoInfo.forks_count,
         contributors: busFactorResult.totalContributors,
-        language: undefined, // Not available in current GitHubRepoInfo
-        topics: [], // Not available in current GitHubRepoInfo
+        language: undefined,
+        topics: [],
         lastCommitDate: repoInfo.pushed_at
           ? new Date(repoInfo.pushed_at)
           : undefined,
         commitCount: commitCount,
         busFactor: busFactorResult.busFactor,
-        riskScore: undefined, // Not available in current GitHubRepoInfo
+        riskScore: undefined,
         readmeContent: readmeContent,
         recentCommits: recentCommits,
       };
@@ -161,7 +160,7 @@ export class RepositorySummaryService {
         message: commit.commit.message,
         author: commit.commit.author.name,
         date: new Date(commit.commit.author.date),
-        filesChanged: 0, // GitHub API doesn't provide files in basic commit response
+        filesChanged: 0,
       }));
     } catch (error) {
       this.logger.warn(
@@ -177,8 +176,6 @@ export class RepositorySummaryService {
     repo: string,
   ): Promise<string | undefined> {
     try {
-      // For now, we'll skip README content as it requires additional GitHub API calls
-      // This can be implemented later when we add the method to GitHubApiService
       this.logger.log(
         `📝 README content fetching not yet implemented for ${owner}/${repo}`,
       );
@@ -194,8 +191,6 @@ export class RepositorySummaryService {
     repo: string,
   ): Promise<number | undefined> {
     try {
-      // This is a simplified approach - in a real implementation,
-      // you might want to use GitHub's GraphQL API for more accurate counts
       const commits = await this.githubApiService.getLatestCommits(
         owner,
         repo,
@@ -212,53 +207,5 @@ export class RepositorySummaryService {
     }
   }
 
-  private cleanMarkdown(content: string): string {
-    // Remove markdown formatting for better AI processing
-    return content
-      .replace(/#{1,6}\s+/g, '') // Remove headers
-      .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
-      .replace(/\*(.*?)\*/g, '$1') // Remove italic
-      .replace(/`(.*?)`/g, '$1') // Remove inline code
-      .replace(/```[\s\S]*?```/g, '') // Remove code blocks
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove links, keep text
-      .replace(/\n+/g, ' ') // Replace multiple newlines with space
-      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-      .trim();
-  }
 
-  async testSummaryGeneration(
-    owner: string,
-    repo: string,
-  ): Promise<{
-    success: boolean;
-    summary?: AISummaryResult;
-    error?: string;
-  }> {
-    try {
-      this.logger.log(`🧪 Testing summary generation for ${owner}/${repo}`);
-
-      const summary = await this.generateSummaryForRepository(
-        owner,
-        repo,
-        'test-watchlist-id',
-      );
-
-      if (summary) {
-        return {
-          success: true,
-          summary,
-        };
-      } else {
-        return {
-          success: false,
-          error: 'Failed to generate summary',
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
 }

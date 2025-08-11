@@ -45,9 +45,8 @@ interface AnomalyDetectionResult {
 export class AIAnomalyDetectionService {
   private readonly logger = new Logger(AIAnomalyDetectionService.name);
   private readonly modelName = 'gemma2:2b';
-  private readonly maxPromptLength = 2000; // Characters
+  private readonly maxPromptLength = 2000;
 
-  // Bot patterns to filter out
   private readonly botPatterns = [
     /dependabot/i,
     /dependabot\[bot\]/i,
@@ -63,7 +62,7 @@ export class AIAnomalyDetectionService {
     /bot@/i,
     /noreply@github\.com/i,
     /actions@github\.com/i,
-    /\[bot\]/i, // Catch any bot with [bot] suffix
+    /\[bot\]/i,
   ];
 
   constructor(private readonly prisma: PrismaService) {
@@ -115,22 +114,17 @@ export class AIAnomalyDetectionService {
     }
   }
 
-  /**
-   * Check if a commit is from a bot
-   */
   private isBotCommit(data: CommitAnalysisData): boolean {
     const author = data.author || '';
     const email = data.email || '';
     const message = data.message || '';
 
-    // Check author name and email against bot patterns
     for (const pattern of this.botPatterns) {
       if (pattern.test(author) || pattern.test(email)) {
         return true;
       }
     }
 
-    // Check for common bot commit message patterns
     const botMessagePatterns = [
       /^chore\(deps\):/i,
       /^chore\(dependencies\):/i,
@@ -159,13 +153,9 @@ export class AIAnomalyDetectionService {
     return false;
   }
 
-  /**
-   * Check if a commit is a merge commit
-   */
   private isMergeCommit(data: CommitAnalysisData): boolean {
     const message = data.message || '';
     
-    // Common merge commit patterns
     const mergePatterns = [
       /^merge/i,
       /^merge branch/i,
@@ -183,12 +173,8 @@ export class AIAnomalyDetectionService {
     return false;
   }
 
-  /**
-   * Analyze a commit for suspicious activity using AI
-   */
   async analyzeCommitForAnomalies(data: CommitAnalysisData): Promise<AnomalyDetectionResult> {
     try {
-      // Skip bot commits entirely
       if (this.isBotCommit(data)) {
         this.logger.log(`🤖 Skipping bot commit: ${data.author}`);
         return {
@@ -200,7 +186,6 @@ export class AIAnomalyDetectionService {
         };
       }
 
-      // Skip merge commits
       if (this.isMergeCommit(data)) {
         this.logger.log(`🔄 Skipping merge commit: ${data.sha.substring(0, 8)}`);
         return {
@@ -212,10 +197,8 @@ export class AIAnomalyDetectionService {
         };
       }
 
-      // Pre-filter: Skip obviously normal commits to reduce false positives
       const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
       
-      // Skip very small commits (less than 5 lines total) - lowered from 10
       if (totalLines < 5) {
         this.logger.log(`📝 Skipping small commit (${totalLines} lines): ${data.sha.substring(0, 8)}`);
         return {
@@ -227,12 +210,10 @@ export class AIAnomalyDetectionService {
         };
       }
 
-      // Skip commits that are within normal ranges for the author
       if (data.contributorStats) {
         const avgLines = data.contributorStats.avgLinesAdded + data.contributorStats.avgLinesDeleted;
         const stddevLines = data.contributorStats.stddevLinesAdded + data.contributorStats.stddevLinesDeleted;
         
-        // If commit is within 2 standard deviations of author's average, skip AI analysis
         if (totalLines <= avgLines + (2 * stddevLines)) {
           this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs avg ${avgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
           return {
@@ -245,11 +226,9 @@ export class AIAnomalyDetectionService {
         }
       }
 
-      // Skip commits that are within normal ranges for the repository
       if (data.repoStats) {
         const repoAvgLines = data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
         
-        // If commit is within 2x repo average, skip AI analysis (lowered from 3x)
         if (totalLines <= repoAvgLines) {
           this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs repo avg ${repoAvgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
           return {
@@ -264,13 +243,8 @@ export class AIAnomalyDetectionService {
 
       this.logger.log(`🔍 Analyzing commit for anomalies: ${data.sha.substring(0, 8)} (${totalLines} lines)`);
 
-      // Build the prompt for AI analysis
       const prompt = this.buildAnomalyDetectionPrompt(data);
-
-      // Generate AI response
       const aiResponse = await this.generateWithGemma(prompt);
-
-      // Parse the AI response
       const result = this.parseAnomalyResponse(aiResponse);
 
       this.logger.log(
@@ -290,15 +264,11 @@ export class AIAnomalyDetectionService {
     }
   }
 
-  /**
-   * Analyze a commit and store the result in the database ONLY if suspicious
-   */
   async analyzeAndStoreAnomaly(
     watchlistId: string,
     data: CommitAnalysisData,
   ): Promise<AnomalyDetectionResult> {
     try {
-      // Check if we already have an analysis for this commit
       const existingAnalysis = await this.prisma.aIAnomaliesDetected.findUnique({
         where: {
           watchlist_id_commit_sha: {
@@ -313,10 +283,8 @@ export class AIAnomalyDetectionService {
         return existingAnalysis.anomaly_details as unknown as AnomalyDetectionResult;
       }
 
-      // Perform the analysis
       const result = await this.analyzeCommitForAnomalies(data);
 
-      // ONLY store the result if it's suspicious
       if (result.isAnomalous) {
         await this.prisma.aIAnomaliesDetected.create({
           data: {
@@ -333,21 +301,18 @@ export class AIAnomalyDetectionService {
       }
 
       return result;
-         } catch (error) {
-       this.logger.error('Failed to analyze and store anomaly:', error);
-       return {
-         isAnomalous: false,
-         confidence: 0.5,
-         reasoning: 'Analysis failed',
-         riskLevel: 'low',
-         suspiciousFactors: [],
-       };
-     }
+    } catch (error) {
+      this.logger.error('Failed to analyze and store anomaly:', error);
+      return {
+        isAnomalous: false,
+        confidence: 0.5,
+        reasoning: 'Analysis failed',
+        riskLevel: 'low',
+        suspiciousFactors: [],
+      };
+    }
   }
 
-  /**
-   * Get all anomalies for a watchlist
-   */
   async getAnomaliesForWatchlist(watchlistId: string): Promise<any[]> {
     try {
       const anomalies = await this.prisma.aIAnomaliesDetected.findMany({
@@ -379,7 +344,6 @@ export class AIAnomalyDetectionService {
     const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
     const filesChanged = data.filesChanged?.length || 0;
     
-    // Analyze file patterns for suspicious indicators
     const suspiciousFilePatterns: string[] = [];
     if (data.filesChanged && data.filesChanged.length > 0) {
       const files = data.filesChanged as string[];
@@ -399,7 +363,6 @@ export class AIAnomalyDetectionService {
       if (unusualExtensions.length > 0) suspiciousFilePatterns.push(`Unusual extensions: ${unusualExtensions.join(', ')}`);
     }
     
-    // Format timestamp as human readable
     const commitTime = new Date(data.date);
     const timeString = commitTime.toLocaleString('en-US', {
       weekday: 'short',
@@ -430,7 +393,6 @@ Author History:
 - Average lines per commit: ${avgLines.toFixed(0)}
 - Standard deviation: ${stddevLines.toFixed(0)}`;
       
-      // Add commit time histogram if available
       if (data.contributorStats.commitTimeHistogram) {
         const timeHistogram = data.contributorStats.commitTimeHistogram;
         const typicalHours = this.getTypicalCommitHours(timeHistogram);
@@ -509,7 +471,6 @@ JSON response:
         this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
       }
 
-      // Validate stdout before processing
       if (!stdout || typeof stdout !== 'string') {
         this.logger.error('❌ Ollama returned empty or invalid stdout for anomaly detection');
         throw new Error('AI model returned empty response for anomaly detection');
@@ -521,7 +482,6 @@ JSON response:
       const cleanOutput = this.cleanGemmaOutput(stdout);
       this.logger.log(`✅ Ollama anomaly detection successful, cleaned output length: ${cleanOutput.length}`);
 
-      // Clean up temp file
       try {
         fs.unlinkSync(tempFile);
       } catch (error) {
@@ -532,7 +492,6 @@ JSON response:
     } catch (error) {
       this.logger.error(`❌ Ollama anomaly detection failed: ${error.message}`);
       
-      // Provide more context for debugging
       if (error.message.includes('timeout')) {
         this.logger.error('❌ AI model timed out for anomaly detection - consider increasing timeout');
       } else if (error.message.includes('ENOENT')) {
@@ -546,7 +505,6 @@ JSON response:
   }
 
   private cleanGemmaOutput(output: string): string {
-    // Remove common prefixes and clean up the output
     return output
       .replace(/^```json\s*/i, '')
       .replace(/\s*```\s*$/i, '')
@@ -571,26 +529,23 @@ JSON response:
       this.logger.log(`📝 Raw AI response length: ${response.length} characters`);
       this.logger.log(`📝 Raw AI response preview: ${response.substring(0, 100)}...`);
 
-      // Try to extract JSON from the response
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
           
-          // Clean up the reasoning field - remove any JSON artifacts
           let cleanReasoning = parsed.reasoning || 'No reasoning provided';
           cleanReasoning = cleanReasoning
-            .replace(/^\{[\s\S]*\}/, '') // Remove any JSON at the start
-            .replace(/\{[\s\S]*\}$/, '') // Remove any JSON at the end
-            .replace(/^"|"$/g, '') // Remove quotes
-            .replace(/\\n/g, ' ') // Replace newlines with spaces
-            .replace(/\\"/g, '"') // Fix escaped quotes
-            .replace(/\{[^}]*\}/g, '') // Remove any remaining JSON objects
-            .replace(/"[^"]*":\s*"[^"]*"/g, '') // Remove key-value pairs
-            .replace(/"[^"]*":\s*[^,}]+/g, '') // Remove key-value pairs with non-string values
+            .replace(/^\{[\s\S]*\}/, '')
+            .replace(/\{[\s\S]*\}$/, '')
+            .replace(/^"|"$/g, '')
+            .replace(/\\n/g, ' ')
+            .replace(/\\"/g, '"')
+            .replace(/\{[^}]*\}/g, '')
+            .replace(/"[^"]*":\s*"[^"]*"/g, '')
+            .replace(/"[^"]*":\s*[^,}]+/g, '')
             .trim();
           
-          // Don't limit reasoning length - show full explanation
           const result = {
             isAnomalous: parsed.isAnomalous || false,
             confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
@@ -606,13 +561,11 @@ JSON response:
         }
       }
 
-                     // Fallback parsing for non-JSON responses - be very conservative
       const isAnomalous = response.toLowerCase().includes('anomalous') && 
                          response.toLowerCase().includes('suspicious') &&
                          (response.toLowerCase().includes('unusual') ||
                           response.toLowerCase().includes('concerning'));
      
-     // Clean up the reasoning - remove JSON references and focus on actual analysis
      let cleanReasoning = response.substring(0, 200)
        .replace(/the json response you provided/i, '')
        .replace(/the json you provided/i, '')
@@ -621,12 +574,11 @@ JSON response:
        .replace(/here's a breakdown:/i, '')
        .replace(/the json/i, '')
        .replace(/json/i, '')
-       .replace(/\{[\s\S]*\}/g, '') // Remove any JSON objects
-       .replace(/^"|"$/g, '') // Remove quotes
-       .replace(/\\n/g, ' ') // Replace newlines with spaces
+       .replace(/\{[\s\S]*\}/g, '')
+       .replace(/^"|"$/g, '')
+       .replace(/\\n/g, ' ')
        .trim();
      
-      // Don't limit reasoning length - show full explanation
       if (!cleanReasoning) {
         cleanReasoning = isAnomalous ? 'Unusual patterns detected' : 'Normal commit';
       }
@@ -658,9 +610,6 @@ JSON response:
     return validLevels.includes(level?.toLowerCase()) ? level.toLowerCase() as any : 'low';
   }
 
-  /**
-   * Get typical commit hours for an author
-   */
   private getTypicalCommitHours(commitTimeHistogram: Record<string, number>): string {
     if (!commitTimeHistogram || Object.keys(commitTimeHistogram).length === 0) {
       return 'No timing data available';
@@ -681,9 +630,6 @@ JSON response:
     return sortedHours;
   }
 
-  /**
-   * Check if commit time is unusual for the author
-   */
   private isUnusualCommitTime(commitTime: Date, commitTimeHistogram?: Record<string, number>): boolean {
     if (!commitTimeHistogram) return false;
 
@@ -693,10 +639,8 @@ JSON response:
       .slice(0, 3)
       .map(([hour]) => hour);
 
-    // Check if commit hour is not in top 3 typical hours
     return !topHours.includes(commitHour);
   }
-
 
   async testModelConnection(): Promise<boolean> {
     try {

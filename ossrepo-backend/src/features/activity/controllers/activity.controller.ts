@@ -19,7 +19,7 @@ import { CommitSummaryDto, CommitSummaryResponseDto } from '../dto/commit-summar
 import { ActivityService } from '../services/activity.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
 import { HealthAnalysisService } from '../services/health-analysis.service';
-import { RateLimitManagerService } from '../services/rate-limit-manager.service';
+
 import { GitHubApiService } from '../services/github-api.service';
 import { PollingProcessor } from '../processors/polling.processor';
 import { VulnerabilityCheckProcessor } from '../processors/vulnerability-check.processor';
@@ -42,7 +42,7 @@ export class ActivityController {
     private readonly activityService: ActivityService,
     private readonly repositorySummaryService: RepositorySummaryService,
     private readonly healthAnalysisService: HealthAnalysisService,
-    private readonly rateLimitManager: RateLimitManagerService,
+
     private readonly githubApiService: GitHubApiService,
     private readonly pollingProcessor: PollingProcessor,
     private readonly vulnerabilityCheckProcessor: VulnerabilityCheckProcessor,

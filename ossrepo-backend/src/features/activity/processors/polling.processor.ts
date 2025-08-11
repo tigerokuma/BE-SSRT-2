@@ -29,7 +29,7 @@ interface PollRepoJobData {
 @Processor('polling')
 export class PollingProcessor {
   private readonly logger = new Logger(PollingProcessor.name);
-  private isProcessingDailyPoll = false; // Prevent concurrent daily polling
+  private isProcessingDailyPoll = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -40,14 +40,9 @@ export class PollingProcessor {
     private readonly aiAnomalyDetectionService: AIAnomalyDetectionService,
     @InjectQueue('polling') private readonly pollingQueue: Queue,
     @InjectQueue('repository-setup') private readonly setupQueue: Queue,
-  ) {
-    // Removed automatic daily polling initialization to prevent duplicate jobs on server restart
-    // Daily polling should be manually triggered or scheduled externally
-  }
+  ) {}
 
-  // Daily job that processes repositories sequentially
   async triggerDailyPolling() {
-    // Prevent concurrent daily polling
     if (this.isProcessingDailyPoll) {
       this.logger.log('⏳ Daily polling already in progress, skipping...');
       return;
@@ -60,18 +55,14 @@ export class PollingProcessor {
     );
 
     try {
-      // Check if any setup jobs are running (they take priority)
       const activeSetupJobs = await this.setupQueue.getActive();
       if (activeSetupJobs.length > 0) {
         this.logger.log(`⏳ ${activeSetupJobs.length} setup jobs are running, skipping daily polling`);
         return;
       }
 
-      // Get all ready repositories from watchlist
       const watchlistedRepos = await this.prisma.watchlist.findMany({
-        where: {
-          status: 'ready',
-        },
+        where: { status: 'ready' },
         select: {
           watchlist_id: true,
           default_branch: true,
@@ -87,7 +78,6 @@ export class PollingProcessor {
 
       this.logger.log(`Found ${watchlistedRepos.length} ready repositories to poll`);
 
-      // Process repositories sequentially instead of queuing individual jobs
       let processedCount = 0;
       for (const repo of watchlistedRepos) {
         const { repo_url, repo_name } = repo.package;
@@ -98,7 +88,6 @@ export class PollingProcessor {
           continue;
         }
 
-        // Parse owner and repo from URL
         const urlParts = repo_url.replace(/\/$/, '').split('/');
         const repoName = urlParts.pop();
         const owner = urlParts.pop();
@@ -117,17 +106,13 @@ export class PollingProcessor {
           });
           processedCount++;
           
-          // Small delay between repositories to make sequential processing obvious
           await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (error) {
           this.logger.error(`Error polling repository ${owner}/${repoName}:`, error);
-          // Continue with next repository instead of failing entire process
         }
       }
 
       this.logger.log(`✅ Completed polling for ${processedCount}/${watchlistedRepos.length} repositories`);
-
-      // Schedule the next daily polling job for tomorrow at midnight
       await this.scheduleNextDailyPolling();
     } catch (error) {
       this.logger.error('Error during daily polling trigger:', error);
@@ -138,7 +123,6 @@ export class PollingProcessor {
 
   private async scheduleNextDailyPolling(): Promise<void> {
     try {
-      // Check if there's already a daily polling job scheduled
       const waitingJobs = await this.pollingQueue.getWaiting();
       const existingDailyPollJob = waitingJobs.find(job => job.name === 'daily-poll');
       
@@ -147,11 +131,10 @@ export class PollingProcessor {
         return;
       }
 
-      // Calculate delay until next midnight
       const now = new Date();
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0); // Set to midnight
+      tomorrow.setHours(0, 0, 0, 0);
       
       const delayMs = tomorrow.getTime() - now.getTime();
       
@@ -160,7 +143,7 @@ export class PollingProcessor {
         {},
         {
           delay: delayMs,
-          attempts: 1, // Don't retry daily polling if it fails
+          attempts: 1,
           removeOnComplete: 10,
           removeOnFail: 50,
         },
@@ -180,8 +163,6 @@ export class PollingProcessor {
 
   @Process('poll-repo')
   async handlePollRepo(job: Job<PollRepoJobData>) {
-    // This method is kept for backward compatibility but should not be used
-    // All polling should go through the daily polling process
     this.logger.warn('Individual poll-repo jobs are deprecated. Use daily polling instead.');
     const { watchlistId, owner, repo, branch } = job.data;
     await this.pollSingleRepository({ watchlistId, owner, repo, branch });
@@ -191,12 +172,9 @@ export class PollingProcessor {
     const { watchlistId, owner, repo, branch } = data;
     let repoPath: string | null = null;
 
-    this.logger.log(
-      `🔍 Polling repository ${owner}/${repo} (watchlist: ${watchlistId})`
-    );
+    this.logger.log(`🔍 Polling repository ${owner}/${repo} (watchlist: ${watchlistId})`);
 
     try {
-      // Get the latest commit SHA from GitHub CLI
       const latestRemoteSha = await this.getLatestRemoteCommitSha(owner, repo, branch);
       
       if (!latestRemoteSha) {
@@ -204,7 +182,6 @@ export class PollingProcessor {
         return;
       }
 
-      // Get the stored latest commit SHA
       const watchlist = await this.prisma.watchlist.findUnique({
         where: { watchlist_id: watchlistId },
         select: { latest_commit_sha: true },
@@ -215,22 +192,15 @@ export class PollingProcessor {
       if (!storedLatestSha) {
         this.logger.log(`📝 No previous commit SHA stored for ${owner}/${repo}, storing current: ${latestRemoteSha}`);
         await this.updateLatestCommitSha(watchlistId, latestRemoteSha);
-        
-        // Update activity score for first-time setup
         await this.updateActivityScore(watchlistId);
         this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
-        
         return;
       }
 
       if (latestRemoteSha === storedLatestSha) {
         this.logger.log(`✅ ${owner}/${repo}: No new commits found`);
-        
-        // Only update activity score when no new commits are found
-        // Don't recalculate bus factor unnecessarily
         await this.updateActivityScore(watchlistId);
         this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
-        
         return;
       }
 
@@ -241,7 +211,6 @@ export class PollingProcessor {
         `   Beginning extraction process...`
       );
 
-      // Clone repository with smart depth adjustment and fallback deepening
       const cloneResult = await this.ensureRepositoryWithSha(owner, repo, branch, storedLatestSha);
       
       if (!cloneResult) {
@@ -252,7 +221,6 @@ export class PollingProcessor {
       repoPath = cloneResult.repoPath;
       const cloneDepth = cloneResult.depth;
 
-      // Get commits since the stored SHA
       const newCommits = await this.getCommitsSinceSha(repoPath, storedLatestSha, cloneDepth);
       
       if (newCommits.length === 0) {
@@ -264,18 +232,14 @@ export class PollingProcessor {
 
       this.logger.log(`📝 Found ${newCommits.length} new commits for ${owner}/${repo}`);
       
-      // Log commit details for debugging
       newCommits.forEach((commit, index) => {
         this.logger.log(`  Commit ${index + 1}: ${commit.sha.substring(0, 8)} by ${commit.author}`);
         this.logger.log(`    Files: ${commit.filesChanged.length}, Lines: +${commit.linesAdded} -${commit.linesDeleted}`);
         this.logger.log(`    Message: ${commit.message.substring(0, 100)}...`);
       });
 
-      // Log commits to database
       await this.logCommitsToDatabase(watchlistId, newCommits);
 
-      // Check new commits for AI anomalies
-      // Transform commits to match the expected format for AI analysis
       const commitsForAI = newCommits.map(commit => ({
         actor: commit.author,
         timestamp: commit.date,
@@ -292,7 +256,6 @@ export class PollingProcessor {
       }));
       await this.checkNewCommitsForAnomalies(watchlistId, commitsForAI);
 
-      // Check for alerts on each commit
       for (const commit of newCommits) {
         await this.alertingService.checkCommitForAlerts(watchlistId, {
           sha: commit.sha,
@@ -306,15 +269,12 @@ export class PollingProcessor {
         });
       }
 
-      // Update contributor and repository statistics (only when there are new commits)
       await this.updateStatistics(watchlistId);
 
-      // Update activity score with latest 3 months of commits
       this.logger.log(`🔄 About to update activity score for ${watchlistId}`);
       await this.updateActivityScore(watchlistId);
       this.logger.log(`✅ Activity score update completed for ${watchlistId}`);
 
-      // Update the latest commit SHA and commits since last health update
       await this.updateLatestCommitSha(watchlistId, latestRemoteSha);
       await this.updateCommitsSinceLastHealthUpdate(watchlistId, newCommits.length);
 
@@ -324,7 +284,6 @@ export class PollingProcessor {
       this.logger.error(`Error polling repository ${owner}/${repo}:`, error);
       throw error;
     } finally {
-      // Clean up repository
       if (repoPath) {
         await this.gitManager.cleanupRepository(owner, repo);
       }
@@ -346,7 +305,6 @@ export class PollingProcessor {
         return null;
       }
 
-      // git ls-remote returns: <sha> <ref>
       const sha = stdout.trim().split('\t')[0];
       return sha;
     } catch (error) {
@@ -361,10 +319,8 @@ export class PollingProcessor {
     branch: string, 
     targetSha: string
   ): Promise<{ repoPath: string; depth: number } | null> {
-    // Start with a reasonable depth that should cover most recent commits
-    // We want to avoid the issue where the oldest commit in a shallow clone appears to create the entire repo
     const depths = [5, 10, 20, 50, 100, 200, 500, 1000];
-    const maxDepth = 2000; // Increased to allow deeper history
+    const maxDepth = 2000;
     
     for (const depth of depths) {
       if (depth > maxDepth) {
@@ -375,10 +331,7 @@ export class PollingProcessor {
       try {
         this.logger.log(`🔍 Trying clone depth ${depth} for ${owner}/${repo}`);
         
-        // Clone with current depth
         const repoPath = await this.gitManager.cloneRepository(owner, repo, branch, depth);
-        
-        // Check if SHA exists in the repository
         const shaExists = await this.checkShaExists(repoPath, targetSha);
         
         if (shaExists) {
@@ -386,28 +339,24 @@ export class PollingProcessor {
           return { repoPath, depth };
         } else {
           this.logger.log(`❌ Target SHA ${targetSha} not found with depth ${depth}, trying deeper...`);
-          // Clean up this clone and try deeper
           await this.gitManager.cleanupRepository(owner, repo);
         }
         
       } catch (cloneError) {
         this.logger.log(`❌ Clone failed with depth ${depth}, trying deeper...`);
-        // Clean up failed clone
         await this.gitManager.cleanupRepository(owner, repo);
       }
     }
     
-    // If iterative deepening failed, try the git manager's deepenRepository method as fallback
     this.logger.log(`🔄 Iterative deepening failed, trying git manager's deepenRepository method...`);
     try {
       const repoPath = await this.gitManager.cloneRepository(owner, repo, branch, 1);
       await this.gitManager.deepenRepository(owner, repo, branch, 2000);
       
-      // Check if SHA exists after deepening
       const shaExists = await this.checkShaExists(repoPath, targetSha);
       if (shaExists) {
         this.logger.log(`✅ Found target SHA ${targetSha} after deepening repository`);
-        return { repoPath, depth: 2000 }; // Assume max depth after deepening
+        return { repoPath, depth: 2000 };
       } else {
         this.logger.error(`❌ Target SHA ${targetSha} still not found after deepening`);
         await this.gitManager.cleanupRepository(owner, repo);
@@ -426,24 +375,20 @@ export class PollingProcessor {
     const execAsync = promisify(exec);
     
     try {
-      // First try: git rev-parse (most reliable)
       const revParseCommand = `cd "${repoPath}" && git rev-parse --verify ${targetSha}`;
       await execAsync(revParseCommand);
       return true;
     } catch (revParseError) {
       try {
-        // Second try: git log (more flexible)
         const logCommand = `cd "${repoPath}" && git log --oneline ${targetSha} -1`;
         await execAsync(logCommand);
         return true;
       } catch (logError) {
         try {
-          // Third try: git show (most permissive)
           const showCommand = `cd "${repoPath}" && git show ${targetSha} --format="%H" -s`;
           await execAsync(showCommand);
           return true;
         } catch (showError) {
-          // SHA not found with this depth
           return false;
         }
       }
@@ -456,26 +401,21 @@ export class PollingProcessor {
     branch: string, 
     targetSha: string
   ): Promise<{ repoPath: string; depth: number } | null> {
-    // First try to clone with smart depth
     const cloneResult = await this.cloneWithSmartDepth(owner, repo, branch, targetSha);
     
     if (cloneResult) {
       return cloneResult;
     }
     
-    // If that fails, try to clone shallow and then deepen
     this.logger.log(`🔄 Trying shallow clone + deepen for ${owner}/${repo}`);
     try {
       const shallowRepoPath = await this.gitManager.cloneRepository(owner, repo, branch, 1);
-      
-      // Try to deepen the repository
       await this.gitManager.deepenRepository(owner, repo, branch, 2000);
       
-      // Check if SHA exists after deepening
       const shaExists = await this.checkShaExists(shallowRepoPath, targetSha);
       if (shaExists) {
         this.logger.log(`✅ Found target SHA ${targetSha} after deepening`);
-        return { repoPath: shallowRepoPath, depth: 2000 }; // Assume max depth after deepening
+        return { repoPath: shallowRepoPath, depth: 2000 };
       } else {
         this.logger.error(`❌ Target SHA ${targetSha} still not found after deepening`);
         await this.gitManager.cleanupRepository(owner, repo);
@@ -494,7 +434,6 @@ export class PollingProcessor {
       const { promisify } = require('util');
       const execAsync = promisify(exec);
       
-      // Get repository info
       const { stdout: logOutput } = await execAsync(`cd "${repoPath}" && git log --oneline -10`);
       const { stdout: revListOutput } = await execAsync(`cd "${repoPath}" && git rev-list --count HEAD`);
       
@@ -512,7 +451,6 @@ export class PollingProcessor {
     branch: string,
     depth: number
   ): Promise<string> {
-    // Use the same path logic as GitManagerService
     const baseDir = this.gitManager['baseDir'];
     const combinedName = `${owner}-${repo}`;
     const maxPathLength = 200;
@@ -529,19 +467,17 @@ export class PollingProcessor {
     const repoUrl = `https://github.com/${owner}/${repo}.git`;
 
     try {
-      // Clean up any existing repository first
       if (fs.existsSync(repoPath)) {
         await this.gitManager.cleanupRepository(owner, repo);
       }
 
-      // Clone the repository with --no-checkout to avoid Windows filename issues
       const { exec } = require('child_process');
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
       const { stdout, stderr } = await execAsync(
         `git clone --branch ${branch} --single-branch --depth ${depth} --no-checkout --no-tags ${repoUrl} "${repoPath}"`,
-        { timeout: 300000 }, // 5 minute timeout
+        { timeout: 300000 },
       );
 
       if (stderr && !stderr.includes('Cloning into')) {
@@ -552,7 +488,6 @@ export class PollingProcessor {
     } catch (error) {
       this.logger.error(`Error cloning repository ${owner}/${repo} with depth ${depth}:`, error);
 
-      // Clean up partial clone if it exists
       if (fs.existsSync(repoPath)) {
         await this.gitManager.cleanupRepository(owner, repo);
       }
@@ -569,7 +504,6 @@ export class PollingProcessor {
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
-      // First, verify the SHA exists and get its full SHA
       let verifiedSha = sinceSha;
       try {
         const verifyCommand = `cd "${repoPath}" && git rev-parse --verify ${sinceSha}`;
@@ -578,7 +512,6 @@ export class PollingProcessor {
       } catch (verifyError) {
         this.logger.error(`❌ SHA ${sinceSha} not found in repository, trying alternative approaches...`);
         
-        // Try to find the SHA in all branches
         try {
           const findCommand = `cd "${repoPath}" && git log --all --grep="${sinceSha}" --format="%H" -1`;
           const { stdout: foundSha } = await execAsync(findCommand);
@@ -595,7 +528,6 @@ export class PollingProcessor {
         }
       }
 
-      // Get basic commit information with verified SHA
       let command = `cd "${repoPath}" && git log ${verifiedSha}..HEAD --pretty=format:"%H|%an|%ae|%ad|%s" --date=iso`;
       let stdout: string;
       
@@ -605,7 +537,6 @@ export class PollingProcessor {
       } catch (rangeError) {
         this.logger.warn(`❌ Range ${verifiedSha}..HEAD failed, trying alternative approach...`);
         
-        // Try getting commits since the SHA without using range syntax
         try {
           command = `cd "${repoPath}" && git log --since="${verifiedSha}" --pretty=format:"%H|%an|%ae|%ad|%s" --date=iso`;
           const result = await execAsync(command);
@@ -623,8 +554,6 @@ export class PollingProcessor {
       const commits: any[] = [];
       const lines = stdout.trim().split('\n');
       
-      // If clone depth is provided, limit the number of commits processed to depth - 1
-      // This prevents the oldest commit in a shallow clone from appearing to create the entire repo
       const maxCommitsToProcess = cloneDepth ? cloneDepth - 1 : lines.length;
       const linesToProcess = lines.slice(0, maxCommitsToProcess);
       
@@ -635,7 +564,6 @@ export class PollingProcessor {
       for (const line of linesToProcess) {
         const [sha, author, email, date, message] = line.split('|');
         
-        // Get detailed commit statistics
         const statsCommand = `cd "${repoPath}" && git show --stat --format="" ${sha}`;
         let linesAdded = 0;
         let linesDeleted = 0;
@@ -644,19 +572,15 @@ export class PollingProcessor {
         try {
           const { stdout: statsOutput } = await execAsync(statsCommand);
           
-          // Debug: Log the stats output for the first few commits
           if (commits.length < 3) {
             this.logger.log(`📊 Git stats output for ${sha}:`);
             this.logger.log(statsOutput);
           }
           
-          // Parse the stats output - look for the summary line at the end
           const statsLines = statsOutput.split('\n');
-          const summaryLine = statsLines[statsLines.length - 2]; // Usually the second-to-last line
+          const summaryLine = statsLines[statsLines.length - 2];
           
           if (summaryLine) {
-            // Look for lines like " 5 files changed, 123 insertions(+), 45 deletions(-)"
-            const fileMatch = summaryLine.match(/(\d+) files? changed/);
             const insertionMatch = summaryLine.match(/(\d+) insertions?/);
             const deletionMatch = summaryLine.match(/(\d+) deletions?/);
             
@@ -667,42 +591,35 @@ export class PollingProcessor {
               linesDeleted = parseInt(deletionMatch[1], 10);
             }
             
-            // Debug logging for the first few commits
             if (commits.length < 3) {
               this.logger.log(`📊 Parsed stats for ${sha}: ${linesAdded} added, ${linesDeleted} deleted, ${filesChanged.length} files`);
             }
           }
           
-          // Get list of changed files
           const filesCommand = `cd "${repoPath}" && git show --name-only --format="" ${sha}`;
           const { stdout: filesOutput } = await execAsync(filesCommand);
           filesChanged = filesOutput.trim().split('\n').filter(file => file.trim() !== '');
           
-                     // Validate file count - if it seems unreasonable, log a warning
-           if (filesChanged.length > 100) {
-             this.logger.warn(`⚠️ Suspicious file count for commit ${sha}: ${filesChanged.length} files. This might be incorrect.`);
-             // Re-validate by checking if this is a merge commit or similar
-             if (message.toLowerCase().includes('merge') || message.toLowerCase().includes('revert')) {
-               this.logger.log(`📝 Commit ${sha} appears to be a merge/revert, high file count may be legitimate`);
-             } else {
-               // This might be the oldest commit in a shallow clone - check if it's the first commit
-               try {
-                 const { stdout: firstCommitOutput } = await execAsync(`cd "${repoPath}" && git log --reverse --format="%H" -1`);
-                 const firstCommitSha = firstCommitOutput.trim();
-                 if (sha === firstCommitSha) {
-                   this.logger.warn(`🚨 Commit ${sha} appears to be the first commit in a shallow clone. File count of ${filesChanged.length} may be inflated.`);
-                   // For the first commit in a shallow clone, we should be more conservative about the file count
-                   // Let's limit it to a reasonable number
-                   if (filesChanged.length > 50) {
-                     filesChanged = filesChanged.slice(0, 50);
-                     this.logger.log(`📝 Limited files changed to first 50 for first commit in shallow clone`);
-                   }
-                 }
-               } catch (firstCommitError) {
-                 this.logger.warn(`Could not verify if this is the first commit: ${firstCommitError.message}`);
-               }
-             }
-           }
+          if (filesChanged.length > 100) {
+            this.logger.warn(`⚠️ Suspicious file count for commit ${sha}: ${filesChanged.length} files. This might be incorrect.`);
+            if (message.toLowerCase().includes('merge') || message.toLowerCase().includes('revert')) {
+              this.logger.log(`📝 Commit ${sha} appears to be a merge/revert, high file count may be legitimate`);
+            } else {
+              try {
+                const { stdout: firstCommitOutput } = await execAsync(`cd "${repoPath}" && git log --reverse --format="%H" -1`);
+                const firstCommitSha = firstCommitOutput.trim();
+                if (sha === firstCommitSha) {
+                  this.logger.warn(`🚨 Commit ${sha} appears to be the first commit in a shallow clone. File count of ${filesChanged.length} may be inflated.`);
+                  if (filesChanged.length > 50) {
+                    filesChanged = filesChanged.slice(0, 50);
+                    this.logger.log(`📝 Limited files changed to first 50 for first commit in shallow clone`);
+                  }
+                }
+              } catch (firstCommitError) {
+                this.logger.warn(`Could not verify if this is the first commit: ${firstCommitError.message}`);
+              }
+            }
+          }
           
         } catch (statsError) {
           this.logger.warn(`Could not get detailed stats for commit ${sha}: ${statsError.message}`);
@@ -763,18 +680,13 @@ export class PollingProcessor {
 
   private async updateStatistics(watchlistId: string): Promise<void> {
     try {
-      // Calculate and store bus factor (this is the main thing we care about)
       try {
         const busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
         
-        // Delete existing bus factor data for this watchlist and create new record
         await this.prisma.busFactorData.deleteMany({
-          where: {
-            watchlist_id: watchlistId,
-          },
+          where: { watchlist_id: watchlistId },
         });
         
-        // Create new bus factor data
         await this.prisma.busFactorData.create({
           data: {
             watchlist_id: watchlistId,
@@ -792,23 +704,19 @@ export class PollingProcessor {
         this.logger.error(`❌ Bus factor calculation failed for ${watchlistId}: ${error.message}`);
       }
       
-      // Do a minimal contributor stats update (only if needed)
       try {
         const existingStats = await this.prisma.contributorStats.findFirst({
           where: { watchlist_id: watchlistId }
         });
         
         if (!existingStats) {
-          // Only update if no stats exist - this is much faster
           await this.gitManager.updateContributorStats(watchlistId);
         }
       } catch (error) {
-        // Don't fail the entire process if contributor stats fail
         this.logger.warn(`⚠️ Contributor stats update skipped for ${watchlistId}: ${error.message}`);
       }
     } catch (error) {
       this.logger.error(`Error updating statistics:`, error);
-      // Don't fail the entire process if stats update fails
     }
   }
 
@@ -830,7 +738,6 @@ export class PollingProcessor {
 
   private async updateCommitsSinceLastHealthUpdate(watchlistId: string, newCommitsCount: number): Promise<void> {
     try {
-      // Get current count and add new commits
       const watchlist = await this.prisma.watchlist.findUnique({
         where: { watchlist_id: watchlistId },
         select: { commits_since_last_health_update: true },
@@ -853,27 +760,9 @@ export class PollingProcessor {
     }
   }
 
-  // Manual trigger for testing
   async triggerPolling() {
     this.logger.log('Manually triggering daily polling...');
     await this.triggerDailyPolling();
-  }
-
-  private async initializeDailyPolling(): Promise<void> {
-    try {
-      // Check if there's already a daily polling job scheduled
-      const waitingJobs = await this.pollingQueue.getWaiting();
-      const dailyPollJob = waitingJobs.find(job => job.name === 'daily-poll');
-      
-      if (!dailyPollJob) {
-        this.logger.log('🚀 Initializing daily polling schedule...');
-        await this.scheduleNextDailyPolling();
-      } else {
-        this.logger.log('📅 Daily polling schedule already exists');
-      }
-    } catch (error) {
-      this.logger.error('Error initializing daily polling:', error);
-    }
   }
 
   private createEventHash(data: string): string {
@@ -885,7 +774,6 @@ export class PollingProcessor {
     try {
       this.logger.log(`📈 Updating activity score for watchlist ${watchlistId}`);
 
-      // Get commits from database for activity analysis - use the same method as repository setup
       const commits = await this.prisma.log.findMany({
         where: {
           watchlist_id: watchlistId,
@@ -906,41 +794,33 @@ export class PollingProcessor {
         return;
       }
 
-                     // Transform commits for activity analysis - use the same logic as repository setup
-        const commitsForAnalysis = commits.map((log) => {
-          const payload = log.payload as any;
-          
-          // The logs table stores snake_case, so use those field names
-          const linesAdded = payload.lines_added || 0;
-          const linesDeleted = payload.lines_deleted || 0;
-          const filesChanged = payload.files_changed || [];
-          
-          return {
-            sha: payload.sha,
-            author: log.actor,
-            email: payload.email || '',
-            date: new Date(log.timestamp + 'Z'), // Ensure UTC interpretation
-            message: payload.message,
-            filesChanged,
-            linesAdded,
-            linesDeleted,
-          };
-        });
-
-             // Calculate new activity score
-       const activityScore = this.activityAnalysisService.calculateActivityScore(commitsForAnalysis);
-       const weeklyCommitRate = this.activityAnalysisService.calculateWeeklyCommitRate(commitsForAnalysis);
-       const activityHeatmap = this.activityAnalysisService.generateActivityHeatmap(commitsForAnalysis);
-
-      // Store or update activity data - use createMany with skipDuplicates for simplicity
-      // First, delete any existing activity data for this watchlist
-      await this.prisma.activityData.deleteMany({
-        where: {
-          watchlist_id: watchlistId,
-        },
+      const commitsForAnalysis = commits.map((log) => {
+        const payload = log.payload as any;
+        
+        const linesAdded = payload.lines_added || 0;
+        const linesDeleted = payload.lines_deleted || 0;
+        const filesChanged = payload.files_changed || [];
+        
+        return {
+          sha: payload.sha,
+          author: log.actor,
+          email: payload.email || '',
+          date: new Date(log.timestamp + 'Z'),
+          message: payload.message,
+          filesChanged,
+          linesAdded,
+          linesDeleted,
+        };
       });
 
-      // Then create new activity data
+      const activityScore = this.activityAnalysisService.calculateActivityScore(commitsForAnalysis);
+      const weeklyCommitRate = this.activityAnalysisService.calculateWeeklyCommitRate(commitsForAnalysis);
+      const activityHeatmap = this.activityAnalysisService.generateActivityHeatmap(commitsForAnalysis);
+
+      await this.prisma.activityData.deleteMany({
+        where: { watchlist_id: watchlistId },
+      });
+
       await this.prisma.activityData.create({
         data: {
           watchlist_id: watchlistId,
@@ -958,15 +838,12 @@ export class PollingProcessor {
         },
       });
 
-             this.logger.log(`Activity score updated for ${watchlistId}`);
+      this.logger.log(`Activity score updated for ${watchlistId}`);
     } catch (error) {
       this.logger.error(`Error updating activity score: ${error.message}`);
     }
   }
 
-  /**
-   * Check new commits for AI anomalies during polling
-   */
   private async checkNewCommitsForAnomalies(watchlistId: string, newCommits: any[]): Promise<void> {
     try {
       if (newCommits.length === 0) {
@@ -976,7 +853,6 @@ export class PollingProcessor {
 
       this.logger.log(`🔍 Checking ${newCommits.length} new commits for AI anomalies`);
 
-      // Get contributor and repo stats for context
       const contributorStats = await this.prisma.contributorStats.findMany({
         where: { watchlist_id: watchlistId },
       });
@@ -985,10 +861,8 @@ export class PollingProcessor {
         where: { watchlist_id: watchlistId },
       });
 
-      // Process each new commit for AI anomaly detection
       for (const commit of newCommits) {
         try {
-          // Validate commit object
           if (!commit || !commit.payload) {
             this.logger.warn(`⚠️ Skipping invalid commit object for AI analysis`);
             continue;
@@ -996,13 +870,11 @@ export class PollingProcessor {
 
           const payload = commit.payload as any;
           
-          // Validate required fields
           if (!payload.sha) {
             this.logger.warn(`⚠️ Skipping commit without SHA for AI analysis`);
             continue;
           }
 
-          // Prepare data for AI analysis
           const analysisData = {
             sha: payload.sha,
             author: commit.actor || 'unknown',
@@ -1030,7 +902,6 @@ export class PollingProcessor {
             } : undefined,
           };
 
-          // Run AI anomaly detection and store result
           await this.aiAnomalyDetectionService.analyzeAndStoreAnomaly(
             watchlistId,
             analysisData,
@@ -1038,14 +909,12 @@ export class PollingProcessor {
 
         } catch (error) {
           this.logger.error(`Failed to analyze commit ${commit?.event_id || 'unknown'} for anomalies:`, error);
-          // Continue with other commits even if one fails
         }
       }
 
       this.logger.log(`✅ Completed AI anomaly detection for ${newCommits.length} new commits`);
     } catch (error) {
       this.logger.error('Failed to check new commits for anomalies:', error);
-      // Don't throw error - this is not critical for polling
     }
   }
 } 

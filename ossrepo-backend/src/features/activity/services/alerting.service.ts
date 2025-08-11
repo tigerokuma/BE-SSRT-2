@@ -51,14 +51,10 @@ export class AlertingService {
     private readonly aiAnomalyDetection: AIAnomalyDetectionService,
   ) {}
 
-  /**
-   * Check a commit against all user alert thresholds for a watchlist
-   */
   async checkCommitForAlerts(watchlistId: string, commitData: CommitData): Promise<void> {
     try {
       this.logger.log(`🔍 Checking commit ${commitData.sha} for alerts in watchlist ${watchlistId}`);
 
-      // Get all users watching this repository
       const userWatchlists = await this.prisma.userWatchlist.findMany({
         where: { watchlist_id: watchlistId },
         select: {
@@ -73,7 +69,6 @@ export class AlertingService {
         return;
       }
 
-      // Get repository and contributor statistics for comparison
       const repoStats = await this.prisma.repoStats.findUnique({
         where: { watchlist_id: watchlistId },
       });
@@ -104,9 +99,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Check a specific user's alert thresholds against a commit
-   */
   private async checkUserAlerts(
     userWatchlist: { id: string; user_id: string; alerts: string | null },
     watchlistId: string,
@@ -115,13 +107,11 @@ export class AlertingService {
     contributorStats: any,
   ): Promise<void> {
     try {
-      // Parse user's alert configuration
       const alertConfig = this.parseAlertConfig(userWatchlist.alerts);
       if (!alertConfig) {
-        return; // No alerts configured
+        return;
       }
 
-      // Check lines added/deleted alerts
       if (alertConfig.lines_added_deleted?.enabled) {
         await this.checkLinesAddedDeletedAlert(
           userWatchlist.id,
@@ -133,7 +123,6 @@ export class AlertingService {
         );
       }
 
-      // Check files changed alerts
       if (alertConfig.files_changed?.enabled) {
         await this.checkFilesChangedAlert(
           userWatchlist.id,
@@ -145,7 +134,6 @@ export class AlertingService {
         );
       }
 
-      // Check high churn alerts
       if (alertConfig.high_churn?.enabled) {
         await this.checkHighChurnAlert(
           userWatchlist.id,
@@ -157,7 +145,6 @@ export class AlertingService {
         );
       }
 
-      // Check suspicious author timestamps
       if (alertConfig.suspicious_author_timestamps?.enabled) {
         await this.checkSuspiciousAuthorTimestampsAlert(
           userWatchlist.id,
@@ -167,7 +154,6 @@ export class AlertingService {
         );
       }
 
-      // Check AI-powered anomaly detection
       if (alertConfig.ai_powered_anomaly_detection?.enabled) {
         await this.checkAIAnomalyDetectionAlert(
           userWatchlist.id,
@@ -178,17 +164,11 @@ export class AlertingService {
         );
       }
 
-      // Note: ancestry_breaks would require more complex git analysis
-      // and is not implemented in this basic version
-
     } catch (error) {
       this.logger.error(`Error checking alerts for user ${userWatchlist.user_id}:`, error);
     }
   }
 
-  /**
-   * Parse user's alert configuration from JSON string
-   */
   private parseAlertConfig(alertsJson: string | null): AlertConfig | null {
     if (!alertsJson) {
       return null;
@@ -203,9 +183,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Check lines added/deleted alerts
-   */
   private async checkLinesAddedDeletedAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -218,7 +195,6 @@ export class AlertingService {
 
     const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
     
-    // Check hardcoded threshold
     if (totalLines >= config.hardcoded_threshold) {
       await this.createAlert(
         userWatchlistId,
@@ -272,9 +248,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Check files changed alerts
-   */
   private async checkFilesChangedAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -339,9 +312,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Check high churn alerts
-   */
   private async checkHighChurnAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -355,11 +325,9 @@ export class AlertingService {
     const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
     const filesChanged = commitData.filesChanged?.length || 0;
     
-    // High churn = high lines changed relative to files changed
     if (filesChanged > 0) {
       const churnRatio = totalLines / filesChanged;
       
-      // Check hardcoded threshold
       if (churnRatio >= config.hardcoded_threshold) {
         await this.createAlert(
           userWatchlistId,
@@ -373,8 +341,7 @@ export class AlertingService {
         );
       }
 
-      // Check multiplier against repository average
-      if (repoStats && config.multiplier > 0) {
+      if (repoStats && config.multiplier > 0 && repoStats.avg_files_changed > 0) {
         const repoChurnRatio = (repoStats.avg_lines_added + repoStats.avg_lines_deleted) / repoStats.avg_files_changed;
         const multiplierThreshold = repoChurnRatio * config.multiplier;
         
@@ -394,9 +361,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Check unusual author activity alerts
-   */
   private async checkSuspiciousAuthorTimestampsAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -405,24 +369,19 @@ export class AlertingService {
   ): Promise<void> {
     if (!contributorStats) return;
 
-    // Simple logic: Check if commit time is way outside contributor's typical hours
     const commitHour = commitData.date.getHours();
     const timeHistogram = contributorStats.commit_time_histogram as Record<string, number>;
     
     if (timeHistogram && Object.keys(timeHistogram).length > 0) {
-      // Find the hours where the contributor typically commits (has commits)
       const activeHours = Object.entries(timeHistogram)
         .filter(([hour, count]) => count > 0)
         .map(([hour]) => parseInt(hour))
         .sort((a, b) => a - b);
       
       if (activeHours.length > 0) {
-        // Check if current commit hour is way outside the typical range
         const minHour = Math.min(...activeHours);
         const maxHour = Math.max(...activeHours);
-        const range = maxHour - minHour;
         
-        // If the commit is more than 6 hours outside their typical range, it's suspicious
         const suspiciousThreshold = 6;
         const isOutsideRange = commitHour < (minHour - suspiciousThreshold) || commitHour > (maxHour + suspiciousThreshold);
         
@@ -443,9 +402,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Check AI-powered anomaly detection alerts
-   */
   private async checkAIAnomalyDetectionAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -454,7 +410,6 @@ export class AlertingService {
     contributorStats: any,
   ): Promise<void> {
     try {
-      // Prepare data for AI analysis
       const analysisData = {
         sha: commitData.sha,
         author: commitData.author,
@@ -483,10 +438,8 @@ export class AlertingService {
         } : undefined,
       };
 
-      // Analyze commit with AI
       const result = await this.aiAnomalyDetection.analyzeCommitForAnomalies(analysisData);
 
-      // If AI detects an anomaly, create an alert
       if (result.isAnomalous) {
         const confidence = result.confidence;
         const riskLevel = result.riskLevel;
@@ -509,9 +462,6 @@ export class AlertingService {
     }
   }
 
-  /**
-   * Create an alert in the AlertTriggered table
-   */
   private async createAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -550,7 +500,7 @@ export class AlertingService {
           contributor: commitData.author,
           metric,
           value,
-          alert_level: 'moderate', // Default level since schema doesn't have specific levels
+          alert_level: 'moderate',
           threshold_type: thresholdType,
           threshold_value: threshold,
           description,

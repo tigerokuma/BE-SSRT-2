@@ -10,7 +10,7 @@ export interface ContributorStats {
   totalFilesChanged: number;
   firstCommit: Date;
   lastCommit: Date;
-  contributionSpan: number; // days
+  contributionSpan: number;
   averageLinesPerCommit: number;
   averageFilesPerCommit: number;
 }
@@ -18,7 +18,7 @@ export interface ContributorStats {
 export interface BusFactorResult {
   busFactor: number;
   totalContributors: number;
-  totalCommits: number; // Total commits from all human contributors
+  totalCommits: number;
   topContributors: ContributorStats[];
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   riskReason: string;
@@ -31,14 +31,10 @@ export class BusFactorService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Calculate bus factor for a repository based on commit data
-   */
   async calculateBusFactor(watchlistId: string): Promise<BusFactorResult> {
     this.logger.log(`🚀 Starting bus factor calculation for ${watchlistId}`);
     
     try {
-      // Get all commits for this repository
       const commits = await this.prisma.log.findMany({
         where: {
           watchlist_id: watchlistId,
@@ -60,7 +56,6 @@ export class BusFactorService {
         return this.createEmptyResult();
       }
 
-      // Group commits by contributor (excluding bots)
       const contributorStats = await this.analyzeContributors(commits, watchlistId);
       const totalContributors = contributorStats.length;
 
@@ -70,29 +65,21 @@ export class BusFactorService {
         return this.createEmptyResult();
       }
 
-      // Sort contributors by commit count (descending)
       const sortedContributors = contributorStats.sort(
         (a, b) => b.totalCommits - a.totalCommits,
       );
 
-      // Log top contributors for debugging
       this.logger.log(`🏆 Top 5 contributors:`);
       sortedContributors.slice(0, 5).forEach((contributor, index) => {
         this.logger.log(`  ${index + 1}. ${contributor.author}: ${contributor.totalCommits} commits`);
       });
 
-      // Calculate bus factor score
       const busFactor = this.calculateBusFactorScore(sortedContributors);
-
-      // Determine risk level
       const riskLevel = this.determineRiskLevel(busFactor, totalContributors, sortedContributors);
-
-      // Calculate total commits from all human contributors
       const totalCommits = sortedContributors.reduce((sum, contributor) => sum + contributor.totalCommits, 0);
       
       this.logger.log(`🔢 Total commits (human only): ${totalCommits}`);
 
-      // Generate risk reason
       const riskReason = this.getRiskReason(
         riskLevel,
         busFactor,
@@ -118,20 +105,14 @@ export class BusFactorService {
     }
   }
 
-  /**
-   * Analyze commits to extract contributor statistics
-   * Uses contributor_stats table for lines changed data (more efficient)
-   */
   private async analyzeContributors(commits: any[], watchlistId: string): Promise<ContributorStats[]> {
     const contributorMap = new Map<string, ContributorStats>();
 
-    // First pass: collect all contributors and their commit counts
     for (const commit of commits) {
       const author = commit.actor;
       const payload = commit.payload;
       const timestamp = new Date(commit.timestamp);
 
-      // Skip automated bots and CI/CD systems
       if (this.isBotContributor(author)) {
         continue;
       }
@@ -155,7 +136,6 @@ export class BusFactorService {
       const stats = contributorMap.get(author)!;
       stats.totalCommits++;
 
-      // Update first and last commit dates
       if (timestamp < stats.firstCommit) {
         stats.firstCommit = timestamp;
       }
@@ -164,12 +144,10 @@ export class BusFactorService {
       }
     }
 
-    // Sort by commit count to get top contributors
     const sortedContributors = Array.from(contributorMap.values()).sort(
       (a, b) => b.totalCommits - a.totalCommits
     );
 
-    // Get lines changed data for top 5 contributors from contributor_stats
     const topContributors = sortedContributors.slice(0, 5);
     this.logger.log(`📊 Getting lines changed data for top ${topContributors.length} contributors from contributor_stats`);
 
@@ -183,14 +161,12 @@ export class BusFactorService {
         });
 
         if (contributorStats) {
-          // Calculate total lines from averages
           contributor.totalLinesAdded = Math.round(contributorStats.avg_lines_added * contributorStats.total_commits);
           contributor.totalLinesDeleted = Math.round(contributorStats.avg_lines_deleted * contributorStats.total_commits);
           contributor.totalFilesChanged = Math.round(contributorStats.avg_files_changed * contributorStats.total_commits);
           
           this.logger.log(`📊 ${contributor.author}: ${contributor.totalLinesAdded} added, ${contributor.totalLinesDeleted} deleted`);
         } else {
-          // Fallback: calculate lines changed from logs table for this contributor
           const contributorCommits = commits.filter(c => c.actor === contributor.author);
           let totalLinesAdded = 0;
           let totalLinesDeleted = 0;
@@ -214,7 +190,6 @@ export class BusFactorService {
       }
     }
 
-    // Calculate derived metrics
     for (const stats of contributorMap.values()) {
       stats.contributionSpan = Math.ceil(
         (stats.lastCommit.getTime() - stats.firstCommit.getTime()) /
@@ -236,9 +211,6 @@ export class BusFactorService {
     return Array.from(contributorMap.values());
   }
 
-  /**
-   * Check if a contributor is an automated bot or CI/CD system
-   */
   private isBotContributor(author: string): boolean {
     const botPatterns = [
       /github-actions/i,
@@ -262,20 +234,6 @@ export class BusFactorService {
     return botPatterns.some((pattern) => pattern.test(author));
   }
 
-  /**
-   * Calculate bus factor score based on contributor concentration
-   * 
-   * Bus Factor Definition: The minimum number of contributors who would need to be 
-   * "hit by a bus" (or leave the project) before the project would be unable to 
-   * continue due to knowledge loss. It's calculated as the number of contributors 
-   * needed to reach 50% of total commits.
-   * 
-   * Examples:
-   * - Bus factor of 1: One person has >50% of commits (critical risk)
-   * - Bus factor of 2: Two people together have >50% of commits (high risk)
-   * - Bus factor of 5: Five people together have >50% of commits (medium risk)
-   * - Bus factor of 8: Eight people together have >50% of commits (low risk)
-   */
   private calculateBusFactorScore(contributors: ContributorStats[]): number {
     if (contributors.length === 0) return 0;
     if (contributors.length === 1) return 1;
@@ -288,7 +246,6 @@ export class BusFactorService {
 
     this.logger.log(`🔢 Total commits (human only): ${totalCommits}`);
 
-    // Check if top contributor has >50% of commits
     const topContributor = contributors[0];
     const topContributorPercentage = topContributor.totalCommits / totalCommits;
     
@@ -296,12 +253,11 @@ export class BusFactorService {
     
     if (topContributorPercentage > 0.5) {
       this.logger.log(`✅ Top contributor has >50% (${(topContributorPercentage * 100).toFixed(1)}%), returning bus factor = 1`);
-      return 1; // Bus factor is 1 if top contributor has >50%
+      return 1;
     }
 
     this.logger.log(`❌ Top contributor has ${(topContributorPercentage * 100).toFixed(1)}% (≤50%), calculating cumulative...`);
 
-    // Calculate how many contributors we need to reach 50% of total commits
     let cumulativeCommits = 0;
     let contributorsNeeded = 0;
     const targetCommits = totalCommits * 0.5;
@@ -323,9 +279,6 @@ export class BusFactorService {
     return contributorsNeeded;
   }
 
-  /**
-   * Determine risk level based on bus factor and contributor patterns
-   */
   private determineRiskLevel(
     busFactor: number,
     totalContributors: number,
@@ -336,35 +289,27 @@ export class BusFactorService {
       ? (contributors[0]?.totalCommits / totalCommits) 
       : 0;
 
-    // Critical: Very few contributors OR extreme concentration (>80% by one person)
     if (totalContributors <= 2 || busFactor === 1 || topContributorPercentage > 0.8) {
       return 'CRITICAL';
     }
 
-    // High: Bus factor of 2-3 OR high concentration (60-80% by one person)
     if (busFactor <= 3 || topContributorPercentage > 0.6) {
       return 'HIGH';
     }
 
-    // Medium: Bus factor of 4-6 OR moderate concentration (40-60% by one person)
     if (busFactor <= 6 || topContributorPercentage > 0.4) {
       return 'MEDIUM';
     }
 
-    // Low: Good distribution of contributors (bus factor > 6 and top contributor < 40%)
     return 'LOW';
   }
 
-  /**
-   * Generate human-readable risk reason
-   */
   private getRiskReason(
     riskLevel: string,
     busFactor: number,
     totalContributors: number,
     contributors: ContributorStats[],
   ): string {
-    // Calculate percentage based on ALL contributors (same as bus factor calculation)
     const totalCommits = contributors.reduce(
       (sum, c) => sum + c.totalCommits,
       0,
@@ -394,9 +339,6 @@ export class BusFactorService {
     }
   }
 
-  /**
-   * Create empty result for repositories with no commits
-   */
   private createEmptyResult(): BusFactorResult {
     return {
       busFactor: 0,
@@ -409,18 +351,26 @@ export class BusFactorService {
     };
   }
 
-  /**
-   * Store bus factor results in database
-   */
   async storeBusFactorResults(
     watchlistId: string,
     results: BusFactorResult,
   ): Promise<void> {
     try {
-      // For now, we'll just log the results
-      // Note: Bus factor table schema not yet implemented - results are logged for monitoring
+      await this.prisma.busFactorData.create({
+        data: {
+          watchlist_id: watchlistId,
+          bus_factor: results.busFactor,
+          total_contributors: results.totalContributors,
+          total_commits: results.totalCommits,
+          top_contributors: results.topContributors as any,
+          risk_level: results.riskLevel,
+          risk_reason: results.riskReason,
+          analysis_date: results.analysisDate,
+        },
+      });
+
       this.logger.log(
-        `📊 Bus factor results for ${watchlistId}: ${results.busFactor} (${results.riskLevel})`,
+        `📊 Bus factor results stored for ${watchlistId}: ${results.busFactor} (${results.riskLevel})`,
       );
       this.logger.log(
         `   Top contributors: ${results.topContributors.map((c) => `${c.author} (${c.totalCommits} commits)`).join(', ')}`,

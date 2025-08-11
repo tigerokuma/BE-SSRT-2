@@ -50,8 +50,8 @@ export interface AISummaryResult {
 @Injectable()
 export class AISummaryService {
   private readonly logger = new Logger(AISummaryService.name);
-  private readonly modelName = 'gemma2:2b'; // Fast, efficient 2B parameter model
-  private readonly maxSummaryLength = 300; // Characters - very concise summaries
+  private readonly modelName = 'gemma2:2b';
+  private readonly maxSummaryLength = 300;
 
   constructor() {
     this.initializeModel();
@@ -59,7 +59,6 @@ export class AISummaryService {
 
   private async initializeModel() {
     try {
-      // Check if Ollama is installed and the model is available
       await this.checkOllamaAvailability();
       await this.ensureModelDownloaded();
       this.logger.log('✅ AI Summary service initialized with Mistral model');
@@ -85,7 +84,6 @@ export class AISummaryService {
 
   private async ensureModelDownloaded(): Promise<void> {
     try {
-      // Check if model is already downloaded
       const { stdout } = await execAsync('ollama list');
       if (!stdout.includes(this.modelName)) {
         this.logger.log(`📥 Downloading ${this.modelName} model...`);
@@ -128,7 +126,6 @@ export class AISummaryService {
   }
 
   private buildSummaryPrompt(repoData: RepositoryData): string {
-    // Clean and simplify the data to avoid command line issues
     const cleanDescription = (repoData.description || 'No description')
       .replace(/[^\w\s.,!?-]/g, ' ')
       .substring(0, 200);
@@ -157,7 +154,6 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
 
   private async generateWithMistral(prompt: string): Promise<string> {
     try {
-      // Use full path on Windows to avoid PATH issues
       const ollamaPath =
         process.platform === 'win32'
           ? 'C:\\Users\\hruck\\AppData\\Local\\Programs\\Ollama\\ollama.exe'
@@ -168,7 +164,6 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       );
       this.logger.log(`🔍 Prompt length: ${prompt.length} characters`);
 
-      // Use a simpler approach - write prompt to a temporary file
       const fs = require('fs');
       const os = require('os');
       const path = require('path');
@@ -182,15 +177,14 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       const command = `"${ollamaPath}" run ${this.modelName} < "${tempFile}"`;
 
       const { stdout, stderr } = await execAsync(command, {
-        timeout: 30000, // 30 second timeout
-        maxBuffer: 1024 * 1024, // 1MB buffer
+        timeout: 30000,
+        maxBuffer: 1024 * 1024,
       });
 
       if (stderr) {
         this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
       }
 
-      // Validate stdout before processing
       if (!stdout || typeof stdout !== 'string') {
         this.logger.error('❌ Ollama returned empty or invalid stdout');
         throw new Error('AI model returned empty response');
@@ -204,7 +198,6 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
         `✅ Ollama execution successful, cleaned output length: ${cleanOutput.length}`,
       );
 
-      // Clean up temp file
       try {
         fs.unlinkSync(tempFile);
       } catch (error) {
@@ -215,7 +208,6 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
     } catch (error) {
       this.logger.error(`❌ Ollama execution failed: ${error.message}`);
       
-      // Provide more context for debugging
       if (error.message.includes('timeout')) {
         this.logger.error('❌ AI model timed out - consider increasing timeout or using a faster model');
       } else if (error.message.includes('ENOENT')) {
@@ -234,26 +226,22 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       return 'No summary available.';
     }
 
-    // Remove common prefixes and clean up the output
     let cleaned = output
-      .replace(/^[^a-zA-Z]*/, '') // Remove leading non-letters
-      .replace(/\n+/g, ' ') // Replace multiple newlines with single space
-      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .replace(/^[^a-zA-Z]*/, '')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
 
-    // If the output is empty after cleaning, return a fallback
     if (!cleaned || cleaned.length === 0) {
       this.logger.warn('Output was empty after cleaning');
       return 'No summary available.';
     }
 
-    // Don't truncate - show the full cleaned output even if it's slightly over the limit
     this.logger.log(`Cleaned AI output: ${cleaned.length} characters`);
     return cleaned;
   }
 
   private calculateConfidence(repoData: RepositoryData): number {
-    // Calculate confidence based on data completeness
     let score = 0;
     let total = 0;
 
@@ -321,7 +309,7 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
 
     return {
       summary: summary,
-      confidence: 0.3, // Low confidence for fallback
+      confidence: 0.3,
       generatedAt: new Date(),
       modelUsed: 'fallback',
     };
@@ -415,7 +403,6 @@ Summary:`;
   private calculateCommitSummaryConfidence(commits: CommitData[]): number {
     if (commits.length === 0) return 0;
 
-    // Calculate confidence based on commit data quality
     let score = 0;
     let total = commits.length;
 
@@ -428,7 +415,7 @@ Summary:`;
       if (commit.linesDeleted >= 0) score += 1;
     }
 
-    return score / (total * 6); // 6 fields per commit
+    return score / (total * 6);
   }
 
   private generateFallbackCommitSummary(

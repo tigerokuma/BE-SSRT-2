@@ -7,31 +7,24 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { HealthAnalysisService } from '../services/health-analysis.service';
 
 interface HealthCheckJobData {
-  watchlistId?: string; // Optional: if provided, check only this repository
+  watchlistId?: string;
 }
 
 @Processor('health-check')
 export class HealthCheckProcessor {
   private readonly logger = new Logger(HealthCheckProcessor.name);
-  private isProcessingMonthlyCheck = false; // Prevent concurrent monthly checks
+  private isProcessingMonthlyCheck = false;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly healthAnalysisService: HealthAnalysisService,
     @InjectQueue('health-check') private readonly healthQueue: Queue,
-  ) {
-    // Removed automatic health check initialization to prevent duplicate jobs on server restart
-    // Health checking should be manually triggered or scheduled externally
-  }
+  ) {}
 
-  /**
-   * Initialize the monthly health check schedule (call this to make the queue visible in BullMQ)
-   */
   async initializeHealthCheckSchedule() {
     this.logger.log('🚀 Initializing monthly health check schedule...');
     
     try {
-      // First, add an immediate job to make the queue visible
       await this.healthQueue.add(
         'monthly-health-check',
         {},
@@ -43,8 +36,6 @@ export class HealthCheckProcessor {
       );
       
       this.logger.log('✅ Added immediate health check job to make queue visible');
-      
-      // Then schedule the next monthly check
       await this.initializeMonthlyHealthCheck();
     } catch (error) {
       this.logger.error('Error initializing monthly health check schedule:', error);
@@ -52,11 +43,7 @@ export class HealthCheckProcessor {
     }
   }
 
-  /**
-   * Monthly job that checks all repositories for health using Scorecard
-   */
   async triggerMonthlyHealthCheck() {
-    // Prevent concurrent monthly checks
     if (this.isProcessingMonthlyCheck) {
       this.logger.log('⏳ Monthly health check already in progress, skipping...');
       return;
@@ -69,11 +56,8 @@ export class HealthCheckProcessor {
     );
 
     try {
-      // Get all ready repositories from watchlist
       const watchlistedRepos = await this.prisma.watchlist.findMany({
-        where: {
-          status: 'ready',
-        },
+        where: { status: 'ready' },
         select: {
           watchlist_id: true,
           default_branch: true,
@@ -89,26 +73,19 @@ export class HealthCheckProcessor {
 
       this.logger.log(`Found ${watchlistedRepos.length} ready repositories to check for health`);
 
-      // Process repositories sequentially
       let processedCount = 0;
       let successfulChecks = 0;
 
       for (const repo of watchlistedRepos) {
-        const { repo_url, repo_name, package_name } = repo.package;
+        const { repo_url, repo_name } = repo.package;
         const { default_branch } = repo;
         
-        if (!repo_url) {
-          this.logger.warn(`No repo URL found for ${repo_name}, skipping`);
-          continue;
-        }
-
-        if (!default_branch) {
-          this.logger.warn(`No default branch found for ${repo_name}, skipping`);
+        if (!repo_url || !default_branch) {
+          this.logger.warn(`Missing repo URL or default branch for ${repo_name}, skipping`);
           continue;
         }
 
         try {
-          // Parse owner and repo from URL
           const urlParts = repo_url.split('/');
           const owner = urlParts[urlParts.length - 2];
           const repoName = urlParts[urlParts.length - 1];
@@ -124,18 +101,15 @@ export class HealthCheckProcessor {
           successfulChecks++;
           processedCount++;
           
-          // Small delay between repositories to avoid rate limiting
           await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (error) {
           this.logger.error(`Error checking health for ${repo_name}:`, error);
-          // Continue with next repository instead of failing entire process
         }
       }
 
       this.logger.log(`✅ Completed health check for ${processedCount}/${watchlistedRepos.length} repositories`);
       this.logger.log(`🎯 Successfully analyzed ${successfulChecks} repositories`);
 
-      // Schedule the next monthly health check for 2 months from now
       await this.scheduleNextMonthlyHealthCheck();
     } catch (error) {
       this.logger.error('Error during monthly health check trigger:', error);
@@ -144,9 +118,6 @@ export class HealthCheckProcessor {
     }
   }
 
-  /**
-   * Check health for a single repository
-   */
   private async checkRepositoryHealth(
     watchlistId: string,
     owner: string,
@@ -157,7 +128,6 @@ export class HealthCheckProcessor {
     try {
       this.logger.log(`🔍 Checking health for ${repoName} (${owner}/${repo})`);
 
-      // Run health analysis using Scorecard
       const healthScore = await this.healthAnalysisService.analyzeRepository(
         watchlistId,
         owner,
@@ -166,8 +136,6 @@ export class HealthCheckProcessor {
       );
 
       this.logger.log(`✅ Health check completed for ${repoName} - Score: ${healthScore}`);
-
-      // Check for health score decreases and create alerts
       await this.checkHealthScoreDecrease(watchlistId, healthScore, repoName);
     } catch (error) {
       this.logger.error(`Error checking health for ${repoName}:`, error);
@@ -175,16 +143,12 @@ export class HealthCheckProcessor {
     }
   }
 
-  /**
-   * Check if health score has decreased and create alerts for users who have enabled them
-   */
   private async checkHealthScoreDecrease(
     watchlistId: string,
     currentHealthScore: number,
     repoName: string
   ): Promise<void> {
     try {
-      // Get the previous health score from the database
       const previousHealthData = await this.prisma.healthData.findFirst({
         where: { watchlist_id: watchlistId },
         orderBy: { analysis_date: 'desc' },
@@ -206,13 +170,12 @@ export class HealthCheckProcessor {
 
       this.logger.log(`📉 Health score decreased for ${repoName}: ${previousHealthScore} → ${currentHealthScore} (decrease: ${healthScoreDecrease.toFixed(1)})`);
 
-      // Get all users watching this repository with their alert settings
       const userWatchlists = await this.prisma.userWatchlist.findMany({
         where: { watchlist_id: watchlistId },
         select: {
           id: true,
           user_id: true,
-          alerts: true, // Include alert settings
+          alerts: true,
         },
       });
 
@@ -221,9 +184,7 @@ export class HealthCheckProcessor {
         return;
       }
 
-      // Check each user's alert settings and create alerts if needed
       for (const userWatchlist of userWatchlists) {
-        // Parse user's alert settings
         let alertSettings;
         try {
           alertSettings = userWatchlist.alerts ? JSON.parse(userWatchlist.alerts) : {};
@@ -232,7 +193,6 @@ export class HealthCheckProcessor {
           alertSettings = {};
         }
 
-        // Check if user has enabled health score decrease alerts
         if (alertSettings.health_score_decreases?.enabled) {
           const userThreshold = alertSettings.health_score_decreases.minimum_health_change || 1.0;
           
@@ -258,9 +218,6 @@ export class HealthCheckProcessor {
     }
   }
 
-  /**
-   * Create a health score decrease alert
-   */
   private async createHealthScoreDecreaseAlert(
     userWatchlistId: string,
     watchlistId: string,
@@ -287,7 +244,7 @@ export class HealthCheckProcessor {
         data: {
           user_watchlist_id: userWatchlistId,
           watchlist_id: watchlistId,
-          commit_sha: 'health-check', // Special identifier for health check alerts
+          commit_sha: 'health-check',
           contributor: 'health-system',
           metric: 'health_score_decrease',
           value: decrease,
@@ -307,12 +264,8 @@ export class HealthCheckProcessor {
     }
   }
 
-  /**
-   * Schedule the next monthly health check
-   */
   private async scheduleNextMonthlyHealthCheck(): Promise<void> {
     try {
-      // Check if there's already a monthly health check job scheduled
       const waitingJobs = await this.healthQueue.getWaiting();
       const existingMonthlyCheckJob = waitingJobs.find(job => job.name === 'monthly-health-check');
       
@@ -321,11 +274,10 @@ export class HealthCheckProcessor {
         return;
       }
 
-      // Calculate delay until 2 months from now
       const now = new Date();
       const nextMonth = new Date(now);
       nextMonth.setMonth(nextMonth.getMonth() + 2);
-      nextMonth.setHours(0, 0, 0, 0); // Set to midnight
+      nextMonth.setHours(0, 0, 0, 0);
       
       const delayMs = nextMonth.getTime() - now.getTime();
       
@@ -334,7 +286,7 @@ export class HealthCheckProcessor {
         {},
         {
           delay: delayMs,
-          attempts: 1, // Don't retry monthly health check if it fails
+          attempts: 1,
           removeOnComplete: 10,
           removeOnFail: 50,
         },
@@ -346,12 +298,8 @@ export class HealthCheckProcessor {
     }
   }
 
-  /**
-   * Initialize monthly health checking schedule
-   */
   private async initializeMonthlyHealthCheck(): Promise<void> {
     try {
-      // Check if there's already a monthly health check job scheduled
       const waitingJobs = await this.healthQueue.getWaiting();
       const monthlyCheckJob = waitingJobs.find(job => job.name === 'monthly-health-check');
       
@@ -397,7 +345,7 @@ export class HealthCheckProcessor {
         }
       });
 
-      if (!watchlist || !watchlist.package) {
+      if (!watchlist?.package) {
         this.logger.error(`No package found for watchlist ${watchlistId}`);
         return;
       }
@@ -405,17 +353,11 @@ export class HealthCheckProcessor {
       const { repo_url, repo_name } = watchlist.package;
       const { default_branch } = watchlist;
       
-      if (!repo_url) {
-        this.logger.error(`No repo URL found for watchlist ${watchlistId}`);
+      if (!repo_url || !default_branch) {
+        this.logger.error(`Missing repo URL or default branch for watchlist ${watchlistId}`);
         return;
       }
 
-      if (!default_branch) {
-        this.logger.error(`No default branch found for watchlist ${watchlistId}`);
-        return;
-      }
-
-      // Parse owner and repo from URL
       const urlParts = repo_url.split('/');
       const owner = urlParts[urlParts.length - 2];
       const repo = urlParts[urlParts.length - 1];

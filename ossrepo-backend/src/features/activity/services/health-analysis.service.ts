@@ -11,7 +11,7 @@ export interface ScorecardResult {
   commit: string;
   scorecard: string;
   date: string;
-  score: number; // Add the overall score field
+  score: number;
   checks: Array<{
     name: string;
     score: number;
@@ -32,7 +32,7 @@ export interface HealthAnalysisResult {
   commitSha: string;
   commitDate: Date;
   scorecardMetrics: ScorecardResult | null;
-  overallHealthScore: number; // 0-100
+  overallHealthScore: number;
   analysisDate: Date;
 }
 
@@ -58,11 +58,9 @@ export class HealthAnalysisService {
     repo: string,
     branch: string = 'main',
     commitShaOverride?: string,
-    skipScorecardQuery: boolean = false,
   ): Promise<number> {
-    // ALWAYS use local analysis to avoid BigQuery costs
     this.logger.log(
-      `🔄 Using local Scorecard CLI analysis for ${owner}/${repo} (BigQuery disabled)`,
+      `🔄 Using local Scorecard CLI analysis for ${owner}/${repo}`,
     );
     const result = await this.performAnalysis(
       watchlistId,
@@ -74,17 +72,12 @@ export class HealthAnalysisService {
     return result.overallHealthScore;
   }
 
-  /**
-   * Run historical health analysis using local Scorecard CLI
-   * BigQuery disabled to avoid costs
-   */
   async runHistoricalHealthAnalysis(
     watchlistId: string,
     owner: string,
     repo: string,
     commits: any[],
     branch: string = 'main',
-    skipScorecardQuery: boolean = false,
   ): Promise<{
     current: number;
     historical: Array<{
@@ -98,9 +91,8 @@ export class HealthAnalysisService {
       return { current: 0, historical: [] };
     }
 
-    // ALWAYS use local analysis to avoid BigQuery costs
     this.logger.log(
-      `🔄 Using local Scorecard CLI analysis for ${owner}/${repo} (BigQuery disabled)`,
+      `🔄 Using local Scorecard CLI analysis for ${owner}/${repo}`,
     );
     return this.runLocalHistoricalAnalysis(
       watchlistId,
@@ -111,9 +103,6 @@ export class HealthAnalysisService {
     );
   }
 
-  /**
-   * Fallback method for when Scorecard data is not available
-   */
   async runLocalHistoricalAnalysis(
     watchlistId: string,
     owner: string,
@@ -129,7 +118,6 @@ export class HealthAnalysisService {
       scorecardMetrics?: any;
     }>;
   }> {
-    // Sort commits by date (oldest first)
     const sortedCommits = commits
       .map((commit) => ({
         ...commit,
@@ -137,10 +125,7 @@ export class HealthAnalysisService {
       }))
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
-    // Determine number of health checks based on commit count
     const healthCheckCount = this.calculateHealthCheckCount(commits.length);
-
-    // Calculate sampling points
     const samplingPoints = this.calculateSamplingPoints(
       sortedCommits,
       healthCheckCount,
@@ -150,8 +135,7 @@ export class HealthAnalysisService {
       `📊 Running ${healthCheckCount} local historical health checks for ${owner}/${repo} (parallel)`,
     );
 
-    // Run health analysis at each sampling point in parallel
-    const healthCheckPromises = samplingPoints.map(async (point, index) => {
+    const healthCheckPromises = samplingPoints.map(async (point) => {
       try {
         const result = await this.performAnalysis(
           watchlistId,
@@ -173,17 +157,15 @@ export class HealthAnalysisService {
         this.logger.warn(
           `⚠️ Failed to analyze health at ${point.date.toISOString().split('T')[0]}: ${error.message}`,
         );
-        // Return a default score instead of null to avoid gaps in the timeline
         return {
           date: point.date,
-          score: 50, // Default score when analysis fails
+          score: 50,
           commitSha: point.sha,
           scorecardMetrics: null,
         };
       }
     });
 
-    // Wait for all health checks to complete
     const historicalResults = (await Promise.all(
       healthCheckPromises,
     )) as Array<{
@@ -193,7 +175,6 @@ export class HealthAnalysisService {
       scorecardMetrics?: any;
     }>;
 
-    // The current score is the latest historical result (newest commit is always included)
     const currentScore =
       historicalResults.length > 0
         ? historicalResults[historicalResults.length - 1].score
@@ -205,44 +186,12 @@ export class HealthAnalysisService {
     };
   }
 
-  /**
-   * Find the closest Scorecard data point to a given date
-   */
-  private findClosestScorecardData(
-    targetDate: Date,
-    scorecardData: any[], // Changed from HistoricalScorecardData to any[]
-  ): any | null { // Changed from HistoricalScorecardData to any
-    if (scorecardData.length === 0) return null;
-
-    let closest = scorecardData[0];
-    let minDiff = Math.abs(targetDate.getTime() - closest.date.getTime());
-
-    for (const data of scorecardData) {
-      const diff = Math.abs(targetDate.getTime() - data.date.getTime());
-      if (diff < minDiff) {
-        minDiff = diff;
-        closest = data;
-      }
-    }
-
-    // Only return if the difference is within 30 days (to avoid using very old data)
-    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
-    return minDiff <= thirtyDaysInMs ? closest : null;
-  }
-
-  /**
-   * Calculate how many health checks to run based on commit count
-   * Reduced for faster fallback analysis (this is just a fallback mechanism)
-   */
   private calculateHealthCheckCount(commitCount: number): number {
-    if (commitCount < 1000) return 3; // Every ~8 months
-    if (commitCount < 2000) return 4; // Every ~6 months
-    return 4; // Cap at 4 checks maximum
+    if (commitCount < 1000) return 3;
+    if (commitCount < 2000) return 4;
+    return 4;
   }
 
-  /**
-   * Calculate sampling points across the commit timeline
-   */
   private calculateSamplingPoints(
     commits: any[],
     count: number,
@@ -251,13 +200,11 @@ export class HealthAnalysisService {
 
     const points: Array<{ sha: string; date: Date }> = [];
 
-    // Always include the oldest commit
     points.push({
       sha: commits[0].sha,
       date: commits[0].date,
     });
 
-    // Calculate intermediate points
     if (count > 2) {
       const step = (commits.length - 1) / (count - 1);
       for (let i = 1; i < count - 1; i++) {
@@ -269,7 +216,6 @@ export class HealthAnalysisService {
       }
     }
 
-    // Always include the newest commit (if not already included)
     if (count > 1) {
       const lastCommit = commits[commits.length - 1];
       if (points[points.length - 1]?.sha !== lastCommit.sha) {
@@ -291,18 +237,12 @@ export class HealthAnalysisService {
     commitShaOverride?: string,
   ): Promise<HealthAnalysisResult> {
     try {
-      // Get the latest commit SHA from GitHub API, or use override
       const commitSha =
         commitShaOverride ||
         (await this.getLatestCommitSha(owner, repo, branch));
 
-      // Get commit date (default to current date for now)
       const commitDate = new Date();
-
-      // Run Scorecard analysis
       const scorecardResult = await this.runScorecard(owner, repo, commitSha);
-
-      // Calculate overall health score from Scorecard results only
       const overallHealthScore =
         this.calculateScorecardHealthScore(scorecardResult);
 
@@ -315,7 +255,6 @@ export class HealthAnalysisService {
         analysisDate: new Date(),
       };
 
-      // Store the results in the database
       await this.storeHealthResults(result);
 
       return result;
@@ -353,7 +292,7 @@ export class HealthAnalysisService {
         throw new Error(`GitHub API error: ${response.statusText}`);
       }
 
-      const commitData = await response.json();
+      const commitData = await response.json() as { sha: string };
       return commitData.sha;
     } catch (error) {
       this.logger.error(
@@ -379,17 +318,15 @@ export class HealthAnalysisService {
       
       try {
         const result = await execAsync(command, {
-          timeout: 400000, // 5 minutes timeout
+          timeout: 400000,
         });
         stdout = result.stdout;
         stderr = result.stderr;
       } catch (execError: any) {
-        // Scorecard might exit with error code but still return valid JSON
         if (execError.stdout) {
           stdout = execError.stdout;
           stderr = execError.stderr || '';
         } else {
-          // No stdout, this is a real failure
           this.logger.error(
             `❌ Scorecard failed for ${owner}/${repo}: ${execError.message}`,
           );
@@ -397,7 +334,6 @@ export class HealthAnalysisService {
         }
       }
 
-      // Parse the JSON output even if there are stderr warnings
       let scorecardData;
       try {
         scorecardData = JSON.parse(stdout);
@@ -408,13 +344,11 @@ export class HealthAnalysisService {
         return null;
       }
 
-      // Check if we have valid data
       if (!scorecardData || !scorecardData.checks) {
         this.logger.error(`❌ Invalid Scorecard data for ${owner}/${repo}`);
         return null;
       }
 
-      // Extract the overall score from the Scorecard output
       const overallScore = scorecardData.score || 0;
 
       return {
@@ -422,7 +356,7 @@ export class HealthAnalysisService {
         commit: commitSha,
         scorecard: scorecardData.scorecard.version,
         date: scorecardData.date,
-        score: overallScore, // Add the overall score to the result
+        score: overallScore,
         checks: scorecardData.checks,
       };
     } catch (error) {
@@ -440,23 +374,17 @@ export class HealthAnalysisService {
       return 0;
     }
 
-    // If Scorecard provided an overall score, use it (this is the most accurate)
     if (scorecard.score && scorecard.score > 0) {
       return scorecard.score;
     }
 
-    // Fallback: Calculate average from individual checks
-    // Handle both array format (new) and object format (old)
     let checksArray: any[];
     if (Array.isArray(scorecard.checks)) {
-      // New format: checks is an array
       checksArray = scorecard.checks;
     } else {
-      // Old format: checks is an object, convert to array
       checksArray = Object.values(scorecard.checks);
     }
 
-    // Filter out checks with -1 scores (errors/failures) and only use valid scores
     const validChecks = checksArray.filter(
       (check) => check.score >= 0,
     );
@@ -465,12 +393,10 @@ export class HealthAnalysisService {
       return 0;
     }
 
-    // Calculate average score from valid checks only
     const totalScore = validChecks.reduce((sum, check) => sum + check.score, 0);
     const averageScore = totalScore / validChecks.length;
 
-    // Keep scores on 0-10 scale for consistency with Scorecard
-    return averageScore; // Return the average directly (0-10 scale)
+    return averageScore;
   }
 
   private async storeHealthResults(

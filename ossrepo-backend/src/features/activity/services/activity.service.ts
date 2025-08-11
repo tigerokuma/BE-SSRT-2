@@ -18,19 +18,11 @@ export class ActivityService {
 
   async addToWatchlist(dto: AddToWatchlistDto) {
     try {
-      // Extract owner and repo name from GitHub URL
       const { owner, repo } = this.parseGitHubUrl(dto.repo_url);
-
-      // Fetch repository info from GitHub API
       const repoInfo = await this.fetchGitHubRepoInfo(owner, repo);
-
-      // Ensure user exists (create if not)
       const user = await this.ensureUserExists(dto.added_by);
-
-      // Generate package name for lookup
       const packageName = `${owner}/${repo}`;
 
-      // Check if package already exists in watchlist
       const existingPackage = await this.prisma.package.findUnique({
         where: { package_name: packageName },
         include: {
@@ -49,10 +41,8 @@ export class ActivityService {
       let shouldQueueSetup = false;
 
       if (existingPackage && existingPackage.watchlists.length > 0) {
-        // Repository already exists in watchlist
         const existingWatchlist = existingPackage.watchlists[0];
 
-        // Check if user is already watching this repository
         if (existingWatchlist.userWatchlistEntries.length > 0) {
           throw new HttpException(
             'You are already watching this repository',
@@ -60,10 +50,7 @@ export class ActivityService {
           );
         }
 
-        // User is not watching, add them to existing watchlist
         watchlistEntry = existingWatchlist;
-
-        // Create user_watchlist entry for existing watchlist
         const userWatchlistId = `user_watchlist_${dto.added_by}_${existingWatchlist.watchlist_id}`;
         userWatchlistEntry = await this.prisma.userWatchlist.create({
           data: {
@@ -76,15 +63,12 @@ export class ActivityService {
           },
         });
 
-        // No need to queue setup job since repo already exists
         shouldQueueSetup = false;
       } else {
-        // Repository is new, create everything from scratch
         const packageId = `package_${owner}_${repo}_${Date.now()}`;
         const watchlistId = `watchlist_${owner}_${repo}_${Date.now()}`;
         const userWatchlistId = `user_watchlist_${dto.added_by}_${watchlistId}`;
 
-        // Create or update package entry
         const packageEntry = await this.prisma.package.upsert({
           where: { package_name: packageName },
           update: {
@@ -99,7 +83,6 @@ export class ActivityService {
           },
         });
 
-        // Create new watchlist entry with processing status
         watchlistEntry = await this.prisma.watchlist.create({
           data: {
             watchlist_id: watchlistId,
@@ -114,7 +97,6 @@ export class ActivityService {
           },
         });
 
-        // Create user_watchlist entry
         userWatchlistEntry = await this.prisma.userWatchlist.create({
           data: {
             id: userWatchlistId,
@@ -126,11 +108,9 @@ export class ActivityService {
           },
         });
 
-        // Queue background job for repository setup
         shouldQueueSetup = true;
       }
 
-      // Queue setup job only for new repositories
       if (shouldQueueSetup) {
         await this.queueRepositorySetupJob(
           watchlistEntry.watchlist_id,
@@ -159,7 +139,6 @@ export class ActivityService {
       };
     } catch (error) {
       if (error instanceof HttpException) {
-        // Log user-friendly message for expected errors
         if (error.getStatus() === HttpStatus.CONFLICT) {
           this.logger.log(
             `📝 Duplicate repository in watchlist: ${dto.repo_url} (${dto.added_by})`,
@@ -179,18 +158,16 @@ export class ActivityService {
 
   private async ensureUserExists(userId: string) {
     try {
-      // Try to find existing user
       let user = await this.prisma.user.findUnique({
         where: { user_id: userId },
       });
 
-      // If user doesn't exist, create a new one
       if (!user) {
         user = await this.prisma.user.create({
           data: {
             user_id: userId,
-            email: `${userId}@example.com`, // Placeholder email
-            name: userId, // Use userId as name
+            email: `${userId}@example.com`,
+            name: userId,
           },
         });
         this.logger.log(`Created new user: ${userId}`);
@@ -210,7 +187,6 @@ export class ActivityService {
     try {
       const urlObj = new URL(url);
 
-      // Validate it's actually a GitHub URL
       if (!urlObj.hostname.includes('github.com')) {
         throw new Error('URL must be a GitHub repository URL');
       }
@@ -226,7 +202,6 @@ export class ActivityService {
       const owner = pathParts[0];
       const repo = pathParts[1].replace('.git', '');
 
-      // Basic validation
       if (!owner || !repo) {
         throw new Error('Invalid owner or repository name');
       }
@@ -250,7 +225,6 @@ export class ActivityService {
         repo,
       );
 
-      // Check if repository is private
       if (repoData.private) {
         throw new HttpException(
           'Private repositories are not supported. Please use a public repository.',
@@ -258,7 +232,6 @@ export class ActivityService {
         );
       }
 
-      // Determine if this is a large repository
       const isLargeRepo = this.isLargeRepository(repoData);
 
       return {
@@ -271,7 +244,7 @@ export class ActivityService {
         stargazers_count: repoData.stargazers_count,
         watchers_count: repoData.watchers_count,
         forks_count: repoData.forks_count,
-        size: repoData.size, // Size in KB
+        size: repoData.size,
         is_large_repo: isLargeRepo,
       };
     } catch (error) {
@@ -279,7 +252,6 @@ export class ActivityService {
         throw error;
       }
 
-      // Handle specific GitHub API errors
       if (error.message.includes('not found')) {
         throw new HttpException(
           'Repository not found on GitHub. Please check the URL and ensure the repository exists.',
@@ -308,7 +280,6 @@ export class ActivityService {
         );
       }
 
-      // Handle network errors
       if (error instanceof TypeError && error.message.includes('fetch')) {
         throw new HttpException(
           'Unable to connect to GitHub. Please check your internet connection and try again.',
@@ -323,17 +294,8 @@ export class ActivityService {
     }
   }
 
-  /**
-   * Determine if a repository is considered "large basedon various metrics
-   */
   private isLargeRepository(repoData: any): boolean {
-    // Large repos typically have:
-    // - High star count (>100)
-    // - Large size (>100 MB)
-    // - Many forks (>100)
-    // - High commit frequency
-
-    const sizeMB = repoData.size / 124; // Convert KB to MB
+    const sizeMB = repoData.size / 124;
     const isLarge =
       repoData.stargazers_count > 100 ||
       sizeMB > 100 ||
@@ -353,7 +315,7 @@ export class ActivityService {
     forceLocalHealthAnalysis?: boolean,
   ): Promise<void> {
     try {
-      const delay = isLargeRepo ? 0 : 0; // No delay for now, but could add delays for large repos
+      const delay = isLargeRepo ? 0 : 0;
 
       await this.repositorySetupQueue.add(
         'clone-and-analyze',
@@ -393,8 +355,6 @@ export class ActivityService {
         `Failed to queue repository setup job for ${owner}/${repo}:`,
         error,
       );
-      // Don't throw error here as the watchlist entry was already created
-      // The job can be retried manually if needed
     }
   }
 
@@ -445,7 +405,6 @@ export class ActivityService {
   }
 
   async removeFromWatchlist(userWatchlistId: string): Promise<void> {
-    // First, get the user watchlist to check if it's the only one for this watchlist
     const userWatchlist = await this.prisma.userWatchlist.findUnique({
       where: { id: userWatchlistId },
       include: {
@@ -466,81 +425,65 @@ export class ActivityService {
     const watchlistId = userWatchlist.watchlist_id
     const packageId = userWatchlist.watchlist.package_id
 
-    // Check if this is the only user watching this specific watchlist
     const watchlistUserCount = await this.prisma.userWatchlist.count({
       where: { watchlist_id: watchlistId }
     })
 
-    // Delete the specific user watchlist entry
     await this.prisma.userWatchlist.delete({
       where: { id: userWatchlistId }
     })
 
-    // If this was the only user watching this watchlist, clean up all related data
     if (watchlistUserCount === 1) {
       this.logger.log(`🧹 Cleaning up all data for watchlist ${watchlistId} as this was the only user watching it`)
 
-      // Delete all vulnerabilities for this watchlist
       await this.prisma.vulnerability.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete vulnerability summaries for this watchlist
       await this.prisma.vulnerabilitySummary.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all repository stats for this watchlist
       await this.prisma.repoStats.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all logs for this watchlist
       await this.prisma.log.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all health data for this watchlist
       await this.prisma.healthData.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all contributor stats for this watchlist
       await this.prisma.contributorStats.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all bus factor data for this watchlist
       await this.prisma.busFactorData.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all alert triggers for this watchlist
       await this.prisma.alertTriggered.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all AI summary data for this watchlist
       await this.prisma.aISummaryData.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all AI anomalies detected for this watchlist
       await this.prisma.aIAnomaliesDetected.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all activity data for this watchlist
       await this.prisma.activityData.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all graph snapshots for this package
       await this.prisma.graphSnapshot.deleteMany({
         where: { repo_id: packageId }
       })
 
-      // Delete all graph nodes for this package (via snapshot_id)
       const snapshotIds = await this.prisma.graphSnapshot.findMany({
         where: { repo_id: packageId },
         select: { snapshot_id: true }
@@ -556,12 +499,10 @@ export class ActivityService {
         })
       }
 
-      // Delete all build tasks for this package
       await this.prisma.buildTask.deleteMany({
         where: { repo_id: packageId }
       })
 
-      // Delete all build subtasks for this package (via task_id)
       const buildTaskIds = await this.prisma.buildTask.findMany({
         where: { repo_id: packageId },
         select: { task_id: true }
@@ -574,25 +515,18 @@ export class ActivityService {
         })
       }
 
-      // Delete all graph exports for this package
       await this.prisma.graphExport.deleteMany({
         where: { repo_id: packageId }
       })
 
-      // Delete all weekly summary data for this watchlist
       await this.prisma.weeklySummaryData.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Delete all watchlist SBOM data for this watchlist
       await this.prisma.watchlistSbom.deleteMany({
         where: { watchlist_id: watchlistId }
       })
 
-      // Note: UserWatchlistSbom is user-specific and should persist
-      // so we don't delete it here
-
-      // Delete the watchlist itself
       await this.prisma.watchlist.delete({
         where: { watchlist_id: watchlistId }
       })

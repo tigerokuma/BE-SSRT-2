@@ -7,7 +7,6 @@ import { promisify } from 'util';
 import * as os from 'os';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { createHash } from 'crypto';
-import { v4 as uuidv4 } from 'uuid';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -21,7 +20,6 @@ export class GitManagerService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    // Create a directory for cloned repositories
     this.baseDir = this.configService.get<string>(
       'GIT_CLONE_DIR',
       './temp-repos',
@@ -37,14 +35,11 @@ export class GitManagerService {
   }
 
   private getRepoPath(owner: string, repo: string): string {
-    // Handle long filenames by truncating if necessary
-    // Windows has a 260 character path limit, so we need to be careful
-    const maxPathLength = 200; // Leave room for baseDir and file extensions
+    const maxPathLength = 200;
     const combinedName = `${owner}-${repo}`;
 
     if (combinedName.length > maxPathLength) {
-      // Truncate the repo name if it's too long, but keep owner intact
-      const maxRepoLength = maxPathLength - owner.length - 1; // -1 for the dash
+      const maxRepoLength = maxPathLength - owner.length - 1;
       const truncatedRepo = repo.substring(0, maxRepoLength);
       return path.join(this.baseDir, `${owner}-${truncatedRepo}`);
     }
@@ -62,15 +57,13 @@ export class GitManagerService {
     const repoUrl = `https://github.com/${owner}/${repo}.git`;
 
     try {
-      // Check if repository already exists
       if (fs.existsSync(repoPath)) {
         return await this.fetchRepository(owner, repo, branch);
       }
 
-      // Clone the repository with options to avoid post-clone scripts
       const { stdout, stderr } = await execAsync(
         `git clone --branch ${branch} --single-branch --depth ${depth} --no-checkout --no-tags ${repoUrl} "${repoPath}"`,
-        { timeout: 300000 }, // 5 minute timeout
+        { timeout: 300000 },
       );
 
       if (stderr && !stderr.includes('Cloning into')) {
@@ -81,7 +74,6 @@ export class GitManagerService {
     } catch (error) {
       this.logger.error(`Error cloning repository ${owner}/${repo}:`, error);
 
-      // Clean up partial clone if it exists
       if (fs.existsSync(repoPath)) {
         await this.cleanupRepository(owner, repo);
       }
@@ -91,8 +83,6 @@ export class GitManagerService {
       );
     }
   }
-
-
 
   async fetchRepository(
     owner: string,
@@ -106,10 +96,7 @@ export class GitManagerService {
     }
 
     try {
-      // Fetch latest changes
       await execAsync(`git fetch origin ${branch}`, { cwd: repoPath });
-
-      // Reset to latest commit on the branch
       await execAsync(`git reset --hard origin/${branch}`, { cwd: repoPath });
 
       return repoPath;
@@ -129,26 +116,21 @@ export class GitManagerService {
     }
 
     try {
-      // On Windows, we need to handle file locking issues
       const isWindows = os.platform() === 'win32';
 
       if (isWindows) {
-        // Use a more robust cleanup method for Windows
         try {
-          // First try to remove with force
           fs.rmSync(repoPath, { recursive: true, force: true });
         } catch (windowsError: any) {
           if (
             windowsError.code === 'EBUSY' ||
             windowsError.code === 'ENOTEMPTY'
           ) {
-            // Don't throw error, just log warning - the cleanup will happen on next run
             return;
           }
           throw windowsError;
         }
       } else {
-        // Unix systems
         fs.rmSync(repoPath, { recursive: true, force: true });
       }
     } catch (error) {
@@ -156,13 +138,9 @@ export class GitManagerService {
         `Error cleaning up repository ${owner}/${repo}:`,
         error,
       );
-      // Don't throw error, just log it - cleanup is not critical
     }
   }
 
-  /**
-   * Deepen a shallow repository iteratively to get more commits from the last 2 years
-   */
   async deepenRepository(
     owner: string,
     repo: string,
@@ -178,12 +156,11 @@ export class GitManagerService {
     try {
       let currentDepth = 1;
       let commitCount = 0;
-      const maxDepth = 2000; // Increased from 1000 to allow deeper history
-      const maxTimeMinutes = 10; // Maximum time to spend deepening
+      const maxDepth = 2000;
+      const maxTimeMinutes = 10;
       const startTime = Date.now();
 
       while (currentDepth <= maxDepth) {
-        // Check if we've exceeded time limit
         if (Date.now() - startTime > maxTimeMinutes * 60 * 1000) {
           this.logger.warn(
             `⏰ Time limit reached while deepening ${owner}/${repo}. Using current depth: ${currentDepth}`,
@@ -191,26 +168,21 @@ export class GitManagerService {
           break;
         }
 
-        // Fetch more commits to increase depth
         await execAsync(`git fetch --depth=${currentDepth} origin ${branch}`, {
           cwd: repoPath,
         });
 
-        // Count commits in the last 2 years
         commitCount = await this.getCommitCountInLastTwoYears(owner, repo);
 
-        // Check if we have enough commits or if we've reached the target
         if (commitCount >= targetCommits) {
           break;
         }
 
-        // Check if we're getting diminishing returns (less than 10% increase)
         const nextDepth = Math.min(currentDepth * 2, maxDepth);
         if (nextDepth === currentDepth) {
           break;
         }
 
-        // Double the depth for next iteration (exponential backoff)
         currentDepth = nextDepth;
       }
 
@@ -223,9 +195,6 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Get the number of commits in the last 2 years for a repository
-   */
   private async getCommitCountInLastTwoYears(
     owner: string,
     repo: string,
@@ -236,11 +205,9 @@ export class GitManagerService {
       const isWindows = os.platform() === 'win32';
       const sinceArg = isWindows ? `"2 years ago"` : `'2 years ago'`;
 
-      // Use git log with --format=oneline and count the lines
       const gitLogCmd = `git log --since=${sinceArg} --format=oneline`;
       const { stdout } = await execAsync(gitLogCmd, { cwd: repoPath });
 
-      // Count non-empty lines
       const lines = stdout.split('\n').filter((line) => line.trim().length > 0);
       return lines.length;
     } catch (error) {
@@ -251,17 +218,13 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Get commits for a repository (up to 2000 latest commits)
-   */
   private async getCommitsForRepo(owner: string, repo: string): Promise<any[]> {
     const repoPath = this.getRepoPath(owner, repo);
     try {
-      // Use execFile to avoid Windows shell variable expansion
       const { stdout } = await execFileAsync(
         'git',
-        ['log', '--pretty=format:%H|%an|%ae|%aI|%s', '-n', '2000'], // Use %aI for ISO format
-        { cwd: repoPath, timeout: 300000 }, // 5 minute timeout
+        ['log', '--pretty=format:%H|%an|%ae|%aI|%s', '-n', '2000'],
+        { cwd: repoPath, timeout: 300000 },
       );
 
       const commits = stdout
@@ -272,9 +235,8 @@ export class GitManagerService {
           return { sha, author, email, date, message: msgParts.join('|') };
         });
 
-      // Get detailed file statistics for each commit
       const commitsWithStats: any[] = [];
-      const maxCommitsToProcess = 2000; // Process up to 2000 commits
+      const maxCommitsToProcess = 2000;
       const commitsToProcess = commits.slice(0, maxCommitsToProcess);
 
       if (commits.length > maxCommitsToProcess) {
@@ -285,11 +247,10 @@ export class GitManagerService {
 
       for (const commit of commitsToProcess) {
         try {
-          // Use execFile for git show as well
           const { stdout: showOut } = await execFileAsync(
             'git',
             ['show', '--numstat', '--pretty=format:""', commit.sha],
-            { cwd: repoPath, timeout: 60000 }, // 1 minute timeout per commit
+            { cwd: repoPath, timeout: 60000 },
           );
 
           const fileStats = showOut
@@ -324,7 +285,6 @@ export class GitManagerService {
           this.logger.warn(
             `Failed to get stats for commit ${commit.sha}: ${error.message}`,
           );
-          // Add commit without stats if git show fails
           commitsWithStats.push({
             ...commit,
             files_changed: [],
@@ -343,9 +303,6 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Log commits to the Log table with hash chaining (optimized batch processing)
-   */
   private async logCommitsToDatabase(
     watchlistId: string,
     commits: any[],
@@ -358,7 +315,6 @@ export class GitManagerService {
       throw new Error(`Invalid watchlist ID: ${watchlistId}`);
     }
     try {
-      // Get the last log entry for this repository to start the hash chain.
       const lastLog = await this.prisma.log.findFirst({
         where: { watchlist_id: watchlistId },
         orderBy: { timestamp: 'desc' },
@@ -367,12 +323,11 @@ export class GitManagerService {
       let currentPrevHash = lastLog ? lastLog.event_hash : null;
       let processedCount = 0;
       let skippedCount = 0;
-      const batchSize = 1000; // Process in batches of 1000
+      const batchSize = 1000;
 
       for (let i = 0; i < commits.length; i += batchSize) {
         const batch = commits.slice(i, i + batchSize);
 
-        // Check for existing commits first to avoid unnecessary operations
         const eventIds = batch.map((commit) => `commit_${commit.sha}`);
         const existingLogs = await this.prisma.log.findMany({
           where: {
@@ -386,7 +341,6 @@ export class GitManagerService {
           existingLogs.map((log) => log.event_id),
         );
 
-        // Process only new commits
         const newCommits = batch.filter(
           (commit) => !existingEventIds.has(`commit_${commit.sha}`),
         );
@@ -396,9 +350,7 @@ export class GitManagerService {
           continue;
         }
 
-        // Process new commits in parallel
         const commitPromises = newCommits.map(async (commit) => {
-          // Validate and parse the date
           let commitDate: Date;
           try {
             commitDate = new Date(commit.date);
@@ -452,7 +404,6 @@ export class GitManagerService {
           processedCount++;
         });
 
-        // Wait for batch to complete
         await Promise.all(commitPromises);
         skippedCount += batch.length - newCommits.length;
       }
@@ -469,18 +420,12 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Create a hash for a log event (hash chain)
-   */
   private createEventHash(logData: any): string {
     const hash = createHash('sha256');
     hash.update(JSON.stringify(logData));
     return hash.digest('hex');
   }
 
-  /**
-   * Backfill commits for a repository: deepen existing clone and log up to 2000 commits from the last 2 years.
-   */
   async backfillCommitsForRepo(
     owner: string,
     repo: string,
@@ -490,20 +435,16 @@ export class GitManagerService {
     const repoPath = this.getRepoPath(owner, repo);
 
     try {
-      // Ensure repository exists (should be cloned by cloneRepository)
       if (!fs.existsSync(repoPath)) {
         throw new Error(
           `Repository ${owner}/${repo} not found. Run cloneRepository first.`,
         );
       }
 
-      // Deepen the repository to get more commits
       await this.deepenRepository(owner, repo, branch, 2000);
 
-      // Get the actual commits for processing
       const commits = await this.getCommitsForRepo(owner, repo);
 
-      // Log commits to database if watchlistId is provided
       if (watchlistId) {
         await this.logCommitsToDatabase(watchlistId, commits);
       }
@@ -517,14 +458,10 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Update contributor statistics for a watchlist
-   */
   async updateContributorStats(watchlistId: string): Promise<void> {
     try {
       this.logger.log(`📊 Updating contributor stats for watchlist ${watchlistId}`);
 
-      // Get all commit logs for this watchlist
       const logs = await this.prisma.log.findMany({
         where: { watchlist_id: watchlistId, event_type: 'COMMIT' },
         select: { actor: true, timestamp: true, payload: true },
@@ -535,7 +472,6 @@ export class GitManagerService {
         return;
       }
 
-      // Group by author_email
       const statsByEmail: Record<string, any[]> = {};
       for (const log of logs) {
         const email = (log.payload as any)?.email;
@@ -544,10 +480,12 @@ export class GitManagerService {
         statsByEmail[email].push(log);
       }
 
-      // Process each contributor
       for (const [email, entries] of Object.entries(statsByEmail)) {
         const author_name = entries[0].actor;
         const total_commits = entries.length;
+        
+        if (total_commits === 0) continue;
+        
         const lines_added_arr = entries.map(e => (e.payload as any)?.lines_added || 0);
         const lines_deleted_arr = entries.map(e => (e.payload as any)?.lines_deleted || 0);
         const files_changed_arr = entries.map(e => ((e.payload as any)?.files_changed?.length || 0));
@@ -561,14 +499,12 @@ export class GitManagerService {
         const stddev_lines_deleted = stddev(lines_deleted_arr, avg_lines_deleted);
         const stddev_files_changed = stddev(files_changed_arr, avg_files_changed);
         
-        // Commit time histogram (by hour)
         const commit_time_histogram: Record<string, number> = {};
         for (const e of entries) {
           const hour = new Date(e.timestamp).getHours();
           commit_time_histogram[hour.toString()] = (commit_time_histogram[hour.toString()] || 0) + 1;
         }
         
-        // Typical days active
         const daysOfWeek = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const dayCounts: Record<string, number> = {};
         for (const e of entries) {
@@ -581,10 +517,8 @@ export class GitManagerService {
           .filter(([_, count]) => count >= threshold)
           .map(([day]) => day);
         
-        // Last commit date
         const last_commit_date = new Date(Math.max(...entries.map(e => new Date(e.timestamp).getTime())));
         
-        // Upsert into ContributorStats
         await this.prisma.contributorStats.upsert({
           where: { 
             watchlist_id_author_email: { 
@@ -625,7 +559,6 @@ export class GitManagerService {
       
       this.logger.log(`✅ Contributor stats updated for watchlist ${watchlistId}`);
       
-      // Also update repo stats
       await this.updateRepoStats(watchlistId);
       
     } catch (err) {
@@ -634,9 +567,6 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Update repository-wide statistics
-   */
   private async updateRepoStats(watchlistId: string): Promise<void> {
     try {
       const logs = await this.prisma.log.findMany({
@@ -660,14 +590,12 @@ export class GitManagerService {
       const stddevLinesDeleted = stddev(linesDeletedArr, avgLinesDeleted);
       const stddevFilesChanged = stddev(filesChangedArr, avgFilesChanged);
 
-      // Commit time histogram
       const commitTimeHistogram: Record<string, number> = {};
       for (const log of logs) {
         const hour = new Date(log.timestamp).getHours();
         commitTimeHistogram[hour.toString()] = (commitTimeHistogram[hour.toString()] || 0) + 1;
       }
 
-      // Typical days active
       const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const dayCounts: Record<string, number> = {};
       for (const log of logs) {
@@ -710,19 +638,14 @@ export class GitManagerService {
     }
   }
 
-  /**
-   * Ensure stats exist for a watchlist, calculating them if they don't exist
-   */
   async ensureStatsExist(watchlistId: string): Promise<void> {
     try {
       this.logger.log(`🔍 Checking if stats exist for watchlist ${watchlistId}`);
 
-      // Check if repo stats exist
       const existingRepoStats = await this.prisma.repoStats.findUnique({
         where: { watchlist_id: watchlistId }
       });
 
-      // Check if contributor stats exist
       const existingContributorStats = await this.prisma.contributorStats.findFirst({
         where: { watchlist_id: watchlistId }
       });
