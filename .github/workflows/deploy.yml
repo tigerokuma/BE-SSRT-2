@@ -37,7 +37,16 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         script: |
           cd ~/BE-SSRT-2/ossrepo-backend
-          git pull origin main
+          
+          # Stash any local changes and clean working directory
+          git stash
+          git clean -fd
+          
+          # Reset to match remote main branch exactly
+          git fetch origin main
+          git reset --hard origin/main
+          
+          # Install dependencies
           npm install
           
           # Generate Prisma client with latest schema
