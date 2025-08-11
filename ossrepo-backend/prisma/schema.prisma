@@ -165,7 +165,7 @@ model Watchlist {
   repoStats                        RepoStats?
   alertTriggered                   AlertTriggered[]
   sbom                             WatchlistSbom?
-  aiAnomaliesDetected             AIAnomaliesDetected[]
+  aiAnomaliesDetected              AIAnomaliesDetected[]
   vulnerabilities                  Vulnerability[]
   vulnerabilitySummary             VulnerabilitySummary?
 }
@@ -549,6 +549,7 @@ model UserWatchlistSbom {
 
   user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   @@index([user_id])
+
 }
 
 model AIAnomaliesDetected {
