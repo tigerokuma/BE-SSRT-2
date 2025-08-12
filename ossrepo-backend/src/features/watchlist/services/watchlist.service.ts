@@ -213,6 +213,10 @@ export class WatchlistService {
     throw new Error('Not implemented');
   }
 
+  async deleteWatchlistItem(user_id: string, id: string) {
+    return this.watchlistRepository.deleteWatchlistItem(user_id, id);
+  }
+
   /**
    * Get vulnerability data for a watchlist
    */

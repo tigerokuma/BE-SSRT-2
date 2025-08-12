@@ -23,6 +23,9 @@ jobs:
     - name: Install dependencies
       run: npm install
     
+    - name: Generate Prisma client
+      run: npx prisma generate --schema=prisma/schema.prisma
+    
     - name: Build application
       run: npm run build
     
@@ -34,8 +37,27 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         script: |
           cd ~/BE-SSRT-2/ossrepo-backend
-          git pull origin main
+          
+          # Stash any local changes and clean working directory
+          git stash
+          git clean -fd
+          
+          # Reset to match remote main branch exactly
+          git fetch origin main
+          git reset --hard origin/main
+          
+          # Install dependencies
           npm install
+          
+          # Generate Prisma client with latest schema
+          npx prisma generate --schema=prisma/schema.prisma
+          
+          # Apply database migrations
+          npx prisma migrate deploy --schema=prisma/schema.prisma
+          
+          # Build the application
           npm run build
+          
+          # Restart the application
           pm2 restart nestjs-api
           echo "✅ Deployment completed successfully!"

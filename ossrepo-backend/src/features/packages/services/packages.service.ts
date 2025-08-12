@@ -28,6 +28,15 @@ export class PackagesService {
     return await this.packageSearchService.forceRefreshCache(repoUrl);
   }
 
+  // OSV Vulnerability methods for advanced use cases
+  async getPackageVulnerabilities(name: string) {
+    return await this.packageSearchService.getPackageVulnerabilities(name);
+  }
+
+  async searchVulnerabilities(packageName: string) {
+    return await this.packageSearchService.searchVulnerabilities(packageName);
+  }
+
   // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {
@@ -41,6 +50,7 @@ export class PackagesService {
         : '',
       version: pkg.version || '',
       license: pkg.license || '',
+      osv_vulnerabilities: pkg.osv_vulnerabilities || []
     };
   }
 
@@ -58,8 +68,7 @@ export class PackagesService {
         : '',
       version: pkg.version || '',
       license: pkg.license || '',
-
-      // Additional detail fields
+      osv_vulnerabilities: pkg.osv_vulnerabilities || [],
       package_id: pkg.package_id || '',
       published: pkg.published_at
         ? new Date(pkg.published_at).toISOString().split('T')[0]
@@ -67,7 +76,6 @@ export class PackagesService {
       published_at: pkg.published_at,
       risk_score: pkg.risk_score || 0,
       npm_url: pkg.npm_url || '',
-
       // Optional GitHub fields (only included if available)
       ...(pkg.repo_url && { repo_url: pkg.repo_url }),
       ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),

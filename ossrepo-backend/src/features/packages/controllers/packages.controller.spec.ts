@@ -37,8 +37,8 @@ describe('PackagesController', () => {
 
   describe('searchPackages', () => {
     const mockSearchResults = [
-      { name: 'test-package-1', version: '1.0.0' },
-      { name: 'test-package-2', version: '2.0.0' },
+      { name: 'test-package-1', version: '1.0.0', osv_vulnerabilities: [{ id: 'GHSA-test', summary: 'Test vulnerability', severity: 'HIGH' }] },
+      { name: 'test-package-2', version: '2.0.0', osv_vulnerabilities: [] },
     ];
 
     beforeEach(() => {
@@ -63,6 +63,7 @@ describe('PackagesController', () => {
         count: 2,
         responseTime: '100ms'
       });
+      expect(result.results[0]).toHaveProperty('osv_vulnerabilities');
       expect(console.log).toHaveBeenCalledWith(
         'Search "test" completed in 100ms, returned 2 packages'
       );
@@ -114,7 +115,8 @@ describe('PackagesController', () => {
     const mockPackageData = {
       name: 'test-package',
       version: '1.0.0',
-      description: 'Test package description'
+      description: 'Test package description',
+      osv_vulnerabilities: [{ id: 'GHSA-test2', summary: 'Test vulnerability 2', severity: 'MODERATE' }]
     };
 
     it('should return package with summary view by default', async () => {
@@ -124,6 +126,7 @@ describe('PackagesController', () => {
 
       expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'summary');
       expect(result).toEqual(mockPackageData);
+      expect(result).toHaveProperty('osv_vulnerabilities');
     });
 
     it('should return package with specified view', async () => {
@@ -133,6 +136,7 @@ describe('PackagesController', () => {
 
       expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'details');
       expect(result).toEqual(mockPackageData);
+      expect(result).toHaveProperty('osv_vulnerabilities');
     });
 
     it('should trim whitespace from package name', async () => {
