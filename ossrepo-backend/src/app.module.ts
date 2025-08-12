@@ -26,7 +26,9 @@ import { SbomModule } from './features/sbom/sbom.module';
         PrismaModule,
         GraphModule,
         UserModule,
-        AuthModule
+        AuthModule,
+        QueueModule,
+        ActivityModule,
     ],
 })
 export class AppModule {}
