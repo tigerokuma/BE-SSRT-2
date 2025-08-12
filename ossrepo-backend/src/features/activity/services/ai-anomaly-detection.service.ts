@@ -92,8 +92,15 @@ export class AIAnomalyDetectionService {
   }
 
   private getOllamaPath(): string {
+    // Check for environment variable first
+    const envPath = process.env.OLLAMA_PATH;
+    if (envPath) {
+      return envPath;
+    }
+    
+    // Fallback to platform-specific defaults
     return process.platform === 'win32'
-      ? 'C:\\Users\\hruck\\AppData\\Local\\Programs\\Ollama\\ollama.exe'
+      ? 'ollama.exe'
       : 'ollama';
   }
 
