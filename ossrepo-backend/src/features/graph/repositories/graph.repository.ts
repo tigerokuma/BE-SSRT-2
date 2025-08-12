@@ -175,6 +175,19 @@ export class GraphRepository {
         });
     }
 
+    async getSnapshotByRepoCommit(repoId: string, commitId?: string | null) {
+        if (commitId) {
+            return this.prisma.graphSnapshot.findFirst({
+                where: {repo_id: repoId, commit_id: commitId},
+                orderBy: {created_at: 'desc'},
+            });
+        }
+        return this.prisma.graphSnapshot.findFirst({
+            where: {repo_id: repoId},
+            orderBy: {created_at: 'desc'},
+        });
+    }
+
     async queryNodes(filter: any) {
         // Use Prisma or SQL to get nodes by filter
         return this.prisma.graphNode.findMany({where: filter});
@@ -227,6 +240,7 @@ export class GraphRepository {
             data: dto.data,
         });
     }
+
     async queryEdges(filter: any) {
         return this.prisma.graphEdge.findMany({where: filter});
     }

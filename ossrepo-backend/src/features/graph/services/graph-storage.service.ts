@@ -124,6 +124,10 @@ export class GraphStorageService {
         return rows.map(mapPrismaSnapshotToDto);
     }
 
+    async getSnapshotByRepoCommit(repoId: string, commitId?: string | null) {
+        return this.repo.getSnapshotByRepoCommit(repoId, commitId);
+    }
+
     async queryNodes(filter: any) {
         // Use Prisma or SQL to get nodes by filter
         return this.repo.queryNodes(filter)
