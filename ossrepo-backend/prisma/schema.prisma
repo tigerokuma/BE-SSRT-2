@@ -556,7 +556,6 @@ model UserWatchlistSbom {
 
   user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   @@index([user_id])
-
 }
 
 model AIAnomaliesDetected {

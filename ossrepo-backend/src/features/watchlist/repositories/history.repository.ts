@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class HistoryRepository {
-  
   async getRecentPackages() {
     // TODO: Implement data access for recent packages
     // - Query database for user's recent package views
@@ -26,7 +25,7 @@ export class HistoryRepository {
     // - Return success status
     throw new Error('Not implemented');
   }
-} 
+}
 
 // import { Injectable } from '@nestjs/common';
 

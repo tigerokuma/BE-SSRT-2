@@ -3,7 +3,7 @@ import { BuildTaskDto } from '../dto/build-task.dto';
 import { BuildSubtaskDto } from '../dto/build-subtask.dto';
 import { GraphSnapshotDto } from '../dto/graph-snapshot.dto';
 import { GraphNodeDto } from '../dto/graph-node.dto';
-
+import type { Node, Relationship } from 'neo4j-driver';
 
 export function mapPrismaSubtaskToDto(row: any): BuildSubtaskDto {
     return {
@@ -62,4 +62,28 @@ export function mapPrismaBuildTaskToDto(row: any): BuildTaskDto {
     started_at: row.started_at ?? undefined,
     finished_at: row.finished_at ?? undefined,
   };
+}
+
+function isRecordObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object';
+}
+
+function isNode(v: unknown): v is Node {
+  return isRecordObject(v) && 'labels' in v && 'properties' in v;
+}
+
+function isRelationship(v: unknown): v is Relationship {
+  return isRecordObject(v) && 'type' in v && 'properties' in v;
+}
+
+// Optional: flatten nested map/array returns from Cypher
+export function iterAllValues(row: unknown): unknown[] {
+  if (!isRecordObject(row)) return [];
+  const values: unknown[] = [];
+  for (const v of Object.values(row)) {
+    if (Array.isArray(v)) values.push(...v);
+    else if (isRecordObject(v)) values.push(...Object.values(v));
+    else values.push(v);
+  }
+  return values;
 }

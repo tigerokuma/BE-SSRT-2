@@ -71,6 +71,13 @@ def _import_language_loaders() -> dict[str, LanguageLoader]:
     except ImportError:
         loaders["cpp"] = None
 
+    try:
+        from tree_sitter_markdown import language as markdown_language_so
+
+        loaders["markdown"] = markdown_language_so
+    except ImportError:
+        loaders["markdown"] = None
+
     return loaders
 
 
@@ -116,9 +123,9 @@ def load_parsers() -> tuple[dict[str, Parser], dict[str, Any]]:
                 )
 
                 queries[lang_name] = {
-                    "functions": language.query(function_patterns),
-                    "classes": language.query(class_patterns),
-                    "calls": language.query(call_patterns) if call_patterns else None,
+                    "functions": language.query(function_patterns) if function_patterns.strip() else None,
+                    "classes": language.query(class_patterns) if class_patterns.strip() else None,
+                    "calls": language.query(call_patterns) if call_patterns.strip() else None,
                     "config": lang_config,
                 }
 

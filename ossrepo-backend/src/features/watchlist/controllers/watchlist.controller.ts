@@ -11,9 +11,14 @@ export class WatchlistController {
     return this.watchlistService.getWatchlist(user_id);
   }
 
+  @Get(':id/details')
+  async getWatchlistItemDetails(@Param('id') id: string) {
+    return this.watchlistService.getWatchlistItemDetails(id);
+  }
+
   @Post()
   async addToWatchlist(@Body() request: AddToWatchlistRequest & { user_id: string }) {
-    return this.watchlistService.addToWatchlist(request.user_id, request);
+    return this.watchlistService.addToWatchlist(request);
   }
 
   @Patch(':id')
@@ -21,7 +26,7 @@ export class WatchlistController {
     @Param('id') id: string,
     @Body() request: UpdateWatchlistRequest & { user_id: string }
   ) {
-    return this.watchlistService.updateWatchlistItem(request.user_id, id, request);
+    return this.watchlistService.updateWatchlistItem(id, request);
   }
 
   @Delete(':id')

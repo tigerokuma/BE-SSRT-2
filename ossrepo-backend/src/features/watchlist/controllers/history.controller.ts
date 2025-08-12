@@ -10,4 +10,4 @@ export class HistoryController {
     // TODO: Implement recently viewed packages retrieval
     return this.historyService.getRecentPackages();
   }
-} 
+}
