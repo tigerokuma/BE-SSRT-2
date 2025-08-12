@@ -62,16 +62,28 @@ export class RepositorySetupProcessor {
 
     this.logger.log(`🚀 Starting repository setup for ${owner}/${repo} (watchlist: ${watchlistId})`);
 
-    try {
-      await this.prisma.watchlist.update({
-        where: { watchlist_id: watchlistId },
-        data: {
-          status: 'processing',
-          processing_started_at: new Date(),
-          last_error: null,
-        },
-      });
+    // Only check if already completed, allow reprocessing if failed or stuck
+    const existingWatchlist = await this.prisma.watchlist.findUnique({
+      where: { watchlist_id: watchlistId },
+      select: { status: true, processing_completed_at: true }
+    });
 
+    if (existingWatchlist?.status === 'ready' && existingWatchlist.processing_completed_at) {
+      this.logger.log(`⏭️ Repository ${owner}/${repo} (watchlist: ${watchlistId}) already processed and ready, skipping duplicate job`);
+      return;
+    }
+
+    // Set status to processing immediately to prevent race conditions
+    await this.prisma.watchlist.update({
+      where: { watchlist_id: watchlistId },
+      data: {
+        status: 'processing',
+        processing_started_at: new Date(),
+        last_error: null,
+      },
+    });
+
+    try {
       const shouldUseApiForCommits = false;
       let commitCount = 0;
 
@@ -167,43 +179,8 @@ export class RepositorySetupProcessor {
       }
 
       if (historicalScorecardData.length > 0) {
-        this.logger.log(`📊 Storing ${historicalScorecardData.length} health data records in database`);
-
-        for (const healthRecord of historicalScorecardData) {
-          let commitDate: Date;
-          try {
-            if (typeof healthRecord.date === 'string') {
-              const dateStr = healthRecord.date.includes('T')
-                ? healthRecord.date
-                : `${healthRecord.date}T00:00:00Z`;
-              commitDate = new Date(dateStr);
-            } else {
-              commitDate = new Date(healthRecord.date);
-            }
-
-            if (isNaN(commitDate.getTime())) {
-              this.logger.warn(`⚠️ Invalid date from Scorecard: "${healthRecord.date}", using current date`);
-              commitDate = new Date();
-            }
-          } catch (error) {
-            this.logger.warn(`⚠️ Error parsing date from Scorecard: "${healthRecord.date}", using current date`);
-            commitDate = new Date();
-          }
-
-          await this.prisma.healthData.create({
-            data: {
-              watchlist_id: watchlistId,
-              commit_sha: healthRecord.commitSha || null,
-              commit_date: commitDate,
-              scorecard_metrics: healthRecord.checks || healthRecord.scorecardMetrics || null,
-              overall_health_score: healthRecord.score,
-              source: healthRecord.source || 'scorecard',
-              analysis_date: new Date(),
-            },
-          });
-        }
-
-        this.logger.log(`✅ ${historicalScorecardData.length} health data records stored in database`);
+        this.logger.log(`📊 Health analysis completed with ${historicalScorecardData.length} data points`);
+        this.logger.log(`✅ Health data already stored by health analysis service`);
       }
 
       let busFactorResult: any = null;

@@ -134,6 +134,9 @@ export class HealthAnalysisService {
     this.logger.log(
       `📊 Running ${healthCheckCount} local historical health checks for ${owner}/${repo} (parallel)`,
     );
+    this.logger.log(
+      `📊 Scorecard test count: ${healthCheckCount} (commits: ${commits.length}, <1000: 3 tests, <2000: 4 tests, >=2000: 4 tests)`,
+    );
 
     const healthCheckPromises = samplingPoints.map(async (point) => {
       try {
@@ -143,6 +146,7 @@ export class HealthAnalysisService {
           repo,
           branch,
           point.sha,
+          point.date, // Pass the actual commit date
         );
         this.logger.log(
           `   📈 ${point.date.toISOString().split('T')[0]}: ${result.overallHealthScore.toFixed(1)}/10`,
@@ -187,9 +191,10 @@ export class HealthAnalysisService {
   }
 
   private calculateHealthCheckCount(commitCount: number): number {
+    // Ensure we only run a maximum of 4 scorecard tests
     if (commitCount < 1000) return 3;
     if (commitCount < 2000) return 4;
-    return 4;
+    return 4; // Maximum of 4 tests for any repository
   }
 
   private calculateSamplingPoints(
@@ -200,19 +205,24 @@ export class HealthAnalysisService {
 
     const points: Array<{ sha: string; date: Date }> = [];
 
+    this.logger.log(`🔍 Calculating sampling points: ${count} tests for ${commits.length} commits`);
+
     points.push({
       sha: commits[0].sha,
       date: commits[0].date,
     });
+    this.logger.log(`   📍 Added first commit: ${commits[0].sha.substring(0, 8)}`);
 
     if (count > 2) {
       const step = (commits.length - 1) / (count - 1);
+      this.logger.log(`   📍 Adding ${count - 2} intermediate points with step ${step.toFixed(2)}`);
       for (let i = 1; i < count - 1; i++) {
         const index = Math.floor(i * step);
         points.push({
           sha: commits[index].sha,
           date: commits[index].date,
         });
+        this.logger.log(`   📍 Added intermediate commit ${i}: ${commits[index].sha.substring(0, 8)} (index ${index})`);
       }
     }
 
@@ -223,9 +233,13 @@ export class HealthAnalysisService {
           sha: lastCommit.sha,
           date: lastCommit.date,
         });
+        this.logger.log(`   📍 Added last commit: ${lastCommit.sha.substring(0, 8)}`);
+      } else {
+        this.logger.log(`   📍 Last commit already included, skipping`);
       }
     }
 
+    this.logger.log(`   📍 Total sampling points: ${points.length}`);
     return points;
   }
 
@@ -235,13 +249,14 @@ export class HealthAnalysisService {
     repo: string,
     branch: string = 'main',
     commitShaOverride?: string,
+    commitDate?: Date,
   ): Promise<HealthAnalysisResult> {
     try {
       const commitSha =
         commitShaOverride ||
         (await this.getLatestCommitSha(owner, repo, branch));
 
-      const commitDate = new Date();
+      const dateToUse = commitDate || new Date();
       const scorecardResult = await this.runScorecard(owner, repo, commitSha);
       const overallHealthScore =
         this.calculateScorecardHealthScore(scorecardResult);
@@ -249,7 +264,7 @@ export class HealthAnalysisService {
       const result: HealthAnalysisResult = {
         watchlistId,
         commitSha,
-        commitDate,
+        commitDate: dateToUse,
         scorecardMetrics: scorecardResult,
         overallHealthScore,
         analysisDate: new Date(),
