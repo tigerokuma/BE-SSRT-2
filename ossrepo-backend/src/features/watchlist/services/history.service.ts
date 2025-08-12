@@ -18,4 +18,4 @@ export class HistoryService {
     // - Maintain history for recent packages feature
     return this.historyRepository.recordPackageView(packageName);
   }
-} 
+}
