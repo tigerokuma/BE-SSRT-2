@@ -72,7 +72,9 @@ export class AISummaryService {
 
   private async checkOllamaAvailability(): Promise<boolean> {
     try {
-      await execAsync('ollama --version');
+      const envPath = process.env.OLLAMA_PATH;
+      const ollamaPath = envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
+      await execAsync(`"${ollamaPath}" --version`);
       return true;
     } catch (error) {
       this.logger.warn(
@@ -84,10 +86,12 @@ export class AISummaryService {
 
   private async ensureModelDownloaded(): Promise<void> {
     try {
-      const { stdout } = await execAsync('ollama list');
+      const envPath = process.env.OLLAMA_PATH;
+      const ollamaPath = envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
+      const { stdout } = await execAsync(`"${ollamaPath}" list`);
       if (!stdout.includes(this.modelName)) {
         this.logger.log(`📥 Downloading ${this.modelName} model...`);
-        await execAsync(`ollama pull ${this.modelName}`);
+        await execAsync(`"${ollamaPath}" pull ${this.modelName}`);
         this.logger.log(`✅ ${this.modelName} model downloaded successfully`);
       } else {
         this.logger.log(`✅ ${this.modelName} model already available`);
@@ -154,10 +158,9 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
 
   private async generateWithMistral(prompt: string): Promise<string> {
     try {
-      const ollamaPath =
-        process.platform === 'win32'
-          ? 'C:\\Users\\hruck\\AppData\\Local\\Programs\\Ollama\\ollama.exe'
-          : 'ollama';
+      // Check for environment variable first
+      const envPath = process.env.OLLAMA_PATH;
+      const ollamaPath = envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
 
       this.logger.log(
         `🔍 Executing Ollama: ${ollamaPath} run ${this.modelName}`,
