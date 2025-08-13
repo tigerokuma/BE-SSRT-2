@@ -116,12 +116,13 @@ export class SbomQueryService {
     };
 
     // Build nodes: main node + direct dependencies only
-    const nodes = [{ id: node.ref, color: "grey" }];
+    const nodes = [{ id: node.ref, color: "grey", license: node.license }];
     const links: { source: string; target: string }[] = [];
 
     for (const dep of directDeps) {
       const isVuln = isNodeVulnerable(dep);
-      nodes.push({ id: dep, color: isVuln ? "red" : "lightblue" });
+      const copLic = sbomJson.components.find((d: any) => d['bom-ref'] === dep).licenses;
+      nodes.push({ id: dep, color: isVuln ? "red" : "lightblue" , license: copLic ? copLic[0].license.id : undefined });
       links.push({ source: node.ref, target: dep });
     }
 
