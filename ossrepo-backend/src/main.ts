@@ -31,11 +31,13 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:3000', // React dev server
+      'http://localhost:8000',
       'http://localhost:3001', // Alternative React port
       'http://localhost:5173', // Vite dev server
       'http://localhost:8080', // Vue/other dev servers
       'http://127.0.0.1:3000', // Alternative localhost
       'http://127.0.0.1:5173', // Alternative localhost
+      'http://127.0.0.1:8080',
       // Add your production domains here
       // 'https://yourapp.com',
       // 'https://www.yourapp.com'
@@ -50,7 +52,7 @@ async function bootstrap() {
     new ValidationPipe({
       transform: true,
       whitelist: true,
-      forbidNonWhitelisted: true,
+      forbidNonWhitelisted: false,
     }),
   );
 
