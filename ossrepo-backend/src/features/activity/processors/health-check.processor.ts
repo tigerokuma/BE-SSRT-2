@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { HealthAnalysisService } from '../services/health-analysis.service';
+import { SlackService } from 'src/features/alert/services/slack.service';
 
 interface HealthCheckJobData {
   watchlistId?: string;
@@ -18,6 +19,7 @@ export class HealthCheckProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly healthAnalysisService: HealthAnalysisService,
+    private readonly slackService: SlackService,
     @InjectQueue('health-check') private readonly healthQueue: Queue,
   ) {}
 
@@ -240,6 +242,8 @@ export class HealthCheckProcessor {
         },
       };
 
+      const description = `Health score decreased by ${decrease.toFixed(1)} points in ${repoName} (${previousScore.toFixed(1)} → ${currentScore.toFixed(1)})`
+
       await this.prisma.alertTriggered.create({
         data: {
           user_watchlist_id: userWatchlistId,
@@ -251,10 +255,15 @@ export class HealthCheckProcessor {
           alert_level: 'moderate',
           threshold_type: 'health_score_decrease',
           threshold_value: 0,
-          description: `Health score decreased by ${decrease.toFixed(1)} points in ${repoName} (${previousScore.toFixed(1)} → ${currentScore.toFixed(1)})`,
+          description: description,
           details_json: details,
         },
       });
+
+      await this.slackService.sendMessage({
+        user_watchlist_id: userWatchlistId,
+        description: description
+      })
 
       this.logger.log(
         `🚨 HEALTH SCORE DECREASE ALERT CREATED: ${repoName} - Decrease: ${decrease.toFixed(1)} points`,

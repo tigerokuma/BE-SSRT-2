@@ -22,6 +22,7 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 
 import { SbomModule } from '../sbom/sbom.module';
+import { AlertModule } from '../alert/alert.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { SbomModule } from '../sbom/sbom.module';
     QueueModule,
     HttpModule,
     SbomModule,
+    AlertModule,
   ],
   controllers: [ActivityController],
   providers: [
