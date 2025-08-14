@@ -21,6 +21,8 @@ import { QueueModule } from '../../common/queue/queue.module';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 
+import { SbomModule } from '../sbom/sbom.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -30,6 +32,7 @@ import { ConfigModule } from '@nestjs/config';
     PrismaModule,
     QueueModule,
     HttpModule,
+    SbomModule,
   ],
   controllers: [ActivityController],
   providers: [
