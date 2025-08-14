@@ -118,6 +118,30 @@ Returns the updated or created email timing object (shape matches EmailTime).
 
 ---
 
+
+### 6. **GET `/email/get-email/:user_id`**
+
+**Description:**  
+Retrieve the email address of a user.
+
+**URL Parameters:**  
+- `user_id` (string, required): ID of the user.
+
+**Response:**  
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+---
+
+**Errors:**  
+- 400 Bad Request if `token` missing  
+- 502 Bad Gateway if confirmation fails
+
+---
+
 # DTOs Summary
 
 | DTO Name        | Fields                                         | Validation                                   |
@@ -147,6 +171,9 @@ Returns the updated or created email timing object (shape matches EmailTime).
 
 - **addEmailTime(emailTimeInput)**:  
   Adds or updates email timing info for the user.
+
+- **getEmailAddress(user_id)**:  
+  Retrieves the email address of the user.
 
 - **sendTimedEmails (cron every 3 minutes)**:  
   Checks users whose `next_email_time` is due, fetches top 10 alerts, sends alert emails, and updates next email time.
