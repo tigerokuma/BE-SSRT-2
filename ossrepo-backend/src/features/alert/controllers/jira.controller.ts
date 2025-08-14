@@ -86,4 +86,14 @@ export class JiraController {
       throw new BadGatewayException('Failed to check Jira link');
     }
   }
+
+  @Get('check-link/:user_watchlist_id')
+  async checkJiraCon(@Param('user_watchlist_id') user_watchlist_id: string) {
+    try {
+      return await this.jiraService.checkJiraUserWatch(user_watchlist_id);
+    } catch (err) {
+      this.logger.error('Failed to check Jira connection', err.stack);
+      throw new BadGatewayException('Failed to check Jira connection');
+    }
+  }
 }

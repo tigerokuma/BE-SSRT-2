@@ -50,7 +50,7 @@ export class JiraService {
   }
 
   async createIssue(issue: JiraIssue) {
-    const jiraInfo = await this.jiraRepository.getJiraInfo(issue.user_id);
+    const jiraInfo = await this.jiraRepository.getJiraInfoUserWatch(issue.user_watchlist_id);
 
     if(!jiraInfo?.webtrigger_url)
       throw new Error('Missing webtrigger_url'); 
@@ -82,13 +82,28 @@ export class JiraService {
   }
 
   async getUserInfo(user_id: string){
-    const userInfo = await this.jiraRepository.getJiraInfo(user_id);
+    const userInfo = await this.jiraRepository.getJiraInfoUser(user_id);
     return {project_key: userInfo?.project_key};
   }
 
   async linkExists(checkJira: CheckJira) {
     const temp = await this.jiraRepository.checkJiraLink(checkJira);
     return temp?.user.user_id;
+  }
+
+  async checkJiraUserWatch(user_watchlist_id: string) {
+    const jiraInfo = await this.jiraRepository.getJiraInfoUserWatch(user_watchlist_id);
+    if (jiraInfo) {
+      return {
+        success: true,
+        data: jiraInfo
+      };
+    }
+    
+    return {
+      success: false,
+      message: 'No Jira info found for this watchlist'
+    };
   }
 
 }
