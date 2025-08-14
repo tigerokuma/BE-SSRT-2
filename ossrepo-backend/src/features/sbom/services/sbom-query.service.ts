@@ -130,8 +130,10 @@ export class SbomQueryService {
   }
 
   // Search the node deps
-  searchNodeDeps(sbomText: string, search: string) {
-    // Parse and normalize the search
+  searchNodeDeps(
+    sbomText: string,
+    search: string
+  ) {
     const sbomJson = JSON.parse(sbomText);
     const searchLower = search.toLowerCase();
 
@@ -147,14 +149,22 @@ export class SbomQueryService {
       (a.ref || "").localeCompare(b.ref || "", undefined, { sensitivity: "base" })
     );
 
-    return matchedNodes.map((node: any) => ({
-      node: {
-        id: node.ref,
-        name: node.name,
-        dependsOn: node.dependsOn || [],
-      },
-    }));
+    return matchedNodes.map((node: any) => {
+      // Find the component in sbomJson.components
+      const component = sbomJson.components.find((c: any) => c['bom-ref'] === node.ref);
+      const license = component?.licenses?.[0]?.license?.id; // grab the first license ID if exists
+
+      return {
+        node: {
+          id: node.ref,
+          name: node.name,
+          license: license,           // <-- include the license
+          dependsOn: node.dependsOn || [],
+        },
+      };
+    });
   }
+
 
   async getDepList(user_id: string) {
     return await this.sbomRepo.getWatchFollows(user_id);
