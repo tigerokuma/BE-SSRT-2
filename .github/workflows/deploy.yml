@@ -2,7 +2,7 @@ name: Deploy to GCP
 
 on:
   push:
-    branches: [ main ]
+    branches: [ deployed-no-error ]  # Changed from main to deployed-no-error
 
 jobs:
   deploy:
@@ -42,9 +42,9 @@ jobs:
           git stash
           git clean -fd
           
-          # Reset to match remote main branch exactly
-          git fetch origin main
-          git reset --hard origin/main
+          # Reset to match remote deployed-no-error branch exactly
+          git fetch origin deployed-no-error
+          git reset --hard origin/deployed-no-error  # Changed from main to deployed-no-error
           
           # Install dependencies
           npm install
