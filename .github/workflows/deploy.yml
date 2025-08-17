@@ -2,9 +2,7 @@ name: Deploy to GCP
 
 on:
   push:
-    branches: 
-      - main
-      - deployed-no-error  # Now it will run on both branches
+    branches: [ deployed-no-error ]
 
 jobs:
   deploy:
@@ -40,29 +38,35 @@ jobs:
         script: |
           cd ~/BE-SSRT-2/ossrepo-backend
           
-          # Get the branch name that triggered the workflow
-          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          # Fetch and update code
+          git fetch origin deployed-no-error
+          git reset --hard origin/deployed-no-error
           
-          # Stash any local changes and clean working directory
-          git stash
-          git clean -fd
-          
-          # Reset to match the branch that triggered the workflow
-          git fetch origin ${BRANCH_NAME}
-          git reset --hard origin/${BRANCH_NAME}
-          
-          # Install dependencies
-          npm install
+          # Clean install dependencies
+          rm -rf node_modules
+          rm -rf dist
+          npm ci
           
           # Generate Prisma client with latest schema
           npx prisma generate --schema=prisma/schema.prisma
           
-          # Apply database migrations
-          npx prisma migrate deploy --schema=prisma/schema.prisma
-          
           # Build the application
           npm run build
           
-          # Restart the application
-          pm2 restart nestjs-api
-          echo "✅ Deployment completed successfully from ${BRANCH_NAME} branch!"
+          # Verify dist folder exists and contains main.js
+          if [ ! -f "dist/main.js" ]; then
+            echo "Error: dist/main.js not found after build!"
+            exit 1
+          fi
+          
+          # Start/Restart with PM2
+          if pm2 list | grep -q "nestjs-api"; then
+            pm2 restart nestjs-api --update-env
+          else
+            pm2 start dist/main.js --name nestjs-api
+          fi
+          
+          # Verify the process is running
+          pm2 list
+          
+          echo "✅ Deployment completed successfully!"
