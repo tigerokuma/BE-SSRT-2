@@ -20,6 +20,7 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
+import {GraphModule} from "../graph/graph.module";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ConfigModule } from '@nestjs/config';
     PrismaModule,
     QueueModule,
     HttpModule,
+    GraphModule,
   ],
   controllers: [ActivityController],
   providers: [

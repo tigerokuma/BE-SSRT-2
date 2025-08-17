@@ -317,17 +317,54 @@ export class GraphRepository {
     }
 
 
+    // src/features/graph/repositories/graph.repository.ts
     async createGraphSubtask(dto: CreateBuildSubtaskDto): Promise<BuildSubtaskDto> {
+        // Accept both snake_case and camelCase just in case
+        const b = dto as any;
+        const task_id: string = b.task_id ?? b.taskId;
+        const language: string = b.language ?? b.lang ?? 'all';
+        const step: string = b.step ?? b.phase; // e.g. "ast"
+        const status: string | undefined = b.status;
+        const message: string | null = b.message ?? null;
+
+        const toDate = (v: any) => (v ? new Date(v) : undefined);
+        const started_at = toDate(b.started_at ?? b.startedAt);
+        const finished_at = toDate(b.finished_at ?? b.finishedAt);
+
+        if (!task_id) {
+            throw new Error('createGraphSubtask: task_id is required');
+        }
+        if (!step) {
+            throw new Error('createGraphSubtask: step is required');
+        }
+
+        // (Optional) uncomment for quick inspection
+        // console.log('createGraphSubtask normalized:', { task_id, language, step, status, started_at });
+
         const row = await this.prisma.buildSubtask.create({
             data: {
-                task_id: dto.task_id,
-                language: dto.language,
-                step: dto.step,
-                status: dto.status ?? 'pending',
-                message: dto.message ?? null,
+                task_id,
+                language,
+                step,                          // <-- use the value, NOT the `String` constructor
+                status: status ?? 'pending',
+                message,
+                started_at,
+                finished_at,
+                created_at: new Date(),
             },
         });
-        return mapPrismaSubtaskToDto(row);
+
+        return {
+            subtask_id: row.subtask_id,
+            task_id: row.task_id,
+            language: row.language,
+            step: row.step,
+            status: row.status,
+            message: row.message ?? undefined,
+            created_at: row.created_at,
+            started_at: row.started_at ?? undefined,
+            finished_at: row.finished_at ?? undefined,
+        };
     }
 
     async getGraphSubtaskById(subtaskId: string): Promise<BuildSubtaskDto | null> {
@@ -345,17 +382,32 @@ export class GraphRepository {
         return rows.map(mapPrismaSubtaskToDto);
     }
 
-    async updateGraphSubtask(subtaskId: string, dto: UpdateBuildSubtaskDto): Promise<BuildSubtaskDto> {
+    async updateGraphSubtask(subtask_id: string, dto: UpdateBuildSubtaskDto): Promise<BuildSubtaskDto> {
+        const b = dto as any;
+        const toDate = (v: any) => (v ? new Date(v) : undefined);
+
         const row = await this.prisma.buildSubtask.update({
-            where: {subtask_id: subtaskId},
+            where: {subtask_id},
             data: {
-                status: dto.status,
-                message: dto.message,
-                step: dto.step,
-                finished_at: dto.status === 'completed' ? new Date() : undefined,
+                status: b.status,
+                message: b.message ?? null,
+                step: b.step ?? b.phase,                    // <-- use dto value
+                started_at: toDate(b.started_at ?? b.startedAt),
+                finished_at: toDate(b.finished_at ?? b.finishedAt),
             },
         });
-        return mapPrismaSubtaskToDto(row);
+
+        return {
+            subtask_id: row.subtask_id,
+            task_id: row.task_id,
+            language: row.language,
+            step: row.step,
+            status: row.status,
+            message: row.message ?? undefined,
+            created_at: row.created_at,
+            started_at: row.started_at ?? undefined,
+            finished_at: row.finished_at ?? undefined,
+        };
     }
 
     async deleteGraphSubtask(subtaskId: string): Promise<void> {

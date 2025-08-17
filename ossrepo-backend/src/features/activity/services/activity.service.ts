@@ -4,6 +4,7 @@ import { Queue } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { GitHubApiService } from './github-api.service';
+import {GraphService} from "../../graph/services/graph.service";
 
 @Injectable()
 export class ActivityService {
@@ -14,6 +15,7 @@ export class ActivityService {
     @InjectQueue('repository-setup')
     private readonly repositorySetupQueue: Queue,
     private readonly githubApiService: GitHubApiService,
+    private readonly graphService: GraphService,
   ) {}
 
   async addToWatchlist(dto: AddToWatchlistDto) {
@@ -120,6 +122,15 @@ export class ActivityService {
           repoInfo.is_large_repo,
           repoInfo.size,
         );
+      }
+
+      const repoId = `${owner}/${repo}`;
+
+      try {
+        await this.graphService.triggerBuild(repoId, {});
+        this.logger.log(`Triggered graph build for ${repoId}`);
+      } catch (e) {
+        this.logger.error(`Failed to trigger graph build for ${repoId}: ${e?.message || e}`);
       }
 
       return {
