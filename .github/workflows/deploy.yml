@@ -36,10 +36,25 @@ jobs:
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_KEY }}
         script: |
-          cd ~/BE-SSRT-2/ossrepo-backend
+          # Create directory structure if it doesn't exist
+          mkdir -p ~/BE-SSRT-2
+          
+          # Go to the project root directory
+          cd ~/BE-SSRT-2
+          
+          # Clone repository if it doesn't exist
+          if [ ! -d "ossrepo-backend" ]; then
+            git clone https://github.com/SSRT-CSYE-7220/BE-SSRT-2.git .
+          fi
+          
+          cd ossrepo-backend
+          
+          # Set up Git if this is first time
+          git config --global --add safe.directory /home/ossrepotracker/BE-SSRT-2/ossrepo-backend
           
           # Fetch and update code
           git fetch origin deployed-no-error
+          git checkout deployed-no-error
           git reset --hard origin/deployed-no-error
           
           # Clean install dependencies
