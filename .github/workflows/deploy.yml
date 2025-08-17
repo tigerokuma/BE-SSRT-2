@@ -35,22 +35,26 @@ jobs:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_KEY }}
-        timeout: 300s    # Added: 5 minutes timeout
-        command_timeout: 20m  # Added: 20 minutes command timeout
+        timeout: 300s
+        command_timeout: 20m
         script: |
-          # Go to home directory and remove existing directory if exists
+          # Force remove existing directory with sudo
           cd ~
-          rm -rf BE-SSRT-2
+          sudo rm -rf BE-SSRT-2
           
-          # Clone the repository fresh (since we know SSH is working)
-          git clone git@github.com:tigerokuma/BE-SSRT-2.git
-          cd BE-SSRT-2/ossrepo-backend
+          # Clone with force
+          git clone --force git@github.com:tigerokuma/BE-SSRT-2.git
+          cd BE-SSRT-2/ossrepo-backend || exit 1
+          
+          # Make sure we're in the right directory
+          pwd
+          ls -la
           
           # Checkout the deployment branch
-          git checkout deployed-no-error
+          git checkout deployed-no-error || exit 1
           
-          # Install dependencies with legacy peer deps due to Node.js version mismatch
-          npm install --legacy-peer-deps
+          # Install dependencies with legacy peer deps
+          npm install --legacy-peer-deps --force
           
           # Generate Prisma client with latest schema
           npx prisma generate --schema=prisma/schema.prisma
