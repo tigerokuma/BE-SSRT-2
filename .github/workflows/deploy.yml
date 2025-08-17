@@ -35,6 +35,8 @@ jobs:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_KEY }}
+        timeout: 300s    # Added: 5 minutes timeout
+        command_timeout: 20m  # Added: 20 minutes command timeout
         script: |
           # Go to home directory and remove existing directory if exists
           cd ~
@@ -47,8 +49,8 @@ jobs:
           # Checkout the deployment branch
           git checkout deployed-no-error
           
-          # Install dependencies
-          npm install
+          # Install dependencies with legacy peer deps due to Node.js version mismatch
+          npm install --legacy-peer-deps
           
           # Generate Prisma client with latest schema
           npx prisma generate --schema=prisma/schema.prisma
