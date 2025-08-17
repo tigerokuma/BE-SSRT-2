@@ -38,23 +38,18 @@ jobs:
         timeout: 300s
         command_timeout: 20m
         script: |
-          # Force remove existing directory with sudo
-          cd ~
-          sudo rm -rf BE-SSRT-2
+          # Go to the existing repository
+          cd ~/BE-SSRT-2/ossrepo-backend
           
-          # Clone with force
-          git clone --force git@github.com:tigerokuma/BE-SSRT-2.git
-          cd BE-SSRT-2/ossrepo-backend || exit 1
+          # Fetch latest changes
+          git fetch origin
           
-          # Make sure we're in the right directory
-          pwd
-          ls -la
-          
-          # Checkout the deployment branch
-          git checkout deployed-no-error || exit 1
+          # Switch to deployment branch
+          git checkout deployed-no-error
+          git pull origin deployed-no-error
           
           # Install dependencies with legacy peer deps
-          npm install --legacy-peer-deps --force
+          npm install --legacy-peer-deps
           
           # Generate Prisma client with latest schema
           npx prisma generate --schema=prisma/schema.prisma
