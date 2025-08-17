@@ -38,39 +38,36 @@ jobs:
         timeout: 300s
         command_timeout: 20m
         script: |
-          # Go to the existing repository
           cd ~/BE-SSRT-2/ossrepo-backend
           
-          # Fetch latest changes
-          git fetch origin
+          # Get absolute path
+          CURRENT_PATH=$(pwd)
+          echo "Current path: $CURRENT_PATH"
           
-          # Switch to deployment branch
+          # Fetch and update code
+          git fetch origin
           git checkout deployed-no-error
           git pull origin deployed-no-error
           
-          # Install dependencies with legacy peer deps
+          # Install dependencies
           npm install --legacy-peer-deps
           
-          # Generate Prisma client with latest schema
+          # Generate Prisma client
           npx prisma generate --schema=prisma/schema.prisma
           
           # Build the application
           npm run build
           
-          # Verify dist folder exists and contains main.js
-          if [ ! -f "dist/main.js" ]; then
-            echo "Error: dist/main.js not found after build!"
-            exit 1
-          fi
+          # Stop existing PM2 process if exists
+          pm2 delete nestjs-api || true
           
-          # Start/Restart with PM2
-          if pm2 list | grep -q "nestjs-api"; then
-            pm2 restart nestjs-api --update-env
-          else
-            pm2 start dist/main.js --name nestjs-api
-          fi
+          # Start with PM2 using absolute path
+          pm2 start $CURRENT_PATH/dist/main.js --name nestjs-api
           
-          # Verify the process is running
+          # Show running processes
           pm2 list
+          
+          # Show recent logs
+          pm2 logs nestjs-api --lines 20 --nostream
           
           echo "✅ Deployment completed successfully!"
