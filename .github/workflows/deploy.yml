@@ -2,7 +2,9 @@ name: Deploy to GCP
 
 on:
   push:
-    branches: [ main ]
+    branches: 
+      - main
+      - deployed-no-error  # Now it will run on both branches
 
 jobs:
   deploy:
@@ -38,13 +40,16 @@ jobs:
         script: |
           cd ~/BE-SSRT-2/ossrepo-backend
           
+          # Get the branch name that triggered the workflow
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          
           # Stash any local changes and clean working directory
           git stash
           git clean -fd
           
-          # Reset to match remote main branch exactly
-          git fetch origin main
-          git reset --hard origin/main
+          # Reset to match the branch that triggered the workflow
+          git fetch origin ${BRANCH_NAME}
+          git reset --hard origin/${BRANCH_NAME}
           
           # Install dependencies
           npm install
@@ -60,4 +65,4 @@ jobs:
           
           # Restart the application
           pm2 restart nestjs-api
-          echo "✅ Deployment completed successfully!"
+          echo "✅ Deployment completed successfully from ${BRANCH_NAME} branch!"
