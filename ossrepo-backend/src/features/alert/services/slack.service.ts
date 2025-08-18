@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import axios from 'axios';
 import { SlackRepository } from "../repositories/slack.repository";
 import { SlackOauthConnect, UserChannel, UserMessage } from "../dto/slack.dto";
@@ -8,6 +8,7 @@ export class SlackService{
     private readonly clientId: string;
     private readonly clientSecret: string;
     private readonly redirectUrl: string;
+    private readonly frontendUrl: string;
 
     constructor(
         private slackRepository: SlackRepository,
@@ -15,6 +16,7 @@ export class SlackService{
         this.clientId = process.env.SLACK_CLIENT_ID!;
         this.clientSecret = process.env.SLACK_CLIENT_SECRET!;
         this.redirectUrl = process.env.SLACK_REDIRECT_URL!;
+        this.frontendUrl = process.env.FRONTEND_URL!;
     }
 
     async exchangeCodeForToken(slackOauthConnect: SlackOauthConnect) {
@@ -48,7 +50,7 @@ export class SlackService{
     }
 
     async getChannels(user_id: string) { 
-        const token = await this.slackRepository.getSlackInfo(user_id);
+        const token = await this.slackRepository.getSlackInfoUser(user_id);
         const response = await axios.get('https://slack.com/api/conversations.list', {
             headers: { Authorization: `Bearer ${token?.slack_token}` },
             params: {
@@ -75,7 +77,7 @@ export class SlackService{
     }
 
     async joinChannel(userChannel: UserChannel) {
-        const token = await this.slackRepository.getSlackInfo(userChannel.user_id);
+        const token = await this.slackRepository.getSlackInfoUser(userChannel.user_id);
         const response = await axios.post(
             'https://slack.com/api/conversations.join',
             { channel: userChannel.channel },
@@ -100,7 +102,7 @@ export class SlackService{
     }
 
     async getSlackChannel(user_id: string) {
-        const slackInfo = await this.slackRepository.getSlackInfo(user_id);
+        const slackInfo = await this.slackRepository.getSlackInfoUser(user_id);
         
         if(!slackInfo?.slack_channel) {
             return {};
@@ -119,23 +121,51 @@ export class SlackService{
     }
 
     async sendMessage(userMessage: UserMessage) {
-        const repo = await this.slackRepository.getSlackInfo(userMessage.user_id);
-        const response = await axios.post(
-            'https://slack.com/api/chat.postMessage',
-            {
-                channel: repo?.slack_channel,
-                text: userMessage.message,
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${repo?.slack_token}`,
-                    'Content-Type': 'application/json',
-                },
-            },
-        );
+        try {
+            const slackInfo = await this.slackRepository.getSlackInfoUserWatch(userMessage.user_watchlist_id);
+            const package_name = await this.slackRepository.getPackageName(userMessage.user_watchlist_id);
 
-        if (!response.data.ok) {
-            throw new Error(`Slack API error: ${response.data.error}`);
+            const response = await axios.post(
+                'https://slack.com/api/chat.postMessage',
+                {
+                    channel: slackInfo?.slack_channel,
+                    blocks: [
+                        {
+                            type: "header",
+                            text: {
+                                type: "plain_text",
+                                text: `New alert in ${package_name}`,
+                            }
+                        },
+                        {
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: userMessage.description
+                            }
+                        },
+                        {
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: `<${this.frontendUrl}/package-details?id=${userMessage.user_watchlist_id}>`
+                            }
+                        }
+                    ]
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${slackInfo?.slack_token}`,
+                        'Content-Type': 'application/json',
+                    },
+                },
+            );
+
+            if (!response.data.ok) {
+                throw new Error(`Slack API error: ${response.data.error}`);
+            }
+        } catch (err) {
+            Logger.error("Slack message failed to send.", err);
         }
 
     }

@@ -22,6 +22,9 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import {GraphModule} from "../graph/graph.module";
 
+import { SbomModule } from '../sbom/sbom.module';
+import { AlertModule } from '../alert/alert.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -32,6 +35,8 @@ import {GraphModule} from "../graph/graph.module";
     QueueModule,
     HttpModule,
     GraphModule,
+    SbomModule,
+    AlertModule,
   ],
   controllers: [ActivityController],
   providers: [

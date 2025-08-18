@@ -10,7 +10,7 @@ export class JiraIssue {
     @IsString()
     @IsNotEmpty()
     @IsDefined()
-    user_id: string;
+    user_watchlist_id: string;
 
     @IsString()
     @IsNotEmpty()

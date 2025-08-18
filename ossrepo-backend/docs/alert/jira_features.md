@@ -114,13 +114,8 @@ Fetch Jira user info (project key).
 **Description:**  
 Check if a Jira project link exists.
 
-**Request Body:**  
-```json
-{
-  "project_key": "string",
-  "webtrigger_url": "string"
-}
-```
+**URL Parameters:**  
+- `user_watchlist_id` (string, required): User Watchlist ID.
 
 **Response:**  
 ```json
@@ -133,12 +128,39 @@ Check if a Jira project link exists.
 
 ---
 
+### 7. **Get `/jira/check-link/:user_watchlist_id`**
+
+**Description:**  
+Check if Jira info exists for a given user watchlist.
+
+**Response:**  
+```json
+{
+  "success": true,
+  "data": {
+    "project_key": "string",
+    "webtrigger_url": "string"
+  }
+}
+// or if not found
+{
+  "success": false,
+  "message": "No Jira info found for this watchlist"
+}
+```
+- Returns data if link exists, otherwise null.
+
+**Errors:**  
+- 502 Bad Gateway if check fails
+
+---
+
 # DTOs Summary
 
 | DTO Name    | Fields                                  | Validation                      |
 |-------------|-----------------------------------------|--------------------------------|
 | `JiraInsert`| `user_id: string`, `webtrigger_url: string`, `project_key: string` | -                              |
-| `JiraIssue` | `user_id: string`, `summary: string`, `description: string`         | Required, non-empty strings    |
+| `JiraIssue` | `user_watchlist_id: string`, `summary: string`, `description: string`         | Required, non-empty strings    |
 | `CheckJira` | `project_key: string`, `webtrigger_url: string`                     | Required, non-empty strings    |
 | `TempJiraInfo` | `code: string`, `project_key: string`, `webtrigger_url: string`   | Required, non-empty strings    |
 | `TempJiraInsert` | `code: string`, `project_key: string`, `webtrigger_url: string`, `expires_at: Date` | -                          |
@@ -168,6 +190,9 @@ Check if a Jira project link exists.
 
 - **linkExists(checkJira)**:  
   Checks if a Jira link exists for the given project key and webhook URL.
+
+- **checkJiraUserWatch(user_watchlist_id)**:  
+  Returns Jira info associated with a user watchlist.
 
 - **Cron job every 15 minutes:**  
   Cleans up expired temporary Jira codes.

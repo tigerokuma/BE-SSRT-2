@@ -146,7 +146,7 @@ Handle Slack OAuth callback, exchange code for access token.
 |------------------|---------------------------------|---------------------------------|
 | `SlackOauthConnect` | `code: string`, `state: string` | Required, non-empty strings      |
 | `SlackInsert`    | `user_id: string`, `token: string`, `channel?: string` | Required for user_id and token  |
-| `UserMessage`    | `user_id: string`, `message: string` | Required, non-empty strings      |
+| `UserMessage`    | `user_watchlist_id: string`, `message: string` | Required, non-empty strings      |
 | `UserChannel`    | `user_id: string`, `channel: string` | Required, non-empty strings      |
 
 ---

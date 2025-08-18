@@ -68,6 +68,20 @@ export class EmailController {
     }
   }
 
+  @Get('get-email/:user_id')
+  async getEmail(@Param('user_id') user_id: string) {
+    if (!user_id) {
+      this.logger.warn('getEmail called without user_id');
+      throw new BadRequestException('Missing user_id parameter');
+    }
+    try {
+      return await this.emailService.getEmailAddress(user_id);
+    } catch (err) {
+      this.logger.error(`Failed to get email for user: ${user_id}`, err.stack);
+      throw new BadGatewayException('Failed to retrieve email time');
+    }
+  }
+
   @Post('add-time')
   async addEmailTime(@Body() emailTimeInput: EmailTimeInput) {
     if (!emailTimeInput?.id) {

@@ -5,6 +5,7 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { GitHubApiService } from './github-api.service';
 import {GraphService} from "../../graph/services/graph.service";
+import { SbomQueueService } from 'src/features/sbom/services/sbom-queue.service';
 
 @Injectable()
 export class ActivityService {
@@ -16,6 +17,7 @@ export class ActivityService {
     private readonly repositorySetupQueue: Queue,
     private readonly githubApiService: GitHubApiService,
     private readonly graphService: GraphService,
+    private readonly sbomQueueService: SbomQueueService
   ) {}
 
   async addToWatchlist(dto: AddToWatchlistDto) {
@@ -65,6 +67,8 @@ export class ActivityService {
           },
         });
 
+        await this.sbomQueueService.mergeSbom(user.user_id);
+
         shouldQueueSetup = false;
       } else {
         const packageId = `package_${owner}_${repo}_${Date.now()}`;
@@ -109,6 +113,8 @@ export class ActivityService {
             created_at: new Date(),
           },
         });
+
+        await this.sbomQueueService.fullProcessSbom(userWatchlistEntry.watchlist_id, user.user_id);
 
         shouldQueueSetup = true;
       }
