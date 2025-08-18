@@ -98,6 +98,10 @@ export class EmailService{
     return await this.emailRepository.getUserEmailTime(user_id);
   }
 
+  async getEmailAddress(user_id: string) {
+    return await this.emailRepository.GetEmail(user_id);
+  }
+
   async confirmEmail(token: string) {
     const userDto = await this.emailRepository.GetUser(token);
     if(!userDto || !userDto.user_id) {

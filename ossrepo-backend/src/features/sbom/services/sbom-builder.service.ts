@@ -16,7 +16,7 @@ export class SbomBuilderService {
     private readonly docker = new Docker.default();
 
     // Clone Git repo into a temp directory
-    async cloneRepo(gitUrl: string): Promise<string> {
+    private async cloneRepo(gitUrl: string): Promise<string> {
         const targetDir = path.join(os.tmpdir(), 'sbom-repos');
         const uniqueDir = path.join(targetDir, randomUUID());
     
@@ -84,7 +84,7 @@ export class SbomBuilderService {
     }
 
     // Generate SBOM using cdxgen inside a container
-    async genSbom(repoPath: string): Promise<string> {
+    private async genSbom(repoPath: string): Promise<string> {
         const absPath = path.resolve(repoPath);
         const outputFileName = 'sbom-output1.json';
         const containerPath = '/app';
@@ -144,20 +144,20 @@ export class SbomBuilderService {
     async addSbom(watchlistId: string) {
         const gitUrl = ( await this.sbomRepo.getUrl(watchlistId) )?.repo_url;
         const repoPath = await this.cloneRepo(gitUrl!);
-        this.cleanupRepo(repoPath);
+        await this.cleanupRepo(repoPath);
         const data = await this.genSbom(repoPath);
         const jsonData = await JSON.parse(data);
         const createSbomDto: CreateSbomDto = {
             id: watchlistId, 
             sbom: jsonData
         }
-        this.sbomRepo.upsertWatchSbom(createSbomDto);
-        this.cleanupTempFolder(repoPath);
+        await this.sbomRepo.upsertWatchSbom(createSbomDto);
+        await this.cleanupTempFolder(repoPath);
         
         return jsonData;
     }
 
-    async writeSbomsToTempFiles(sboms: Array<{ sbom: any }>) {
+    private async writeSbomsToTempFiles(sboms: Array<{ sbom: any }>) {
         const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sbom-'));
         const filePaths: string[] = [];
 

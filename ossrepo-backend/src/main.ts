@@ -38,6 +38,7 @@ async function bootstrap() {
       'http://127.0.0.1:3000', // Alternative localhost
       'http://127.0.0.1:5173', // Alternative localhost
       'http://127.0.0.1:8080',
+      'http://localhost:8000'
       // Add your production domains here
       // 'https://yourapp.com',
       // 'https://www.yourapp.com'

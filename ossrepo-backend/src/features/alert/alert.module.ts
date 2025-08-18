@@ -32,5 +32,8 @@ import { ScheduleModule } from '@nestjs/schedule';
     JiraRepository,
     EmailRepository
   ],
+  exports: [
+    SlackService
+  ]
 })
 export class AlertModule {}

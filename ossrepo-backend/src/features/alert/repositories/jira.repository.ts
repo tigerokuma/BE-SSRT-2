@@ -64,7 +64,7 @@ constructor(private readonly prisma: PrismaService) {}
         }); 
     }
 
-    async getJiraInfo(userId: string) {
+    async getJiraInfoUser(userId: string) {
         return await this.prisma.jira.findUnique({
         where: { id: userId },
         select: { webtrigger_url: true, project_key: true },
@@ -81,6 +81,23 @@ constructor(private readonly prisma: PrismaService) {}
         });
     }
 
+    async getJiraInfoUserWatch(user_watchlist_id: string) {
+        const watchlistEntry = await this.prisma.userWatchlist.findUnique({
+        where: { id: user_watchlist_id },
+        select: { user_id: true },
+        });
+
+        if (!watchlistEntry) return null; // handle not found
+
+        // Then get Slack info for that user_id
+        const jiraInfo = await this.prisma.jira.findFirst({
+        where: { id: watchlistEntry.user_id },
+        select: { webtrigger_url: true, project_key: true }
+        });
+
+        return jiraInfo;
+    }
+
     @Cron('*/15 * * * *') //every 15 minutes
     async cleanupExpiredData() {
         const deleted = await this.prisma.tempJira.deleteMany({
@@ -90,7 +107,6 @@ constructor(private readonly prisma: PrismaService) {}
             },
         },
         });
-        console.log(`🗑️ Cleaned up ${deleted.count} expired records.`);
 
     }
 }

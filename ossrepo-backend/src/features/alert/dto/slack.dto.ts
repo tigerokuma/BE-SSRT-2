@@ -31,12 +31,12 @@ export class UserMessage {
   @IsString()
   @IsNotEmpty()
   @IsDefined()
-  user_id: string;
+  user_watchlist_id: string;
 
   @IsString()
   @IsNotEmpty()
   @IsDefined()
-  message: string;
+  description: string;
 }
 
 export class UserChannel {
