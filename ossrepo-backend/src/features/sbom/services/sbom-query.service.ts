@@ -122,7 +122,17 @@ export class SbomQueryService {
     for (const dep of directDeps) {
       const isVuln = isNodeVulnerable(dep);
       const copLic = sbomJson.components.find((d: any) => d['bom-ref'] === dep).licenses;
-      nodes.push({ id: dep, color: isVuln ? "red" : "lightblue" , license: copLic ? copLic[0].license.id : undefined });
+      let license;
+      try {
+        license = copLic[0].license.id;
+      } catch (e) {
+        license = undefined;  // fallback if copLic or license is missing
+      }
+
+      nodes.push({
+         id: dep, 
+         color: isVuln ? "red" : "lightblue" , 
+         license: license });
       links.push({ source: node.ref, target: dep });
     }
 
