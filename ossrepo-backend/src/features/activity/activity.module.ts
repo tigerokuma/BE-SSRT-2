@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ActivityController } from './controllers/activity.controller';
+import { PollingController } from './controllers/polling.controller';
 import { ActivityService } from './services/activity.service';
 import { GitManagerService } from './services/git-manager.service';
 import { HealthAnalysisService } from './services/health-analysis.service';
@@ -38,7 +39,7 @@ import { AlertModule } from '../alert/alert.module';
     SbomModule,
     AlertModule,
   ],
-  controllers: [ActivityController],
+  controllers: [ActivityController, PollingController],
   providers: [
     ActivityService,
     GitManagerService,
