@@ -1,6 +1,18 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+} from '@nestjs/common';
 import { WatchlistService } from '../services/watchlist.service';
-import { AddToWatchlistRequest, UpdateWatchlistRequest } from '../dto/watchlist.dto';
+import {
+  AddToWatchlistRequest,
+  UpdateWatchlistRequest,
+} from '../dto/watchlist.dto';
 
 @Controller('watchlist')
 export class WatchlistController {
@@ -17,14 +29,16 @@ export class WatchlistController {
   }
 
   @Post()
-  async addToWatchlist(@Body() request: AddToWatchlistRequest & { user_id: string }) {
+  async addToWatchlist(
+    @Body() request: AddToWatchlistRequest & { user_id: string },
+  ) {
     return this.watchlistService.addToWatchlist(request);
   }
 
   @Patch(':id')
   async updateWatchlistItem(
     @Param('id') id: string,
-    @Body() request: UpdateWatchlistRequest & { user_id: string }
+    @Body() request: UpdateWatchlistRequest & { user_id: string },
   ) {
     return this.watchlistService.updateWatchlistItem(id, request);
   }
@@ -32,8 +46,8 @@ export class WatchlistController {
   @Delete(':id')
   async deleteWatchlistItem(
     @Param('id') id: string,
-    @Body() body: { user_id: string }
+    @Body() body: { user_id: string },
   ) {
     return this.watchlistService.deleteWatchlistItem(body.user_id, id);
   }
-} 
+}

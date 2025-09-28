@@ -66,9 +66,7 @@ export class GitHubApiService {
   private readonly baseUrl: string;
   private readonly token: string | undefined;
 
-  constructor(
-    private readonly configService: ConfigService,
-  ) {
+  constructor(private readonly configService: ConfigService) {
     this.baseUrl = this.configService.get<string>(
       'GITHUB_API_BASE_URL',
       'https://api.github.com',
@@ -121,7 +119,7 @@ export class GitHubApiService {
           );
         }
 
-        const pageCommits = await response.json() as GitHubCommit[];
+        const pageCommits = (await response.json()) as GitHubCommit[];
 
         if (pageCommits.length === 0) {
           hasMorePages = false;
@@ -174,7 +172,7 @@ export class GitHubApiService {
         );
       }
 
-      const repoData = await response.json() as GitHubRepoInfo;
+      const repoData = (await response.json()) as GitHubRepoInfo;
       return repoData;
     } catch (error) {
       this.logger.error(

@@ -12,23 +12,22 @@ import { AlertModule } from './features/alert/alert.module';
 import { AuthModule } from './features/auth/auth.module';
 import { SbomModule } from './features/sbom/sbom.module';
 
-
 @Module({
-    imports: [
-        ConfigModule.forRoot({
-            isGlobal: true, // Loads .env automatically
-        }),
-        ConfigModule,
-        PackagesModule,
-        WatchlistModule,
-        AlertModule,
-        SbomModule,
-        PrismaModule,
-        GraphModule,
-        UserModule,
-        AuthModule,
-        QueueModule,
-        ActivityModule,
-    ],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true, // Loads .env automatically
+    }),
+    ConfigModule,
+    PackagesModule,
+    WatchlistModule,
+    AlertModule,
+    SbomModule,
+    PrismaModule,
+    GraphModule,
+    UserModule,
+    AuthModule,
+    QueueModule,
+    ActivityModule,
+  ],
 })
 export class AppModule {}

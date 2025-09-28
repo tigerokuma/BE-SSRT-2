@@ -25,8 +25,9 @@ describe('PackagesService', () => {
     }).compile();
 
     service = module.get<PackagesService>(PackagesService);
-    packageSearchService = module.get<PackageSearchService>(PackageSearchService);
-    
+    packageSearchService =
+      module.get<PackageSearchService>(PackageSearchService);
+
     jest.clearAllMocks();
   });
 
@@ -44,7 +45,7 @@ describe('PackagesService', () => {
         maintainers: ['test@example.com'],
         last_updated: '2024-01-01T00:00:00Z',
         version: '1.0.0',
-        license: 'MIT'
+        license: 'MIT',
       },
       {
         package_name: 'another-package',
@@ -54,8 +55,8 @@ describe('PackagesService', () => {
         maintainers: ['test2@example.com'],
         last_updated: '2024-01-02T00:00:00Z',
         version: '2.0.0',
-        license: 'ISC'
-      }
+        license: 'ISC',
+      },
     ];
 
     it('should return transformed package cards', async () => {
@@ -63,7 +64,9 @@ describe('PackagesService', () => {
 
       const result = await service.searchPackages('test');
 
-      expect(mockPackageSearchService.searchPackages).toHaveBeenCalledWith('test');
+      expect(mockPackageSearchService.searchPackages).toHaveBeenCalledWith(
+        'test',
+      );
       expect(result).toHaveLength(2);
       expect(result[0]).toEqual({
         name: 'test-package',
@@ -73,16 +76,18 @@ describe('PackagesService', () => {
         maintainers: ['test@example.com'],
         last_updated: '2024-01-01',
         version: '1.0.0',
-        license: 'MIT'
+        license: 'MIT',
       });
     });
 
     it('should handle packages with missing optional fields', async () => {
       const incompletePackage = {
         package_name: 'incomplete-package',
-        version: '1.0.0'
+        version: '1.0.0',
       };
-      mockPackageSearchService.searchPackages.mockResolvedValue([incompletePackage]);
+      mockPackageSearchService.searchPackages.mockResolvedValue([
+        incompletePackage,
+      ]);
 
       const result = await service.searchPackages('incomplete');
 
@@ -94,7 +99,7 @@ describe('PackagesService', () => {
         maintainers: [],
         last_updated: '',
         version: '1.0.0',
-        license: ''
+        license: '',
       });
     });
 
@@ -126,17 +131,21 @@ describe('PackagesService', () => {
         repo_name: 'test/package',
         stars: 100,
         forks: 20,
-        contributors: 5
+        contributors: 5,
       },
-      homepage: 'https://test-package.com'
+      homepage: 'https://test-package.com',
     };
 
     it('should return package card for summary view', async () => {
-      mockPackageSearchService.getPackageDetails.mockResolvedValue(mockPackageData);
+      mockPackageSearchService.getPackageDetails.mockResolvedValue(
+        mockPackageData,
+      );
 
       const result = await service.getPackage('test-package', 'summary');
 
-      expect(mockPackageSearchService.getPackageDetails).toHaveBeenCalledWith('test-package');
+      expect(mockPackageSearchService.getPackageDetails).toHaveBeenCalledWith(
+        'test-package',
+      );
       expect(result).toEqual({
         name: 'test-package',
         description: 'A test package',
@@ -145,12 +154,14 @@ describe('PackagesService', () => {
         maintainers: ['test@example.com'],
         last_updated: '2024-01-01',
         version: '1.0.0',
-        license: 'MIT'
+        license: 'MIT',
       });
     });
 
     it('should return package details for details view', async () => {
-      mockPackageSearchService.getPackageDetails.mockResolvedValue(mockPackageData);
+      mockPackageSearchService.getPackageDetails.mockResolvedValue(
+        mockPackageData,
+      );
 
       const result = await service.getPackage('test-package', 'details');
 
@@ -173,7 +184,7 @@ describe('PackagesService', () => {
         homepage: 'https://test-package.com',
         stars: 100,
         forks: 20,
-        contributors: 5
+        contributors: 5,
       });
     });
 
@@ -190,9 +201,11 @@ describe('PackagesService', () => {
         ...mockPackageData,
         repo_url: null,
         githubRepo: null,
-        homepage: null
+        homepage: null,
       };
-      mockPackageSearchService.getPackageDetails.mockResolvedValue(packageWithoutGitHub);
+      mockPackageSearchService.getPackageDetails.mockResolvedValue(
+        packageWithoutGitHub,
+      );
 
       const result = await service.getPackage('test-package', 'details');
 
@@ -210,7 +223,9 @@ describe('PackagesService', () => {
 
       const result = await service.forceRefreshCache();
 
-      expect(mockPackageSearchService.forceRefreshCache).toHaveBeenCalledWith(undefined);
+      expect(mockPackageSearchService.forceRefreshCache).toHaveBeenCalledWith(
+        undefined,
+      );
       expect(result).toEqual(mockResult);
     });
 
@@ -221,7 +236,9 @@ describe('PackagesService', () => {
 
       const result = await service.forceRefreshCache(repoUrl);
 
-      expect(mockPackageSearchService.forceRefreshCache).toHaveBeenCalledWith(repoUrl);
+      expect(mockPackageSearchService.forceRefreshCache).toHaveBeenCalledWith(
+        repoUrl,
+      );
       expect(result).toEqual(mockResult);
     });
 
@@ -229,7 +246,9 @@ describe('PackagesService', () => {
       const error = new Error('Cache refresh failed');
       mockPackageSearchService.forceRefreshCache.mockRejectedValue(error);
 
-      await expect(service.forceRefreshCache()).rejects.toThrow('Cache refresh failed');
+      await expect(service.forceRefreshCache()).rejects.toThrow(
+        'Cache refresh failed',
+      );
     });
   });
-}); 
+});

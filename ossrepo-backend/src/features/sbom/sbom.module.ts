@@ -10,11 +10,17 @@ import { QueueModule } from 'src/common/queue/queue.module';
 import { SbomProcessor } from './processors/sbom.processor';
 
 @Module({
-  imports: [
-    BullModule.registerQueue({ name: 'sbom' }),
+  imports: [BullModule.registerQueue({ name: 'sbom' })],
+  providers: [
+    SbomRepository,
+    SbomBuilderService,
+    SbomQueryService,
+    SbomQueueService,
+    SbomProcessor,
+    QueueModule,
+    PrismaService,
   ],
-  providers: [SbomRepository, SbomBuilderService, SbomQueryService, SbomQueueService, SbomProcessor, QueueModule, PrismaService],
   controllers: [SbomController],
   exports: [SbomBuilderService, SbomQueryService, SbomQueueService],
 })
-export class SbomModule {} 
+export class SbomModule {}

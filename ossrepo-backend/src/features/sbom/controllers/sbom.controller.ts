@@ -6,11 +6,12 @@ import { GraphParamsDto, SearchParamsDto } from '../dto/sbom.dto';
 @Controller('sbom')
 export class SbomController {
   constructor(
-    private readonly sbomBuilderService: SbomBuilderService, 
-    private readonly sbomQueryService: SbomQueryService) {}
-  
+    private readonly sbomBuilderService: SbomBuilderService,
+    private readonly sbomQueryService: SbomQueryService,
+  ) {}
+
   @Get('dep-list/:user_id')
-  async getDepList(@Param('user_id') user_id: string){
+  async getDepList(@Param('user_id') user_id: string) {
     return await this.sbomQueryService.getDepList(user_id);
   }
 
@@ -29,19 +30,33 @@ export class SbomController {
   }
 
   @Get('graph-dependencies/:id/:node_id')
-  async getWatchGraphDependencies(@Param() params: GraphParamsDto, @Query('vulns') vulns?: string) {
+  async getWatchGraphDependencies(
+    @Param() params: GraphParamsDto,
+    @Query('vulns') vulns?: string,
+  ) {
     const vulnerablePackages = vulns ? vulns.split(',') : [];
     const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomQueryService.getNodeDeps(sbomText, params.node_id, vulnerablePackages);
+    return this.sbomQueryService.getNodeDeps(
+      sbomText,
+      params.node_id,
+      vulnerablePackages,
+    );
   }
 
   @Get('user-graph-dependencies/:id/:node_id')
-  async getUserGraphDependencies(@Param() params: GraphParamsDto, @Query('vulns') vulns?: string) {
+  async getUserGraphDependencies(
+    @Param() params: GraphParamsDto,
+    @Query('vulns') vulns?: string,
+  ) {
     const vulnerablePackages = vulns ? vulns.split(',') : [];
     const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    const temp =  this.sbomQueryService.getNodeDeps(sbomText, params.node_id, vulnerablePackages);
+    const temp = this.sbomQueryService.getNodeDeps(
+      sbomText,
+      params.node_id,
+      vulnerablePackages,
+    );
     return temp;
   }
 
@@ -58,7 +73,7 @@ export class SbomController {
     const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
     return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
   }
-  
+
   @Get('watchlist/:watchlist_id')
   async getWatchlistSbom(@Param('watchlist_id') watchlist_id: string) {
     return (await this.sbomQueryService.getWatchSbom(watchlist_id))?.sbom;

@@ -15,7 +15,10 @@ import {
   Put,
 } from '@nestjs/common';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
-import { CommitSummaryDto, CommitSummaryResponseDto } from '../dto/commit-summary.dto';
+import {
+  CommitSummaryDto,
+  CommitSummaryResponseDto,
+} from '../dto/commit-summary.dto';
 import { ActivityService } from '../services/activity.service';
 import { RepositorySummaryService } from '../services/repository-summary.service';
 import { HealthAnalysisService } from '../services/health-analysis.service';
@@ -29,7 +32,7 @@ import { AIAnomalyDetectionService } from '../services/ai-anomaly-detection.serv
 import { AISummaryService } from '../services/ai-summary.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
-import { ApiTags, ApiResponse } from '@nestjs/swagger'; 
+import { ApiTags, ApiResponse } from '@nestjs/swagger';
 import { BusFactorService } from '../services/bus-factor.service';
 import { VulnerabilityService } from '../services/vulnerability.service';
 
@@ -77,12 +80,17 @@ export class ActivityController {
   })
   async updateUserWatchlistAlerts(
     @Param('userWatchlistId') userWatchlistId: string,
-    @Body() body: { alerts: any }
+    @Body() body: { alerts: any },
   ) {
-    this.logger.log(`📝 Updating alert settings for user watchlist ${userWatchlistId}`);
+    this.logger.log(
+      `📝 Updating alert settings for user watchlist ${userWatchlistId}`,
+    );
 
     try {
-      await this.activityService.updateUserWatchlistAlerts(userWatchlistId, body.alerts);
+      await this.activityService.updateUserWatchlistAlerts(
+        userWatchlistId,
+        body.alerts,
+      );
       return { success: true, message: 'Alert settings updated successfully' };
     } catch (error) {
       this.logger.error(`Error updating alert settings: ${error.message}`);
@@ -102,16 +110,6 @@ export class ActivityController {
     return await this.activityService.getWatchlistStatus(watchlistId);
   }
 
-
-
-
-
-
-
-
-
-
-
   @Post('watchlist/:watchlistId/commit-summary')
   @ApiResponse({
     status: 200,
@@ -122,12 +120,14 @@ export class ActivityController {
     @Param('watchlistId') watchlistId: string,
     @Body() dto: CommitSummaryDto,
   ) {
-    this.logger.log(`🤖 Generating commit summary for watchlist ${watchlistId} (${dto.commitCount || 10} commits)`);
+    this.logger.log(
+      `🤖 Generating commit summary for watchlist ${watchlistId} (${dto.commitCount || 10} commits)`,
+    );
 
     try {
       // First, try to find the UserWatchlist record to get the actual watchlist_id
       let actualWatchlistId = watchlistId;
-      
+
       // Check if this is a user watchlist ID
       if (watchlistId.includes('user_watchlist_')) {
         const userWatchlist = await this.prisma.userWatchlist.findUnique({
@@ -137,9 +137,13 @@ export class ActivityController {
 
         if (userWatchlist) {
           actualWatchlistId = userWatchlist.watchlist_id;
-          this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
+          this.logger.log(
+            `🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`,
+          );
         } else {
-          this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
+          this.logger.log(
+            `🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`,
+          );
         }
       }
 
@@ -211,13 +215,19 @@ export class ActivityController {
         { linesAdded: 0, linesDeleted: 0, filesChanged: 0 },
       );
 
-      const uniqueAuthors = [...new Set(commitData.map(c => c.author))];
+      const uniqueAuthors = [...new Set(commitData.map((c) => c.author))];
       const dateRange = `${commitData[commitData.length - 1].timestamp.toISOString().split('T')[0]} to ${commitData[0].timestamp.toISOString().split('T')[0]}`;
 
       // Validate AI result
       let summary = aiResult.summary;
-      if (!summary || summary.trim() === '' || summary === 'No summary available.') {
-        this.logger.warn(`AI summary generation failed for ${watchlist.package.repo_name}, using fallback`);
+      if (
+        !summary ||
+        summary.trim() === '' ||
+        summary === 'No summary available.'
+      ) {
+        this.logger.warn(
+          `AI summary generation failed for ${watchlist.package.repo_name}, using fallback`,
+        );
         summary = `Recent activity in ${watchlist.package.repo_name} shows ${commitData.length} commits from ${uniqueAuthors.length} authors. Total changes: +${totalStats.linesAdded} -${totalStats.linesDeleted} lines across ${totalStats.filesChanged} files.`;
       }
 
@@ -236,7 +246,7 @@ export class ActivityController {
         `Error generating commit summary for watchlist ${watchlistId}:`,
         error,
       );
-      
+
       // Provide a more helpful error message
       let errorMessage = 'Failed to generate commit summary';
       if (error.message.includes('AI model')) {
@@ -246,19 +256,10 @@ export class ActivityController {
       } else if (error.message.includes('not found')) {
         errorMessage = 'Repository not found or no commits available';
       }
-      
-      throw new HttpException(
-        errorMessage,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+
+      throw new HttpException(errorMessage, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
-
-
-
-
-
-
 
   @Get('watchlist/:watchlistId/commits')
   @ApiResponse({
@@ -269,12 +270,14 @@ export class ActivityController {
     @Param('watchlistId') watchlistId: string,
     @Query('limit') limit?: number,
   ) {
-    this.logger.log(`📝 Getting recent commits for watchlist ${watchlistId} (limit: ${limit || 50})`);
+    this.logger.log(
+      `📝 Getting recent commits for watchlist ${watchlistId} (limit: ${limit || 50})`,
+    );
 
     try {
       // First, try to find the UserWatchlist record to get the actual watchlist_id
       let actualWatchlistId = watchlistId;
-      
+
       // Check if this is a user watchlist ID
       if (watchlistId.includes('user_watchlist_')) {
         const userWatchlist = await this.prisma.userWatchlist.findUnique({
@@ -284,9 +287,13 @@ export class ActivityController {
 
         if (userWatchlist) {
           actualWatchlistId = userWatchlist.watchlist_id;
-          this.logger.log(`🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`);
+          this.logger.log(
+            `🔍 Found UserWatchlist, using watchlist_id: ${actualWatchlistId}`,
+          );
         } else {
-          this.logger.log(`🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`);
+          this.logger.log(
+            `🔍 UserWatchlist not found, trying as direct watchlist_id: ${watchlistId}`,
+          );
         }
       }
 
@@ -339,7 +346,7 @@ export class ActivityController {
 
       // Create a map of commit SHA to AI anomaly details
       const aiAnomalyMap = new Map();
-      aiAnomalies.forEach(anomaly => {
+      aiAnomalies.forEach((anomaly) => {
         const details = anomaly.anomaly_details as any;
         aiAnomalyMap.set(anomaly.commit_sha, {
           isAnomalous: details.isAnomalous || false,
@@ -354,13 +361,14 @@ export class ActivityController {
       const transformedCommits = commits.map((commit) => {
         const payload = commit.payload as any;
         const timeAgo = this.getTimeAgo(commit.timestamp);
-        const commitSha = payload?.sha || commit.event_id.replace('commit_', '');
-        
+        const commitSha =
+          payload?.sha || commit.event_id.replace('commit_', '');
+
         // Check if this commit has an AI anomaly
         const aiAnomaly = aiAnomalyMap.get(commitSha);
         const isSuspicious = aiAnomaly?.isAnomalous || false;
         const suspiciousReason = aiAnomaly?.reasoning || '';
-        
+
         return {
           id: commit.event_id,
           message: payload?.message || 'No message',
@@ -370,7 +378,8 @@ export class ActivityController {
           initials: this.getInitials(commit.actor),
           linesAdded: payload?.lines_added || commit.lines_added || 0,
           linesDeleted: payload?.lines_deleted || commit.lines_deleted || 0,
-          filesChanged: payload?.files_changed?.length || commit.files_changed || 0,
+          filesChanged:
+            payload?.files_changed?.length || commit.files_changed || 0,
           isSuspicious,
           suspiciousReason,
           sha: commitSha,
@@ -392,14 +401,8 @@ export class ActivityController {
     }
   }
 
-
-
-
-
   @Delete('user-watchlist/:userWatchlistId')
-  async removeFromWatchlist(
-    @Param('userWatchlistId') userWatchlistId: string
-  ) {
+  async removeFromWatchlist(@Param('userWatchlistId') userWatchlistId: string) {
     this.logger.log(`📝 Removing user watchlist ${userWatchlistId}`);
     try {
       await this.activityService.removeFromWatchlist(userWatchlistId);
@@ -408,7 +411,9 @@ export class ActivityController {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to remove repository from watchlist');
+      throw new InternalServerErrorException(
+        'Failed to remove repository from watchlist',
+      );
     }
   }
 
@@ -475,10 +480,10 @@ export class ActivityController {
         include: {
           watchlist: {
             include: {
-              package: true
-            }
-          }
-        }
+              package: true,
+            },
+          },
+        },
       });
 
       if (!userWatchlist) {
@@ -494,17 +499,17 @@ export class ActivityController {
         include: {
           watchlist: {
             include: {
-              package: true
-            }
-          }
+              package: true,
+            },
+          },
         },
-        orderBy: { created_at: 'desc' }
+        orderBy: { created_at: 'desc' },
       });
 
       return {
         alerts,
         count: alerts.length,
-        userWatchlistId
+        userWatchlistId,
       };
     } catch (error) {
       this.logger.error(`Error fetching alerts: ${error.message}`);
@@ -514,16 +519,6 @@ export class ActivityController {
       );
     }
   }
-
-
-
-
-
-
-
-
-
-
 
   // Helper methods (copied from ActivityService for testing)
   private parseGitHubUrl(url: string): { owner: string; repo: string } {
@@ -662,20 +657,14 @@ export class ActivityController {
 
   private getInitials(name: string): string {
     if (!name) return 'U';
-    
-    const parts = name.split(' ').filter(part => part.length > 0);
+
+    const parts = name.split(' ').filter((part) => part.length > 0);
     if (parts.length === 0) return 'U';
-    
+
     if (parts.length === 1) {
       return parts[0].substring(0, 2).toUpperCase();
     }
-    
+
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
-
-
-
-
-
-
 }

@@ -73,7 +73,9 @@ export class AIAnomalyDetectionService {
     try {
       await this.checkOllamaAvailability();
       await this.ensureModelDownloaded();
-      this.logger.log('✅ AI Anomaly Detection service initialized with Gemma2:2b model');
+      this.logger.log(
+        '✅ AI Anomaly Detection service initialized with Gemma2:2b model',
+      );
     } catch (error) {
       this.logger.warn(
         '⚠️ AI Anomaly Detection service initialization failed, will use fallback detection',
@@ -97,11 +99,9 @@ export class AIAnomalyDetectionService {
     if (envPath) {
       return envPath;
     }
-    
+
     // Fallback to platform-specific defaults
-    return process.platform === 'win32'
-      ? 'ollama.exe'
-      : 'ollama';
+    return process.platform === 'win32' ? 'ollama.exe' : 'ollama';
   }
 
   private async ensureModelDownloaded(): Promise<void> {
@@ -162,7 +162,7 @@ export class AIAnomalyDetectionService {
 
   private isMergeCommit(data: CommitAnalysisData): boolean {
     const message = data.message || '';
-    
+
     const mergePatterns = [
       /^merge/i,
       /^merge branch/i,
@@ -180,7 +180,9 @@ export class AIAnomalyDetectionService {
     return false;
   }
 
-  async analyzeCommitForAnomalies(data: CommitAnalysisData): Promise<AnomalyDetectionResult> {
+  async analyzeCommitForAnomalies(
+    data: CommitAnalysisData,
+  ): Promise<AnomalyDetectionResult> {
     try {
       if (this.isBotCommit(data)) {
         this.logger.log(`🤖 Skipping bot commit: ${data.author}`);
@@ -194,7 +196,9 @@ export class AIAnomalyDetectionService {
       }
 
       if (this.isMergeCommit(data)) {
-        this.logger.log(`🔄 Skipping merge commit: ${data.sha.substring(0, 8)}`);
+        this.logger.log(
+          `🔄 Skipping merge commit: ${data.sha.substring(0, 8)}`,
+        );
         return {
           isAnomalous: false,
           confidence: 0.9,
@@ -205,9 +209,11 @@ export class AIAnomalyDetectionService {
       }
 
       const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
-      
+
       if (totalLines < 5) {
-        this.logger.log(`📝 Skipping small commit (${totalLines} lines): ${data.sha.substring(0, 8)}`);
+        this.logger.log(
+          `📝 Skipping small commit (${totalLines} lines): ${data.sha.substring(0, 8)}`,
+        );
         return {
           isAnomalous: false,
           confidence: 0.9,
@@ -218,11 +224,17 @@ export class AIAnomalyDetectionService {
       }
 
       if (data.contributorStats) {
-        const avgLines = data.contributorStats.avgLinesAdded + data.contributorStats.avgLinesDeleted;
-        const stddevLines = data.contributorStats.stddevLinesAdded + data.contributorStats.stddevLinesDeleted;
-        
-        if (totalLines <= avgLines + (2 * stddevLines)) {
-          this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs avg ${avgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
+        const avgLines =
+          data.contributorStats.avgLinesAdded +
+          data.contributorStats.avgLinesDeleted;
+        const stddevLines =
+          data.contributorStats.stddevLinesAdded +
+          data.contributorStats.stddevLinesDeleted;
+
+        if (totalLines <= avgLines + 2 * stddevLines) {
+          this.logger.log(
+            `📝 Skipping normal-range commit (${totalLines} lines vs avg ${avgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`,
+          );
           return {
             isAnomalous: false,
             confidence: 0.8,
@@ -234,10 +246,13 @@ export class AIAnomalyDetectionService {
       }
 
       if (data.repoStats) {
-        const repoAvgLines = data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
-        
+        const repoAvgLines =
+          data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
+
         if (totalLines <= repoAvgLines) {
-          this.logger.log(`📝 Skipping normal-range commit (${totalLines} lines vs repo avg ${repoAvgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`);
+          this.logger.log(
+            `📝 Skipping normal-range commit (${totalLines} lines vs repo avg ${repoAvgLines.toFixed(0)}): ${data.sha.substring(0, 8)}`,
+          );
           return {
             isAnomalous: false,
             confidence: 0.8,
@@ -248,14 +263,16 @@ export class AIAnomalyDetectionService {
         }
       }
 
-      this.logger.log(`🔍 Analyzing commit for anomalies: ${data.sha.substring(0, 8)} (${totalLines} lines)`);
+      this.logger.log(
+        `🔍 Analyzing commit for anomalies: ${data.sha.substring(0, 8)} (${totalLines} lines)`,
+      );
 
       const prompt = this.buildAnomalyDetectionPrompt(data);
       const aiResponse = await this.generateWithGemma(prompt);
       const result = this.parseAnomalyResponse(aiResponse);
 
       this.logger.log(
-        `📊 AI Analysis Result: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'} (confidence: ${result.confidence})`
+        `📊 AI Analysis Result: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'} (confidence: ${result.confidence})`,
       );
 
       return result;
@@ -276,17 +293,21 @@ export class AIAnomalyDetectionService {
     data: CommitAnalysisData,
   ): Promise<AnomalyDetectionResult> {
     try {
-      const existingAnalysis = await this.prisma.aIAnomaliesDetected.findUnique({
-        where: {
-          watchlist_id_commit_sha: {
-            watchlist_id: watchlistId,
-            commit_sha: data.sha,
+      const existingAnalysis = await this.prisma.aIAnomaliesDetected.findUnique(
+        {
+          where: {
+            watchlist_id_commit_sha: {
+              watchlist_id: watchlistId,
+              commit_sha: data.sha,
+            },
           },
         },
-      });
+      );
 
       if (existingAnalysis) {
-        this.logger.log(`📋 Found existing anomaly analysis for commit ${data.sha}`);
+        this.logger.log(
+          `📋 Found existing anomaly analysis for commit ${data.sha}`,
+        );
         return existingAnalysis.anomaly_details as unknown as AnomalyDetectionResult;
       }
 
@@ -302,9 +323,13 @@ export class AIAnomalyDetectionService {
           },
         });
 
-        this.logger.log(`💾 Stored suspicious anomaly analysis for commit ${data.sha} in database`);
+        this.logger.log(
+          `💾 Stored suspicious anomaly analysis for commit ${data.sha} in database`,
+        );
       } else {
-        this.logger.log(`📝 Commit ${data.sha} is normal - not storing analysis`);
+        this.logger.log(
+          `📝 Commit ${data.sha} is normal - not storing analysis`,
+        );
       }
 
       return result;
@@ -331,7 +356,7 @@ export class AIAnomalyDetectionService {
         },
       });
 
-      return anomalies.map(anomaly => ({
+      return anomalies.map((anomaly) => ({
         id: anomaly.id,
         commitSha: anomaly.commit_sha,
         anomalyDetails: anomaly.anomaly_details,
@@ -350,36 +375,53 @@ export class AIAnomalyDetectionService {
 
     const totalLines = (data.linesAdded || 0) + (data.linesDeleted || 0);
     const filesChanged = data.filesChanged?.length || 0;
-    
+
     const suspiciousFilePatterns: string[] = [];
     if (data.filesChanged && data.filesChanged.length > 0) {
-      const files = data.filesChanged as string[];
-      const configFiles = files.filter(f => 
-        f.includes('config') || f.includes('.env') || f.includes('secret') || 
-        f.includes('key') || f.includes('.pem') || f.includes('password')
+      const files = data.filesChanged;
+      const configFiles = files.filter(
+        (f) =>
+          f.includes('config') ||
+          f.includes('.env') ||
+          f.includes('secret') ||
+          f.includes('key') ||
+          f.includes('.pem') ||
+          f.includes('password'),
       );
-      const lockFiles = files.filter(f => 
-        f.includes('package-lock.json') || f.includes('yarn.lock') || f.includes('pnpm-lock.yaml')
+      const lockFiles = files.filter(
+        (f) =>
+          f.includes('package-lock.json') ||
+          f.includes('yarn.lock') ||
+          f.includes('pnpm-lock.yaml'),
       );
-      const unusualExtensions = files.filter(f => 
-        f.includes('.exe') || f.includes('.dll') || f.includes('.so') || f.includes('.dylib')
+      const unusualExtensions = files.filter(
+        (f) =>
+          f.includes('.exe') ||
+          f.includes('.dll') ||
+          f.includes('.so') ||
+          f.includes('.dylib'),
       );
-      
-      if (configFiles.length > 0) suspiciousFilePatterns.push(`Config files: ${configFiles.join(', ')}`);
-      if (lockFiles.length > 0) suspiciousFilePatterns.push(`Lock files: ${lockFiles.join(', ')}`);
-      if (unusualExtensions.length > 0) suspiciousFilePatterns.push(`Unusual extensions: ${unusualExtensions.join(', ')}`);
+
+      if (configFiles.length > 0)
+        suspiciousFilePatterns.push(`Config files: ${configFiles.join(', ')}`);
+      if (lockFiles.length > 0)
+        suspiciousFilePatterns.push(`Lock files: ${lockFiles.join(', ')}`);
+      if (unusualExtensions.length > 0)
+        suspiciousFilePatterns.push(
+          `Unusual extensions: ${unusualExtensions.join(', ')}`,
+        );
     }
-    
+
     const commitTime = new Date(data.date);
     const timeString = commitTime.toLocaleString('en-US', {
       weekday: 'short',
-      month: 'short', 
+      month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: true
+      hour12: true,
     });
-    
+
     let prompt = `Analyze this commit for suspicious activity:
 
 Author: ${data.author}
@@ -389,25 +431,29 @@ Files: ${filesChanged}${suspiciousFilePatterns.length > 0 ? '\nSuspicious file p
 Time: ${timeString}`;
 
     if (data.contributorStats) {
-      const avgLines = data.contributorStats.avgLinesAdded + data.contributorStats.avgLinesDeleted;
-      const stddevLines = data.contributorStats.stddevLinesAdded + data.contributorStats.stddevLinesDeleted;
+      const avgLines =
+        data.contributorStats.avgLinesAdded +
+        data.contributorStats.avgLinesDeleted;
+      const stddevLines =
+        data.contributorStats.stddevLinesAdded +
+        data.contributorStats.stddevLinesDeleted;
       const totalCommits = data.contributorStats.totalCommits;
-      
+
       prompt += `
 
 Author History:
 - Total commits: ${totalCommits}
 - Average lines per commit: ${avgLines.toFixed(0)}
 - Standard deviation: ${stddevLines.toFixed(0)}`;
-      
+
       if (data.contributorStats.commitTimeHistogram) {
         const timeHistogram = data.contributorStats.commitTimeHistogram;
         const typicalHours = this.getTypicalCommitHours(timeHistogram);
         const isUnusual = this.isUnusualCommitTime(commitTime, timeHistogram);
-        
+
         prompt += `
 - Typical commit hours: ${typicalHours}`;
-        
+
         if (isUnusual) {
           prompt += `
 - ⚠️ UNUSUAL TIMING: Commit at ${timeString} is outside typical hours`;
@@ -416,7 +462,8 @@ Author History:
     }
 
     if (data.repoStats) {
-      const repoAvgLines = data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
+      const repoAvgLines =
+        data.repoStats.avgLinesAdded + data.repoStats.avgLinesDeleted;
       prompt += `
 
 Repository Average: ${repoAvgLines.toFixed(0)} lines per commit`;
@@ -458,7 +505,9 @@ JSON response:
       const os = require('os');
       const path = require('path');
 
-      this.logger.log(`🔍 Executing Ollama for anomaly detection: ${ollamaPath} run ${this.modelName}`);
+      this.logger.log(
+        `🔍 Executing Ollama for anomaly detection: ${ollamaPath} run ${this.modelName}`,
+      );
       this.logger.log(`🔍 Prompt length: ${prompt.length} characters`);
 
       const tempFile = path.join(
@@ -479,15 +528,25 @@ JSON response:
       }
 
       if (!stdout || typeof stdout !== 'string') {
-        this.logger.error('❌ Ollama returned empty or invalid stdout for anomaly detection');
-        throw new Error('AI model returned empty response for anomaly detection');
+        this.logger.error(
+          '❌ Ollama returned empty or invalid stdout for anomaly detection',
+        );
+        throw new Error(
+          'AI model returned empty response for anomaly detection',
+        );
       }
 
-      this.logger.log(`📝 Raw AI anomaly response length: ${stdout.length} characters`);
-      this.logger.log(`📝 Raw AI anomaly response preview: ${stdout.substring(0, 100)}...`);
+      this.logger.log(
+        `📝 Raw AI anomaly response length: ${stdout.length} characters`,
+      );
+      this.logger.log(
+        `📝 Raw AI anomaly response preview: ${stdout.substring(0, 100)}...`,
+      );
 
       const cleanOutput = this.cleanGemmaOutput(stdout);
-      this.logger.log(`✅ Ollama anomaly detection successful, cleaned output length: ${cleanOutput.length}`);
+      this.logger.log(
+        `✅ Ollama anomaly detection successful, cleaned output length: ${cleanOutput.length}`,
+      );
 
       try {
         fs.unlinkSync(tempFile);
@@ -498,15 +557,21 @@ JSON response:
       return cleanOutput;
     } catch (error) {
       this.logger.error(`❌ Ollama anomaly detection failed: ${error.message}`);
-      
+
       if (error.message.includes('timeout')) {
-        this.logger.error('❌ AI model timed out for anomaly detection - consider increasing timeout');
+        this.logger.error(
+          '❌ AI model timed out for anomaly detection - consider increasing timeout',
+        );
       } else if (error.message.includes('ENOENT')) {
-        this.logger.error('❌ Ollama not found for anomaly detection - check if Ollama is installed');
+        this.logger.error(
+          '❌ Ollama not found for anomaly detection - check if Ollama is installed',
+        );
       } else if (error.message.includes('empty response')) {
-        this.logger.error('❌ AI model returned empty response for anomaly detection');
+        this.logger.error(
+          '❌ AI model returned empty response for anomaly detection',
+        );
       }
-      
+
       throw error;
     }
   }
@@ -533,14 +598,18 @@ JSON response:
         };
       }
 
-      this.logger.log(`📝 Raw AI response length: ${response.length} characters`);
-      this.logger.log(`📝 Raw AI response preview: ${response.substring(0, 100)}...`);
+      this.logger.log(
+        `📝 Raw AI response length: ${response.length} characters`,
+      );
+      this.logger.log(
+        `📝 Raw AI response preview: ${response.substring(0, 100)}...`,
+      );
 
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
-          
+
           let cleanReasoning = parsed.reasoning || 'No reasoning provided';
           cleanReasoning = cleanReasoning
             .replace(/^\{[\s\S]*\}/, '')
@@ -552,84 +621,107 @@ JSON response:
             .replace(/"[^"]*":\s*"[^"]*"/g, '')
             .replace(/"[^"]*":\s*[^,}]+/g, '')
             .trim();
-          
+
           const result = {
             isAnomalous: parsed.isAnomalous || false,
             confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
             reasoning: cleanReasoning,
             riskLevel: this.validateRiskLevel(parsed.riskLevel),
-            suspiciousFactors: Array.isArray(parsed.suspiciousFactors) ? parsed.suspiciousFactors : [],
+            suspiciousFactors: Array.isArray(parsed.suspiciousFactors)
+              ? parsed.suspiciousFactors
+              : [],
           };
-          
-          this.logger.log(`✅ Successfully parsed JSON response: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`);
+
+          this.logger.log(
+            `✅ Successfully parsed JSON response: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`,
+          );
           return result;
         } catch (jsonError) {
-          this.logger.warn(`Failed to parse JSON from response: ${jsonError.message}`);
+          this.logger.warn(
+            `Failed to parse JSON from response: ${jsonError.message}`,
+          );
         }
       }
 
-      const isAnomalous = response.toLowerCase().includes('anomalous') && 
-                         response.toLowerCase().includes('suspicious') &&
-                         (response.toLowerCase().includes('unusual') ||
-                          response.toLowerCase().includes('concerning'));
-     
-     let cleanReasoning = response.substring(0, 200)
-       .replace(/the json response you provided/i, '')
-       .replace(/the json you provided/i, '')
-       .replace(/json response/i, '')
-       .replace(/here's why:/i, '')
-       .replace(/here's a breakdown:/i, '')
-       .replace(/the json/i, '')
-       .replace(/json/i, '')
-       .replace(/\{[\s\S]*\}/g, '')
-       .replace(/^"|"$/g, '')
-       .replace(/\\n/g, ' ')
-       .trim();
-     
+      const isAnomalous =
+        response.toLowerCase().includes('anomalous') &&
+        response.toLowerCase().includes('suspicious') &&
+        (response.toLowerCase().includes('unusual') ||
+          response.toLowerCase().includes('concerning'));
+
+      let cleanReasoning = response
+        .substring(0, 200)
+        .replace(/the json response you provided/i, '')
+        .replace(/the json you provided/i, '')
+        .replace(/json response/i, '')
+        .replace(/here's why:/i, '')
+        .replace(/here's a breakdown:/i, '')
+        .replace(/the json/i, '')
+        .replace(/json/i, '')
+        .replace(/\{[\s\S]*\}/g, '')
+        .replace(/^"|"$/g, '')
+        .replace(/\\n/g, ' ')
+        .trim();
+
       if (!cleanReasoning) {
-        cleanReasoning = isAnomalous ? 'Unusual patterns detected' : 'Normal commit';
+        cleanReasoning = isAnomalous
+          ? 'Unusual patterns detected'
+          : 'Normal commit';
       }
-     
-     const result: AnomalyDetectionResult = {
-       isAnomalous,
-       confidence: 0.5,
-       reasoning: cleanReasoning,
-       riskLevel: isAnomalous ? 'moderate' : 'low',
-       suspiciousFactors: isAnomalous ? ['AI detected suspicious patterns'] : [],
-     };
-       
-       this.logger.log(`📝 Using fallback parsing: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`);
-       return result;
-     } catch (error) {
-       this.logger.error('Failed to parse AI response:', error);
-       return {
-         isAnomalous: false,
-         confidence: 0.5,
-         reasoning: 'Failed to parse AI response',
-         riskLevel: 'low',
-         suspiciousFactors: [],
-       };
-     }
+
+      const result: AnomalyDetectionResult = {
+        isAnomalous,
+        confidence: 0.5,
+        reasoning: cleanReasoning,
+        riskLevel: isAnomalous ? 'moderate' : 'low',
+        suspiciousFactors: isAnomalous
+          ? ['AI detected suspicious patterns']
+          : [],
+      };
+
+      this.logger.log(
+        `📝 Using fallback parsing: ${result.isAnomalous ? 'SUSPICIOUS' : 'Normal'}`,
+      );
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to parse AI response:', error);
+      return {
+        isAnomalous: false,
+        confidence: 0.5,
+        reasoning: 'Failed to parse AI response',
+        riskLevel: 'low',
+        suspiciousFactors: [],
+      };
+    }
   }
 
-  private validateRiskLevel(level: string): 'low' | 'moderate' | 'high' | 'critical' {
+  private validateRiskLevel(
+    level: string,
+  ): 'low' | 'moderate' | 'high' | 'critical' {
     const validLevels = ['low', 'moderate', 'high', 'critical'];
-    return validLevels.includes(level?.toLowerCase()) ? level.toLowerCase() as any : 'low';
+    return validLevels.includes(level?.toLowerCase())
+      ? (level.toLowerCase() as any)
+      : 'low';
   }
 
-  private getTypicalCommitHours(commitTimeHistogram: Record<string, number>): string {
+  private getTypicalCommitHours(
+    commitTimeHistogram: Record<string, number>,
+  ): string {
     if (!commitTimeHistogram || Object.keys(commitTimeHistogram).length === 0) {
       return 'No timing data available';
     }
 
     const sortedHours = Object.entries(commitTimeHistogram)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 3)
       .map(([hour, count]) => {
         const hourNum = parseInt(hour);
-        const timeStr = hourNum < 12 ? `${hourNum}:00 AM` : 
-                       hourNum === 12 ? '12:00 PM' : 
-                       `${hourNum - 12}:00 PM`;
+        const timeStr =
+          hourNum < 12
+            ? `${hourNum}:00 AM`
+            : hourNum === 12
+              ? '12:00 PM'
+              : `${hourNum - 12}:00 PM`;
         return `${timeStr} (${count} commits)`;
       })
       .join(', ');
@@ -637,12 +729,15 @@ JSON response:
     return sortedHours;
   }
 
-  private isUnusualCommitTime(commitTime: Date, commitTimeHistogram?: Record<string, number>): boolean {
+  private isUnusualCommitTime(
+    commitTime: Date,
+    commitTimeHistogram?: Record<string, number>,
+  ): boolean {
     if (!commitTimeHistogram) return false;
 
     const commitHour = commitTime.getHours().toString();
     const topHours = Object.entries(commitTimeHistogram)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 3)
       .map(([hour]) => hour);
 
@@ -661,7 +756,7 @@ JSON response:
         linesDeleted: 5,
         filesChanged: ['test.txt'],
       };
-      
+
       await this.analyzeCommitForAnomalies(testData);
       return true;
     } catch (error) {
@@ -669,4 +764,4 @@ JSON response:
       return false;
     }
   }
-} 
+}

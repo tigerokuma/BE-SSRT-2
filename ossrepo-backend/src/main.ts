@@ -38,7 +38,7 @@ async function bootstrap() {
       'http://127.0.0.1:3000', // Alternative localhost
       'http://127.0.0.1:5173', // Alternative localhost
       'http://127.0.0.1:8080',
-      'http://localhost:8000'
+      'http://localhost:8000',
       // Add your production domains here
       // 'https://yourapp.com',
       // 'https://www.yourapp.com'
@@ -61,4 +61,4 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
-bootstrap();// Test change for CI/CD
+bootstrap(); // Test change for CI/CD

@@ -45,7 +45,9 @@ export class MemgraphService implements OnModuleDestroy {
           if (!retriable || attempt === maxAttempts) throw err;
 
           // jittered backoff
-          await new Promise((r) => setTimeout(r, 150 * attempt + Math.random() * 200));
+          await new Promise((r) =>
+            setTimeout(r, 150 * attempt + Math.random() * 200),
+          );
         }
       }
 

@@ -51,9 +51,14 @@ export class AlertingService {
     private readonly aiAnomalyDetection: AIAnomalyDetectionService,
   ) {}
 
-  async checkCommitForAlerts(watchlistId: string, commitData: CommitData): Promise<void> {
+  async checkCommitForAlerts(
+    watchlistId: string,
+    commitData: CommitData,
+  ): Promise<void> {
     try {
-      this.logger.log(`🔍 Checking commit ${commitData.sha} for alerts in watchlist ${watchlistId}`);
+      this.logger.log(
+        `🔍 Checking commit ${commitData.sha} for alerts in watchlist ${watchlistId}`,
+      );
 
       const userWatchlists = await this.prisma.userWatchlist.findMany({
         where: { watchlist_id: watchlistId },
@@ -93,9 +98,14 @@ export class AlertingService {
         );
       }
 
-      this.logger.log(`✅ Alert checking completed for commit ${commitData.sha}`);
+      this.logger.log(
+        `✅ Alert checking completed for commit ${commitData.sha}`,
+      );
     } catch (error) {
-      this.logger.error(`Error checking alerts for commit ${commitData.sha}:`, error);
+      this.logger.error(
+        `Error checking alerts for commit ${commitData.sha}:`,
+        error,
+      );
     }
   }
 
@@ -163,9 +173,11 @@ export class AlertingService {
           contributorStats,
         );
       }
-
     } catch (error) {
-      this.logger.error(`Error checking alerts for user ${userWatchlist.user_id}:`, error);
+      this.logger.error(
+        `Error checking alerts for user ${userWatchlist.user_id}:`,
+        error,
+      );
     }
   }
 
@@ -193,8 +205,9 @@ export class AlertingService {
   ): Promise<void> {
     if (!config) return;
 
-    const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
-    
+    const totalLines =
+      (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
+
     if (totalLines >= config.hardcoded_threshold) {
       await this.createAlert(
         userWatchlistId,
@@ -210,10 +223,16 @@ export class AlertingService {
 
     // Check contributor variance
     if (contributorStats && config.contributor_variance > 0) {
-      const contributorAvg = contributorStats.avg_lines_added + contributorStats.avg_lines_deleted;
-      const contributorThreshold = contributorAvg + (config.contributor_variance * 
-        Math.sqrt(contributorStats.stddev_lines_added ** 2 + contributorStats.stddev_lines_deleted ** 2));
-      
+      const contributorAvg =
+        contributorStats.avg_lines_added + contributorStats.avg_lines_deleted;
+      const contributorThreshold =
+        contributorAvg +
+        config.contributor_variance *
+          Math.sqrt(
+            contributorStats.stddev_lines_added ** 2 +
+              contributorStats.stddev_lines_deleted ** 2,
+          );
+
       if (totalLines > contributorThreshold) {
         await this.createAlert(
           userWatchlistId,
@@ -232,7 +251,7 @@ export class AlertingService {
     if (repoStats && config.repository_variance > 0) {
       const repoAvg = repoStats.avg_lines_added + repoStats.avg_lines_deleted;
       const repoThreshold = repoAvg * config.repository_variance;
-      
+
       if (totalLines > repoThreshold) {
         await this.createAlert(
           userWatchlistId,
@@ -259,7 +278,7 @@ export class AlertingService {
     if (!config) return;
 
     const filesChanged = commitData.filesChanged?.length || 0;
-    
+
     // Check hardcoded threshold
     if (filesChanged >= config.hardcoded_threshold) {
       await this.createAlert(
@@ -276,9 +295,10 @@ export class AlertingService {
 
     // Check contributor variance
     if (contributorStats && config.contributor_variance > 0) {
-      const contributorThreshold = contributorStats.avg_files_changed + 
-        (config.contributor_variance * contributorStats.stddev_files_changed);
-      
+      const contributorThreshold =
+        contributorStats.avg_files_changed +
+        config.contributor_variance * contributorStats.stddev_files_changed;
+
       if (filesChanged > contributorThreshold) {
         await this.createAlert(
           userWatchlistId,
@@ -295,8 +315,9 @@ export class AlertingService {
 
     // Check repository variance
     if (repoStats && config.repository_variance > 0) {
-      const repoThreshold = repoStats.avg_files_changed * config.repository_variance;
-      
+      const repoThreshold =
+        repoStats.avg_files_changed * config.repository_variance;
+
       if (filesChanged > repoThreshold) {
         await this.createAlert(
           userWatchlistId,
@@ -322,12 +343,13 @@ export class AlertingService {
   ): Promise<void> {
     if (!config) return;
 
-    const totalLines = (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
+    const totalLines =
+      (commitData.linesAdded || 0) + (commitData.linesDeleted || 0);
     const filesChanged = commitData.filesChanged?.length || 0;
-    
+
     if (filesChanged > 0) {
       const churnRatio = totalLines / filesChanged;
-      
+
       if (churnRatio >= config.hardcoded_threshold) {
         await this.createAlert(
           userWatchlistId,
@@ -341,10 +363,16 @@ export class AlertingService {
         );
       }
 
-      if (repoStats && config.multiplier > 0 && repoStats.avg_files_changed > 0) {
-        const repoChurnRatio = (repoStats.avg_lines_added + repoStats.avg_lines_deleted) / repoStats.avg_files_changed;
+      if (
+        repoStats &&
+        config.multiplier > 0 &&
+        repoStats.avg_files_changed > 0
+      ) {
+        const repoChurnRatio =
+          (repoStats.avg_lines_added + repoStats.avg_lines_deleted) /
+          repoStats.avg_files_changed;
         const multiplierThreshold = repoChurnRatio * config.multiplier;
-        
+
         if (churnRatio > multiplierThreshold) {
           await this.createAlert(
             userWatchlistId,
@@ -370,21 +398,26 @@ export class AlertingService {
     if (!contributorStats) return;
 
     const commitHour = commitData.date.getHours();
-    const timeHistogram = contributorStats.commit_time_histogram as Record<string, number>;
-    
+    const timeHistogram = contributorStats.commit_time_histogram as Record<
+      string,
+      number
+    >;
+
     if (timeHistogram && Object.keys(timeHistogram).length > 0) {
       const activeHours = Object.entries(timeHistogram)
         .filter(([hour, count]) => count > 0)
         .map(([hour]) => parseInt(hour))
         .sort((a, b) => a - b);
-      
+
       if (activeHours.length > 0) {
         const minHour = Math.min(...activeHours);
         const maxHour = Math.max(...activeHours);
-        
+
         const suspiciousThreshold = 6;
-        const isOutsideRange = commitHour < (minHour - suspiciousThreshold) || commitHour > (maxHour + suspiciousThreshold);
-        
+        const isOutsideRange =
+          commitHour < minHour - suspiciousThreshold ||
+          commitHour > maxHour + suspiciousThreshold;
+
         if (isOutsideRange) {
           const typicalRange = `${minHour}:00-${maxHour}:00`;
           await this.createAlert(
@@ -419,26 +452,31 @@ export class AlertingService {
         linesAdded: commitData.linesAdded,
         linesDeleted: commitData.linesDeleted,
         filesChanged: commitData.filesChanged,
-        contributorStats: contributorStats ? {
-          avgLinesAdded: contributorStats.avg_lines_added || 0,
-          avgLinesDeleted: contributorStats.avg_lines_deleted || 0,
-          avgFilesChanged: contributorStats.avg_files_changed || 0,
-          stddevLinesAdded: contributorStats.stddev_lines_added || 0,
-          stddevLinesDeleted: contributorStats.stddev_lines_deleted || 0,
-          stddevFilesChanged: contributorStats.stddev_files_changed || 0,
-          totalCommits: contributorStats.total_commits || 0,
-          commitTimeHistogram: contributorStats.commit_time_histogram,
-        } : undefined,
-        repoStats: repoStats ? {
-          avgLinesAdded: repoStats.avg_lines_added || 0,
-          avgLinesDeleted: repoStats.avg_lines_deleted || 0,
-          avgFilesChanged: repoStats.avg_files_changed || 0,
-          totalCommits: repoStats.total_commits || 0,
-          totalContributors: repoStats.total_contributors || 0,
-        } : undefined,
+        contributorStats: contributorStats
+          ? {
+              avgLinesAdded: contributorStats.avg_lines_added || 0,
+              avgLinesDeleted: contributorStats.avg_lines_deleted || 0,
+              avgFilesChanged: contributorStats.avg_files_changed || 0,
+              stddevLinesAdded: contributorStats.stddev_lines_added || 0,
+              stddevLinesDeleted: contributorStats.stddev_lines_deleted || 0,
+              stddevFilesChanged: contributorStats.stddev_files_changed || 0,
+              totalCommits: contributorStats.total_commits || 0,
+              commitTimeHistogram: contributorStats.commit_time_histogram,
+            }
+          : undefined,
+        repoStats: repoStats
+          ? {
+              avgLinesAdded: repoStats.avg_lines_added || 0,
+              avgLinesDeleted: repoStats.avg_lines_deleted || 0,
+              avgFilesChanged: repoStats.avg_files_changed || 0,
+              totalCommits: repoStats.total_commits || 0,
+              totalContributors: repoStats.total_contributors || 0,
+            }
+          : undefined,
       };
 
-      const result = await this.aiAnomalyDetection.analyzeCommitForAnomalies(analysisData);
+      const result =
+        await this.aiAnomalyDetection.analyzeCommitForAnomalies(analysisData);
 
       if (result.isAnomalous) {
         const confidence = result.confidence;
@@ -458,7 +496,10 @@ export class AlertingService {
         );
       }
     } catch (error) {
-      this.logger.error(`Error in AI anomaly detection for commit ${commitData.sha}:`, error);
+      this.logger.error(
+        `Error in AI anomaly detection for commit ${commitData.sha}:`,
+        error,
+      );
     }
   }
 
@@ -515,4 +556,4 @@ export class AlertingService {
       this.logger.error(`Error creating alert:`, error);
     }
   }
-} 
+}

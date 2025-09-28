@@ -79,7 +79,7 @@ export class ActivityAnalysisService {
     const now = new Date();
     const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
     const recentCommits = commits.filter((c) => c.date >= threeMonthsAgo);
-    
+
     if (recentCommits.length === 0) {
       return {
         score: 0,
@@ -109,7 +109,11 @@ export class ActivityAnalysisService {
     const weeklyCommitRate = this.calculateWeeklyCommitRate(recentCommits);
     const developmentConsistency = Math.min(weeklyCommitRate / 3, 1) * 25;
 
-    const totalScore = commitFrequency + contributorDiversity + codeChurn + developmentConsistency;
+    const totalScore =
+      commitFrequency +
+      contributorDiversity +
+      codeChurn +
+      developmentConsistency;
 
     let level: ActivityScore['level'];
     if (totalScore >= 80) level = 'VERY_HIGH';
@@ -166,7 +170,9 @@ export class ActivityAnalysisService {
     const dates = commits
       .map((c) => c.date)
       .sort((a, b) => a.getTime() - b.getTime());
-    const timeSpan = (dates[dates.length - 1].getTime() - dates[0].getTime()) / (1000 * 60 * 60 * 24 * 30);
+    const timeSpan =
+      (dates[dates.length - 1].getTime() - dates[0].getTime()) /
+      (1000 * 60 * 60 * 24 * 30);
 
     const fileChurnData: FileChurnData[] = Array.from(fileStats.entries()).map(
       ([filePath, stats]) => ({
@@ -264,7 +270,10 @@ export class ActivityAnalysisService {
     };
   }
 
-  getTopActiveFiles(fileChurnData: FileChurnData[], limit: number = 10): FileChurnData[] {
+  getTopActiveFiles(
+    fileChurnData: FileChurnData[],
+    limit: number = 10,
+  ): FileChurnData[] {
     return fileChurnData.slice(0, limit);
   }
 

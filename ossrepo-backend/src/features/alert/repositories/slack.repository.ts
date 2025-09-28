@@ -4,28 +4,27 @@ import { SlackInsert } from '../dto/slack.dto';
 
 @Injectable()
 export class SlackRepository {
-  
   constructor(private readonly prisma: PrismaService) {}
 
   async insertSlackInfo(slackInsert: SlackInsert) {
     return this.prisma.slack.upsert({
-        where: {id: slackInsert.user_id},
-        update: {
-            slack_token: slackInsert.token,
-            slack_channel: slackInsert.channel
-        },
-        create: {
-            id: slackInsert.user_id,
-            slack_token: slackInsert.token,
-            slack_channel: slackInsert.channel
-        }
+      where: { id: slackInsert.user_id },
+      update: {
+        slack_token: slackInsert.token,
+        slack_channel: slackInsert.channel,
+      },
+      create: {
+        id: slackInsert.user_id,
+        slack_token: slackInsert.token,
+        slack_channel: slackInsert.channel,
+      },
     });
   }
 
   async getUserById(state: string) {
-      return await this.prisma.user.findUnique({ 
-        where: { user_id: state } 
-      });
+    return await this.prisma.user.findUnique({
+      where: { user_id: state },
+    });
   }
 
   async getSlackInfoUser(user_id: string) {
@@ -43,12 +42,12 @@ export class SlackRepository {
           select: {
             package: {
               select: {
-                package_name: true
-              }
-            }
-          }
-        }
-      }
+                package_name: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     return result?.watchlist?.package?.package_name;

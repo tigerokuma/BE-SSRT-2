@@ -41,7 +41,7 @@ describe('GitHubService', () => {
             description: 'A test repository',
             html_url: 'https://github.com/user/test-repo',
             stargazers_count: 100,
-            forks_count: 20
+            forks_count: 20,
           },
           {
             id: 2,
@@ -50,10 +50,10 @@ describe('GitHubService', () => {
             description: 'Another test repository',
             html_url: 'https://github.com/user/another-repo',
             stargazers_count: 50,
-            forks_count: 10
-          }
-        ]
-      }
+            forks_count: 10,
+          },
+        ],
+      },
     };
 
     it('should search repositories with correct parameters', async () => {
@@ -68,27 +68,27 @@ describe('GitHubService', () => {
             q: 'test',
             sort: 'stars',
             order: 'desc',
-            per_page: 10
+            per_page: 10,
           },
           headers: {
-            'Authorization': 'token test-token',
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'OSS-Repository-Backend'
-          }
-        }
+            Authorization: 'token test-token',
+            Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'OSS-Repository-Backend',
+          },
+        },
       );
       expect(result).toEqual(mockSearchResponse.data.items);
     });
 
     it('should handle search without GitHub token', async () => {
       delete process.env.GITHUB_TOKEN;
-      
+
       // Recreate service without token
       const module: TestingModule = await Test.createTestingModule({
         providers: [GitHubService],
       }).compile();
       const serviceWithoutToken = module.get<GitHubService>(GitHubService);
-      
+
       mockedAxios.get.mockResolvedValue(mockSearchResponse);
 
       await serviceWithoutToken.searchRepositories('test');
@@ -97,11 +97,11 @@ describe('GitHubService', () => {
         expect.any(String),
         expect.objectContaining({
           headers: {
-            'Authorization': 'token undefined',
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'OSS-Repository-Backend'
-          }
-        })
+            Authorization: 'token undefined',
+            Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'OSS-Repository-Backend',
+          },
+        }),
       );
     });
 
@@ -109,7 +109,10 @@ describe('GitHubService', () => {
       mockedAxios.get.mockRejectedValue(new Error('GitHub API Error'));
 
       await expect(service.searchRepositories('test')).rejects.toThrow(
-        new HttpException('Failed to search GitHub', HttpStatus.SERVICE_UNAVAILABLE)
+        new HttpException(
+          'Failed to search GitHub',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        ),
       );
     });
   });
@@ -125,21 +128,24 @@ describe('GitHubService', () => {
         stargazers_count: 100,
         forks_count: 20,
         language: 'TypeScript',
-        topics: ['javascript', 'nodejs']
-      }
+        topics: ['javascript', 'nodejs'],
+      },
     };
 
     const mockContributorsResponse = {
       data: [
         { login: 'user1', contributions: 50 },
         { login: 'user2', contributions: 30 },
-        { login: 'user3', contributions: 20 }
-      ]
+        { login: 'user3', contributions: 20 },
+      ],
     };
 
     it('should get repository details with contributors', async () => {
       mockedAxios.get.mockImplementation((url, config) => {
-        if (url.includes('/repos/user/test-repo') && !url.includes('/contributors')) {
+        if (
+          url.includes('/repos/user/test-repo') &&
+          !url.includes('/contributors')
+        ) {
           return Promise.resolve(mockRepoResponse);
         }
         if (url.includes('/contributors')) {
@@ -158,30 +164,37 @@ describe('GitHubService', () => {
         'https://api.github.com/repos/user/test-repo',
         {
           headers: {
-            'Authorization': 'token test-token',
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'OSS-Repository-Backend'
-          }
-        }
+            Authorization: 'token test-token',
+            Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'OSS-Repository-Backend',
+          },
+        },
       );
 
       expect(result).toEqual({
         ...mockRepoResponse.data,
         contributors_count: 15, // 3 contributors × 5 pages
-        contributors: expect.any(Array)
+        contributors: expect.any(Array),
       });
     });
 
     it('should handle repositories with many contributors (pagination)', async () => {
       const mockPage1 = {
-        data: Array(100).fill(null).map((_, i) => ({ login: `user${i}`, contributions: 10 }))
+        data: Array(100)
+          .fill(null)
+          .map((_, i) => ({ login: `user${i}`, contributions: 10 })),
       };
       const mockPage2 = {
-        data: Array(50).fill(null).map((_, i) => ({ login: `user${i + 100}`, contributions: 5 }))
+        data: Array(50)
+          .fill(null)
+          .map((_, i) => ({ login: `user${i + 100}`, contributions: 5 })),
       };
 
       mockedAxios.get.mockImplementation((url, config) => {
-        if (url.includes('/repos/user/test-repo') && !url.includes('/contributors')) {
+        if (
+          url.includes('/repos/user/test-repo') &&
+          !url.includes('/contributors')
+        ) {
           return Promise.resolve(mockRepoResponse);
         }
         if (url.includes('/contributors')) {
@@ -206,7 +219,10 @@ describe('GitHubService', () => {
 
     it('should handle contributor API failures gracefully', async () => {
       mockedAxios.get.mockImplementation((url) => {
-        if (url.includes('/repos/user/test-repo') && !url.includes('/contributors')) {
+        if (
+          url.includes('/repos/user/test-repo') &&
+          !url.includes('/contributors')
+        ) {
           return Promise.resolve(mockRepoResponse);
         }
         if (url.includes('/contributors')) {
@@ -223,7 +239,7 @@ describe('GitHubService', () => {
       expect(result.contributors).toEqual([]);
       expect(consoleSpy).toHaveBeenCalledWith(
         'Failed to fetch contributors page 1:',
-        'Contributors API failed'
+        'Contributors API failed',
       );
 
       consoleSpy.mockRestore();
@@ -232,8 +248,13 @@ describe('GitHubService', () => {
     it('should throw HttpException when repository details fail', async () => {
       mockedAxios.get.mockRejectedValue(new Error('Repository not found'));
 
-      await expect(service.getRepositoryDetails('user', 'nonexistent')).rejects.toThrow(
-        new HttpException('Failed to get repository details', HttpStatus.SERVICE_UNAVAILABLE)
+      await expect(
+        service.getRepositoryDetails('user', 'nonexistent'),
+      ).rejects.toThrow(
+        new HttpException(
+          'Failed to get repository details',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        ),
       );
     });
   });
@@ -242,7 +263,7 @@ describe('GitHubService', () => {
     it('should get all contributors with parallel then sequential pagination', async () => {
       const mockPageData = [
         { login: 'user1', contributions: 50 },
-        { login: 'user2', contributions: 30 }
+        { login: 'user2', contributions: 30 },
       ];
 
       mockedAxios.get.mockImplementation((url, config) => {
@@ -272,7 +293,7 @@ describe('GitHubService', () => {
       expect(result).toEqual([]);
       expect(consoleSpy).toHaveBeenCalledWith(
         'Failed to fetch contributors page 1:',
-        'API Error'
+        'API Error',
       );
 
       consoleSpy.mockRestore();
@@ -284,15 +305,15 @@ describe('GitHubService', () => {
       const headers = service['getHeaders']();
 
       expect(headers).toEqual({
-        'Authorization': 'token test-token',
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'OSS-Repository-Backend'
+        Authorization: 'token test-token',
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'OSS-Repository-Backend',
       });
     });
 
     it('should include authorization with undefined when token is not available', async () => {
       delete process.env.GITHUB_TOKEN;
-      
+
       // Recreate service without token
       const module: TestingModule = await Test.createTestingModule({
         providers: [GitHubService],
@@ -302,10 +323,10 @@ describe('GitHubService', () => {
       const headers = serviceWithoutToken['getHeaders']();
 
       expect(headers).toEqual({
-        'Authorization': 'token undefined',
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'OSS-Repository-Backend'
+        Authorization: 'token undefined',
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'OSS-Repository-Backend',
       });
     });
   });
-}); 
+});

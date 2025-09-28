@@ -19,7 +19,8 @@ export class CommitSummaryDto {
 export class CommitSummaryResponseDto {
   @ApiProperty({
     description: 'AI-generated summary of recent commits',
-    example: 'Recent commits show active development on the authentication system, with 3 commits adding new login features and 2 commits fixing security vulnerabilities.',
+    example:
+      'Recent commits show active development on the authentication system, with 3 commits adding new login features and 2 commits fixing security vulnerabilities.',
   })
   summary: string;
 
@@ -64,4 +65,4 @@ export class CommitSummaryResponseDto {
     example: '2024-01-15T10:30:00Z',
   })
   generatedAt: Date;
-} 
+}

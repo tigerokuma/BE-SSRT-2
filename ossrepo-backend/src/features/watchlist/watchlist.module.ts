@@ -15,10 +15,7 @@ import { PackagesModule } from '../packages/packages.module';
     PackagesModule, // Import the packages module to use its services
     HttpModule, // For vulnerability service HTTP requests
   ],
-  controllers: [
-    WatchlistController,
-    HistoryController,
-  ],
+  controllers: [WatchlistController, HistoryController],
   providers: [
     WatchlistService,
     HistoryService,

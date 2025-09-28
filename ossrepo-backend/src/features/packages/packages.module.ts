@@ -16,9 +16,7 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
   imports: [
     PrismaModule, // Import PrismaModule for database access
   ],
-  controllers: [
-    PackagesController,
-  ],
+  controllers: [PackagesController],
   providers: [
     PackagesService,
     PackageSearchService,

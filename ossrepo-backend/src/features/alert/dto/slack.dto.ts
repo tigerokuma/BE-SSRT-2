@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsDefined } from "class-validator";
+import { IsString, IsNotEmpty, IsDefined } from 'class-validator';
 
 export class SlackOauthConnect {
   @IsString()

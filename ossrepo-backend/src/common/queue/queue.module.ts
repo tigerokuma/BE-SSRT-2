@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ManualProcessorService } from './manual-processor.service';
 
 @Module({
   imports: [
@@ -11,18 +12,21 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           host: configService.get('REDIS_HOST', 'localhost'),
           port: parseInt(configService.get('REDIS_PORT', '6379')),
           // Add authentication if provided
-          ...(configService.get('REDIS_PASSWORD') && { password: configService.get('REDIS_PASSWORD') }),
-          ...(configService.get('REDIS_USERNAME') && { username: configService.get('REDIS_USERNAME') }),
-          // Add connection options for cloud Redis
-          connectTimeout: 10000,
-          lazyConnect: true,
-          retryDelayOnFailover: 100,
-          // Additional options for cloud Redis
-          family: 4, // Force IPv4
-          keepAlive: 30000,
-          retryDelayOnClusterDown: 300,
+          ...(configService.get('REDIS_PASSWORD') && {
+            password: configService.get('REDIS_PASSWORD'),
+          }),
+          ...(configService.get('REDIS_USERNAME') && {
+            username: configService.get('REDIS_USERNAME'),
+          }),
+          // Single connection for hosted Redis
+          maxRetriesPerRequest: 1,
           enableReadyCheck: false,
-          maxRetriesPerRequest: null,
+          lazyConnect: false,
+          connectTimeout: 5000,
+          commandTimeout: 3000,
+          retryDelayOnFailover: 100,
+          family: 4,
+          keepAlive: 0,
         },
         defaultJobOptions: {
           removeOnComplete: 100,
@@ -51,6 +55,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       },
     ),
   ],
+  providers: [ManualProcessorService],
   exports: [BullModule],
 })
 export class QueueModule {}

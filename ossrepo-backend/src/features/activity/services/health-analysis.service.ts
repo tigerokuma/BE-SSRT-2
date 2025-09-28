@@ -12,19 +12,21 @@ export interface ScorecardResult {
   scorecard: string;
   date: string;
   score: number;
-  checks: Array<{
-    name: string;
-    score: number;
-    reason: string;
-    details: string[] | null;
-  }> | {
-    [key: string]: {
-      name: string;
-      score: number;
-      reason: string;
-      details: string[];
-    };
-  };
+  checks:
+    | Array<{
+        name: string;
+        score: number;
+        reason: string;
+        details: string[] | null;
+      }>
+    | {
+        [key: string]: {
+          name: string;
+          score: number;
+          reason: string;
+          details: string[];
+        };
+      };
 }
 
 export interface HealthAnalysisResult {
@@ -58,6 +60,7 @@ export class HealthAnalysisService {
     repo: string,
     branch: string = 'main',
     commitShaOverride?: string,
+    repoPath?: string,
   ): Promise<number> {
     this.logger.log(
       `🔄 Using local Scorecard CLI analysis for ${owner}/${repo}`,
@@ -68,6 +71,8 @@ export class HealthAnalysisService {
       repo,
       branch,
       commitShaOverride,
+      undefined,
+      repoPath,
     );
     return result.overallHealthScore;
   }
@@ -78,6 +83,7 @@ export class HealthAnalysisService {
     repo: string,
     commits: any[],
     branch: string = 'main',
+    repoPath?: string,
   ): Promise<{
     current: number;
     historical: Array<{
@@ -100,6 +106,7 @@ export class HealthAnalysisService {
       repo,
       commits,
       branch,
+      repoPath,
     );
   }
 
@@ -109,6 +116,7 @@ export class HealthAnalysisService {
     repo: string,
     commits: any[],
     branch: string = 'main',
+    repoPath?: string,
   ): Promise<{
     current: number;
     historical: Array<{
@@ -147,6 +155,7 @@ export class HealthAnalysisService {
           branch,
           point.sha,
           point.date, // Pass the actual commit date
+          repoPath,
         );
         this.logger.log(
           `   📈 ${point.date.toISOString().split('T')[0]}: ${result.overallHealthScore.toFixed(1)}/10`,
@@ -205,24 +214,32 @@ export class HealthAnalysisService {
 
     const points: Array<{ sha: string; date: Date }> = [];
 
-    this.logger.log(`🔍 Calculating sampling points: ${count} tests for ${commits.length} commits`);
+    this.logger.log(
+      `🔍 Calculating sampling points: ${count} tests for ${commits.length} commits`,
+    );
 
     points.push({
       sha: commits[0].sha,
       date: commits[0].date,
     });
-    this.logger.log(`   📍 Added first commit: ${commits[0].sha.substring(0, 8)}`);
+    this.logger.log(
+      `   📍 Added first commit: ${commits[0].sha.substring(0, 8)}`,
+    );
 
     if (count > 2) {
       const step = (commits.length - 1) / (count - 1);
-      this.logger.log(`   📍 Adding ${count - 2} intermediate points with step ${step.toFixed(2)}`);
+      this.logger.log(
+        `   📍 Adding ${count - 2} intermediate points with step ${step.toFixed(2)}`,
+      );
       for (let i = 1; i < count - 1; i++) {
         const index = Math.floor(i * step);
         points.push({
           sha: commits[index].sha,
           date: commits[index].date,
         });
-        this.logger.log(`   📍 Added intermediate commit ${i}: ${commits[index].sha.substring(0, 8)} (index ${index})`);
+        this.logger.log(
+          `   📍 Added intermediate commit ${i}: ${commits[index].sha.substring(0, 8)} (index ${index})`,
+        );
       }
     }
 
@@ -233,7 +250,9 @@ export class HealthAnalysisService {
           sha: lastCommit.sha,
           date: lastCommit.date,
         });
-        this.logger.log(`   📍 Added last commit: ${lastCommit.sha.substring(0, 8)}`);
+        this.logger.log(
+          `   📍 Added last commit: ${lastCommit.sha.substring(0, 8)}`,
+        );
       } else {
         this.logger.log(`   📍 Last commit already included, skipping`);
       }
@@ -250,6 +269,7 @@ export class HealthAnalysisService {
     branch: string = 'main',
     commitShaOverride?: string,
     commitDate?: Date,
+    repoPath?: string,
   ): Promise<HealthAnalysisResult> {
     try {
       const commitSha =
@@ -257,7 +277,12 @@ export class HealthAnalysisService {
         (await this.getLatestCommitSha(owner, repo, branch));
 
       const dateToUse = commitDate || new Date();
-      const scorecardResult = await this.runScorecard(owner, repo, commitSha);
+      const scorecardResult = await this.runScorecard(
+        owner,
+        repo,
+        commitSha,
+        repoPath,
+      );
       const overallHealthScore =
         this.calculateScorecardHealthScore(scorecardResult);
 
@@ -307,7 +332,7 @@ export class HealthAnalysisService {
         throw new Error(`GitHub API error: ${response.statusText}`);
       }
 
-      const commitData = await response.json() as { sha: string };
+      const commitData = (await response.json()) as { sha: string };
       return commitData.sha;
     } catch (error) {
       this.logger.error(
@@ -322,15 +347,28 @@ export class HealthAnalysisService {
     owner: string,
     repo: string,
     commitSha: string,
+    repoPath?: string,
   ): Promise<ScorecardResult | null> {
     try {
-      const command = `${this.scorecardPath} --repo=github.com/${owner}/${repo} --commit=${commitSha} --format=json --show-details`;
-      
-      this.logger.log(`🔍 Running Scorecard on ${owner}/${repo}@${commitSha.substring(0, 8)}`);
-      
+      let command: string;
+
+      if (repoPath) {
+        // Use local repository path
+        command = `${this.scorecardPath} --local=${repoPath} --commit=${commitSha} --format=json --show-details`;
+        this.logger.log(
+          `🔍 Running Scorecard on local repository ${repoPath}@${commitSha.substring(0, 8)}`,
+        );
+      } else {
+        // Fallback to GitHub URL
+        command = `${this.scorecardPath} --repo=github.com/${owner}/${repo} --commit=${commitSha} --format=json --show-details`;
+        this.logger.log(
+          `🔍 Running Scorecard on ${owner}/${repo}@${commitSha.substring(0, 8)}`,
+        );
+      }
+
       let stdout: string;
       let stderr: string;
-      
+
       try {
         const result = await execAsync(command, {
           timeout: 400000,
@@ -400,9 +438,7 @@ export class HealthAnalysisService {
       checksArray = Object.values(scorecard.checks);
     }
 
-    const validChecks = checksArray.filter(
-      (check) => check.score >= 0,
-    );
+    const validChecks = checksArray.filter((check) => check.score >= 0);
 
     if (validChecks.length === 0) {
       return 0;
@@ -423,14 +459,16 @@ export class HealthAnalysisService {
           watchlist_id: result.watchlistId,
           commit_sha: result.commitSha,
           commit_date: result.commitDate,
-          scorecard_metrics: result.scorecardMetrics as any || undefined,
+          scorecard_metrics: (result.scorecardMetrics as any) || undefined,
           overall_health_score: result.overallHealthScore,
           analysis_date: result.analysisDate,
           source: 'scorecard',
         },
       });
 
-      this.logger.log(`✅ Health results stored for watchlist ${result.watchlistId} - Score: ${result.overallHealthScore}`);
+      this.logger.log(
+        `✅ Health results stored for watchlist ${result.watchlistId} - Score: ${result.overallHealthScore}`,
+      );
     } catch (error) {
       this.logger.error(`❌ Failed to store health results: ${error.message}`);
       throw error;

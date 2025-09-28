@@ -15,7 +15,9 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
     const callbackURL = configService.get<string>('GITHUB_CALLBACK_URL');
 
     if (!clientID || !clientSecret) {
-      throw new Error('GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be configured');
+      throw new Error(
+        'GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be configured',
+      );
     }
 
     super({
@@ -28,7 +30,7 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
 
   async validate(accessToken: string, refreshToken: string, profile: any) {
     const { id, username, emails, displayName } = profile;
-    
+
     const user = await this.authService.validateGithubUser({
       github_id: id,
       github_username: username,

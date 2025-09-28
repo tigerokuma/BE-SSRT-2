@@ -26,7 +26,7 @@ describe('PackagesController', () => {
 
     controller = module.get<PackagesController>(PackagesController);
     service = module.get<PackagesService>(PackagesService);
-    
+
     // Clear all mocks before each test
     jest.clearAllMocks();
   });
@@ -37,13 +37,22 @@ describe('PackagesController', () => {
 
   describe('searchPackages', () => {
     const mockSearchResults = [
-      { name: 'test-package-1', version: '1.0.0', osv_vulnerabilities: [{ id: 'GHSA-test', summary: 'Test vulnerability', severity: 'HIGH' }] },
+      {
+        name: 'test-package-1',
+        version: '1.0.0',
+        osv_vulnerabilities: [
+          { id: 'GHSA-test', summary: 'Test vulnerability', severity: 'HIGH' },
+        ],
+      },
       { name: 'test-package-2', version: '2.0.0', osv_vulnerabilities: [] },
     ];
 
     beforeEach(() => {
       // Mock Date.now to control timing
-      jest.spyOn(Date, 'now').mockReturnValueOnce(1000).mockReturnValueOnce(1100);
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValueOnce(1000)
+        .mockReturnValueOnce(1100);
       jest.spyOn(console, 'log').mockImplementation();
     });
 
@@ -61,11 +70,11 @@ describe('PackagesController', () => {
         query: 'test',
         results: mockSearchResults,
         count: 2,
-        responseTime: '100ms'
+        responseTime: '100ms',
       });
       expect(result.results[0]).toHaveProperty('osv_vulnerabilities');
       expect(console.log).toHaveBeenCalledWith(
-        'Search "test" completed in 100ms, returned 2 packages'
+        'Search "test" completed in 100ms, returned 2 packages',
       );
     });
 
@@ -79,11 +88,11 @@ describe('PackagesController', () => {
 
     it('should throw BadRequestException when name is not provided', async () => {
       await expect(controller.searchPackages('')).rejects.toThrow(
-        new BadRequestException('Package name is required')
+        new BadRequestException('Package name is required'),
       );
-      
+
       await expect(controller.searchPackages('   ')).rejects.toThrow(
-        new BadRequestException('Package name is required')
+        new BadRequestException('Package name is required'),
       );
 
       expect(mockPackagesService.searchPackages).not.toHaveBeenCalled();
@@ -91,7 +100,7 @@ describe('PackagesController', () => {
 
     it('should throw BadRequestException when name is less than 2 characters', async () => {
       await expect(controller.searchPackages('a')).rejects.toThrow(
-        new BadRequestException('Package name must be at least 2 characters')
+        new BadRequestException('Package name must be at least 2 characters'),
       );
 
       expect(mockPackagesService.searchPackages).not.toHaveBeenCalled();
@@ -106,7 +115,7 @@ describe('PackagesController', () => {
         query: 'nonexistent',
         results: [],
         count: 0,
-        responseTime: '100ms'
+        responseTime: '100ms',
       });
     });
   });
@@ -116,7 +125,13 @@ describe('PackagesController', () => {
       name: 'test-package',
       version: '1.0.0',
       description: 'Test package description',
-      osv_vulnerabilities: [{ id: 'GHSA-test2', summary: 'Test vulnerability 2', severity: 'MODERATE' }]
+      osv_vulnerabilities: [
+        {
+          id: 'GHSA-test2',
+          summary: 'Test vulnerability 2',
+          severity: 'MODERATE',
+        },
+      ],
     };
 
     it('should return package with summary view by default', async () => {
@@ -124,7 +139,10 @@ describe('PackagesController', () => {
 
       const result = await controller.getPackage('test-package');
 
-      expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'summary');
+      expect(mockPackagesService.getPackage).toHaveBeenCalledWith(
+        'test-package',
+        'summary',
+      );
       expect(result).toEqual(mockPackageData);
       expect(result).toHaveProperty('osv_vulnerabilities');
     });
@@ -134,7 +152,10 @@ describe('PackagesController', () => {
 
       const result = await controller.getPackage('test-package', 'details');
 
-      expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'details');
+      expect(mockPackagesService.getPackage).toHaveBeenCalledWith(
+        'test-package',
+        'details',
+      );
       expect(result).toEqual(mockPackageData);
       expect(result).toHaveProperty('osv_vulnerabilities');
     });
@@ -144,24 +165,31 @@ describe('PackagesController', () => {
 
       await controller.getPackage('  test-package  ', 'summary');
 
-      expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'summary');
+      expect(mockPackagesService.getPackage).toHaveBeenCalledWith(
+        'test-package',
+        'summary',
+      );
     });
 
     it('should throw BadRequestException when name is not provided', async () => {
       await expect(controller.getPackage('')).rejects.toThrow(
-        new BadRequestException('Package name is required')
+        new BadRequestException('Package name is required'),
       );
-      
+
       await expect(controller.getPackage('   ')).rejects.toThrow(
-        new BadRequestException('Package name is required')
+        new BadRequestException('Package name is required'),
       );
 
       expect(mockPackagesService.getPackage).not.toHaveBeenCalled();
     });
 
     it('should throw BadRequestException for invalid view parameter', async () => {
-      await expect(controller.getPackage('test-package', 'invalid' as any)).rejects.toThrow(
-        new BadRequestException('View parameter must be "summary" or "details"')
+      await expect(
+        controller.getPackage('test-package', 'invalid' as any),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'View parameter must be "summary" or "details"',
+        ),
       );
 
       expect(mockPackagesService.getPackage).not.toHaveBeenCalled();
@@ -170,8 +198,10 @@ describe('PackagesController', () => {
     it('should throw NotFoundException when package is not found', async () => {
       mockPackagesService.getPackage.mockResolvedValue(null);
 
-      await expect(controller.getPackage('nonexistent-package')).rejects.toThrow(
-        new NotFoundException("Package 'nonexistent-package' not found")
+      await expect(
+        controller.getPackage('nonexistent-package'),
+      ).rejects.toThrow(
+        new NotFoundException("Package 'nonexistent-package' not found"),
       );
     });
 
@@ -180,7 +210,10 @@ describe('PackagesController', () => {
 
       await controller.getPackage('test-package', 'summary');
 
-      expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'summary');
+      expect(mockPackagesService.getPackage).toHaveBeenCalledWith(
+        'test-package',
+        'summary',
+      );
     });
 
     it('should accept details view parameter', async () => {
@@ -188,22 +221,31 @@ describe('PackagesController', () => {
 
       await controller.getPackage('test-package', 'details');
 
-      expect(mockPackagesService.getPackage).toHaveBeenCalledWith('test-package', 'details');
+      expect(mockPackagesService.getPackage).toHaveBeenCalledWith(
+        'test-package',
+        'details',
+      );
     });
   });
 
   describe('forceRefreshCache', () => {
     it('should call service to force refresh cache', async () => {
-      mockPackagesService.forceRefreshCache.mockResolvedValue({ message: 'Cache refreshed' });
+      mockPackagesService.forceRefreshCache.mockResolvedValue({
+        message: 'Cache refreshed',
+      });
 
       const result = await controller.forceRefreshCache('test-package');
 
-      expect(mockPackagesService.forceRefreshCache).toHaveBeenCalledWith('test-package');
+      expect(mockPackagesService.forceRefreshCache).toHaveBeenCalledWith(
+        'test-package',
+      );
       expect(result).toEqual({ message: 'Cache refreshed' });
     });
 
     it('should handle empty package name for cache refresh', async () => {
-      mockPackagesService.forceRefreshCache.mockResolvedValue({ message: 'Cache cleared' });
+      mockPackagesService.forceRefreshCache.mockResolvedValue({
+        message: 'Cache cleared',
+      });
 
       const result = await controller.forceRefreshCache('');
 
@@ -220,14 +262,16 @@ describe('PackagesController', () => {
           "'; DROP TABLE packages; --",
           "' OR '1'='1",
           "test'; DELETE FROM npm_packages; --",
-          "' UNION SELECT * FROM users --"
+          "' UNION SELECT * FROM users --",
         ];
 
         mockPackagesService.searchPackages.mockResolvedValue([]);
 
         for (const maliciousInput of maliciousInputs) {
           await controller.searchPackages(maliciousInput);
-          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(maliciousInput);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+            maliciousInput,
+          );
         }
       });
 
@@ -236,14 +280,16 @@ describe('PackagesController', () => {
           '{"$ne": null}',
           '{"$gt": ""}',
           '{"$regex": ".*"}',
-          '{"$where": "this.name.length > 0"}'
+          '{"$where": "this.name.length > 0"}',
         ];
 
         mockPackagesService.searchPackages.mockResolvedValue([]);
 
         for (const injection of noSqlInjections) {
           await controller.searchPackages(injection);
-          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(injection);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+            injection,
+          );
         }
       });
 
@@ -252,14 +298,16 @@ describe('PackagesController', () => {
           '<script>alert("xss")</script>',
           'javascript:alert("xss")',
           '"><script>alert("xss")</script>',
-          'onload="alert(\'xss\')"'
+          'onload="alert(\'xss\')"',
         ];
 
         mockPackagesService.searchPackages.mockResolvedValue([]);
 
         for (const script of scriptInjections) {
           await controller.searchPackages(script);
-          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(script);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+            script,
+          );
         }
       });
     });
@@ -271,7 +319,9 @@ describe('PackagesController', () => {
 
         await controller.searchPackages(longName);
 
-        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(longName);
+        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+          longName,
+        );
       });
 
       it('should handle Unicode and special characters', async () => {
@@ -288,7 +338,9 @@ describe('PackagesController', () => {
 
         for (const unicode of unicodeInputs) {
           await controller.searchPackages(unicode);
-          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(unicode);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+            unicode,
+          );
         }
       });
 
@@ -298,7 +350,7 @@ describe('PackagesController', () => {
           '..\\..\\..\\windows\\system32',
           '%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd',
           '....//....//....//etc/passwd',
-          '/var/log/auth.log'
+          '/var/log/auth.log',
         ];
 
         mockPackagesService.searchPackages.mockResolvedValue([]);
@@ -313,7 +365,7 @@ describe('PackagesController', () => {
     describe('Malformed Data Handling', () => {
       it('should handle various whitespace edge cases', async () => {
         const whitespaceTests = [
-          '  test  ',    // Multiple spaces
+          '  test  ', // Multiple spaces
           '\t\ttest\t\t', // Tabs
           '\n\ntest\n\n', // Newlines
           '\r\ntest\r\n', // CRLF
@@ -325,7 +377,9 @@ describe('PackagesController', () => {
 
         for (const whitespace of whitespaceTests) {
           await controller.searchPackages(whitespace);
-          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(whitespace.trim());
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+            whitespace.trim(),
+          );
         }
       });
 
@@ -335,14 +389,16 @@ describe('PackagesController', () => {
           'test+package',
           'test%2Bpackage',
           'test%3Cscript%3E',
-          decodeURIComponent('test%20encoded')
+          decodeURIComponent('test%20encoded'),
         ];
 
         mockPackagesService.searchPackages.mockResolvedValue([]);
 
         for (const encoded of encodedInputs) {
           await controller.searchPackages(encoded);
-          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(encoded);
+          expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+            encoded,
+          );
         }
       });
     });
@@ -361,13 +417,17 @@ describe('PackagesController', () => {
         mockPackagesService.searchPackages.mockResolvedValue([]);
 
         await controller.searchPackages(maxLengthName);
-        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(maxLengthName);
+        expect(mockPackagesService.searchPackages).toHaveBeenCalledWith(
+          maxLengthName,
+        );
       });
     });
 
     describe('Error Information Disclosure Prevention', () => {
       it('should not expose internal errors in search endpoint', async () => {
-        const internalError = new Error('Database connection failed: server details');
+        const internalError = new Error(
+          'Database connection failed: server details',
+        );
         mockPackagesService.searchPackages.mockRejectedValue(internalError);
 
         await expect(controller.searchPackages('test')).rejects.toThrow();
@@ -375,7 +435,9 @@ describe('PackagesController', () => {
       });
 
       it('should not expose internal errors in getPackage endpoint', async () => {
-        const internalError = new Error('Internal service configuration: secret details');
+        const internalError = new Error(
+          'Internal service configuration: secret details',
+        );
         mockPackagesService.getPackage.mockRejectedValue(internalError);
 
         await expect(controller.getPackage('test')).rejects.toThrow();
@@ -387,9 +449,9 @@ describe('PackagesController', () => {
       it('should handle multiple simultaneous search requests', async () => {
         mockPackagesService.searchPackages.mockResolvedValue([]);
 
-        const simultaneousRequests = Array(10).fill(null).map((_, i) => 
-          controller.searchPackages(`test-${i}`)
-        );
+        const simultaneousRequests = Array(10)
+          .fill(null)
+          .map((_, i) => controller.searchPackages(`test-${i}`));
 
         await Promise.all(simultaneousRequests);
 

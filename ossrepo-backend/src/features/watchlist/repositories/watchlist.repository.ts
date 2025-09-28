@@ -13,18 +13,18 @@ export class WatchlistRepository {
     // Fetch user's watchlist items with package details
     const userWatchlist = await this.prisma.userWatchlist.findMany({
       where: {
-        user_id: userId
+        user_id: userId,
       },
       include: {
         watchlist: {
           include: {
-            package: true
-          }
-        }
+            package: true,
+          },
+        },
       },
       orderBy: {
-        added_at: 'desc'
-      }
+        added_at: 'desc',
+      },
     });
 
     // Fetch additional data for each watchlist item
@@ -33,33 +33,33 @@ export class WatchlistRepository {
         // Get alert count for this user watchlist
         const alertCount = await this.prisma.alertTriggered.count({
           where: {
-            user_watchlist_id: item.id
-          }
+            user_watchlist_id: item.id,
+          },
         });
 
         // Get latest activity score
         const latestActivity = await this.prisma.activityData.findFirst({
           where: {
-            watchlist_id: item.watchlist_id
+            watchlist_id: item.watchlist_id,
           },
           orderBy: {
-            analysis_date: 'desc'
+            analysis_date: 'desc',
           },
           select: {
             activity_score: true,
             activity_factors: true,
             weekly_commit_rate: true,
-            activity_heatmap: true
-          }
+            activity_heatmap: true,
+          },
         });
 
         // Get latest bus factor data
         const latestBusFactor = await this.prisma.busFactorData.findFirst({
           where: {
-            watchlist_id: item.watchlist_id
+            watchlist_id: item.watchlist_id,
           },
           orderBy: {
-            analysis_date: 'desc'
+            analysis_date: 'desc',
           },
           select: {
             bus_factor: true,
@@ -68,37 +68,37 @@ export class WatchlistRepository {
             top_contributors: true,
             risk_level: true,
             risk_reason: true,
-            analysis_date: true
-          }
+            analysis_date: true,
+          },
         });
 
         // Get latest health score
         const latestHealth = await this.prisma.healthData.findFirst({
           where: {
-            watchlist_id: item.watchlist_id
+            watchlist_id: item.watchlist_id,
           },
           orderBy: {
-            analysis_date: 'desc'
+            analysis_date: 'desc',
           },
           select: {
-            overall_health_score: true
-          }
+            overall_health_score: true,
+          },
         });
 
         // Get latest AI summary
         const latestAISummary = await this.prisma.aISummaryData.findFirst({
           where: {
-            watchlist_id: item.watchlist_id
+            watchlist_id: item.watchlist_id,
           },
           orderBy: {
-            created_at: 'desc'
+            created_at: 'desc',
           },
           select: {
             summary: true,
             confidence: true,
             model_used: true,
-            created_at: true
-          }
+            created_at: true,
+          },
         });
 
         // Calculate tracking duration
@@ -112,21 +112,24 @@ export class WatchlistRepository {
         let npmUrl: string | null = null;
         let enhancedDescription: string | null = null;
         let repoUrl = item.watchlist.package?.repo_url;
-        
+
         if (repoUrl) {
           // Ensure repoUrl starts with 'https://'
-          if (!repoUrl.startsWith('http://') && !repoUrl.startsWith('https://')) {
+          if (
+            !repoUrl.startsWith('http://') &&
+            !repoUrl.startsWith('https://')
+          ) {
             repoUrl = 'https://' + repoUrl;
           }
 
           // Enhanced NPM data fetch
           const npmPkg = await this.prisma.npmPackage.findFirst({
             where: { repo_url: repoUrl },
-            select: { 
+            select: {
               downloads: true,
               npm_url: true,
-              description: true
-            }
+              description: true,
+            },
           });
           downloads = npmPkg?.downloads ?? null;
           npmUrl = npmPkg?.npm_url ?? null;
@@ -135,7 +138,7 @@ export class WatchlistRepository {
           // GitHub stars, contributors, forks
           const ghRepo = await this.prisma.gitHubRepository.findUnique({
             where: { repo_url: repoUrl },
-            select: { stars: true, contributors: true, forks: true }
+            select: { stars: true, contributors: true, forks: true },
           });
           stars = ghRepo?.stars ?? null;
           contributors = ghRepo?.contributors ?? null;
@@ -146,20 +149,31 @@ export class WatchlistRepository {
         return {
           ...item,
           alertCount,
-          activityScore: latestActivity?.activity_score !== undefined && latestActivity?.activity_score !== null ? latestActivity.activity_score : null,
+          activityScore:
+            latestActivity?.activity_score !== undefined &&
+            latestActivity?.activity_score !== null
+              ? latestActivity.activity_score
+              : null,
           activityFactors: latestActivity?.activity_factors || null,
           weeklyCommitRate: latestActivity?.weekly_commit_rate || null,
           activityHeatmap: latestActivity?.activity_heatmap || null,
           busFactor: latestBusFactor?.bus_factor || null,
-          busFactorDetails: latestBusFactor ? {
-            level: latestBusFactor.bus_factor,
-            risk: latestBusFactor.risk_level as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
-            description: latestBusFactor.risk_reason || '',
-            topContributors: latestBusFactor.top_contributors as any[] || [],
-            totalContributors: latestBusFactor.total_contributors || 0,
-            totalCommits: latestBusFactor.total_commits || 0,
-            analysisDate: latestBusFactor.analysis_date
-          } : null,
+          busFactorDetails: latestBusFactor
+            ? {
+                level: latestBusFactor.bus_factor,
+                risk: latestBusFactor.risk_level as
+                  | 'LOW'
+                  | 'MEDIUM'
+                  | 'HIGH'
+                  | 'CRITICAL',
+                description: latestBusFactor.risk_reason || '',
+                topContributors:
+                  (latestBusFactor.top_contributors as any[]) || [],
+                totalContributors: latestBusFactor.total_contributors || 0,
+                totalCommits: latestBusFactor.total_commits || 0,
+                analysisDate: latestBusFactor.analysis_date,
+              }
+            : null,
           healthScore: latestHealth?.overall_health_score || null,
           trackingDuration,
           // Enhanced data fields for frontend
@@ -173,9 +187,9 @@ export class WatchlistRepository {
           aiSummary: latestAISummary?.summary || null,
           aiConfidence: latestAISummary?.confidence || null,
           aiModelUsed: latestAISummary?.model_used || null,
-          aiCreatedAt: latestAISummary?.created_at || null
+          aiCreatedAt: latestAISummary?.created_at || null,
         };
-      })
+      }),
     );
 
     return enrichedWatchlist;
@@ -185,7 +199,7 @@ export class WatchlistRepository {
     const now = new Date();
     const diffInMs = now.getTime() - addedAt.getTime();
     const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-    
+
     if (diffInDays < 30) {
       return `${diffInDays} days`;
     } else if (diffInDays < 365) {
@@ -199,10 +213,14 @@ export class WatchlistRepository {
 
   async addToWatchlist(user_id: string, request: AddToWatchlistRequest) {
     // Try to find the package in the Package table
-    let pkg = await this.prisma.package.findUnique({ where: { package_name: request.name } });
+    let pkg = await this.prisma.package.findUnique({
+      where: { package_name: request.name },
+    });
     // If not found, try to import from NpmPackage
     if (!pkg) {
-      const npmPkg = await this.prisma.npmPackage.findUnique({ where: { package_name: request.name } });
+      const npmPkg = await this.prisma.npmPackage.findUnique({
+        where: { package_name: request.name },
+      });
       if (!npmPkg) throw new Error('Package not found');
       // Create a new Package record from NpmPackage fields
       pkg = await this.prisma.package.create({
@@ -233,7 +251,9 @@ export class WatchlistRepository {
     if (existing) throw new Error('Already in watchlist');
 
     // Create Watchlist entry if not exists
-    let watchlist = await this.prisma.watchlist.findFirst({ where: { package_id: pkg.package_id } });
+    let watchlist = await this.prisma.watchlist.findFirst({
+      where: { package_id: pkg.package_id },
+    });
     if (!watchlist) {
       watchlist = await this.prisma.watchlist.create({
         data: {
@@ -259,7 +279,11 @@ export class WatchlistRepository {
     });
   }
 
-  async updateWatchlistItem(user_id: string, id: string, request: UpdateWatchlistRequest) {
+  async updateWatchlistItem(
+    user_id: string,
+    id: string,
+    request: UpdateWatchlistRequest,
+  ) {
     return this.prisma.userWatchlist.update({
       where: { id },
       data: {

@@ -21,7 +21,7 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
-import {GraphModule} from "../graph/graph.module";
+import { GraphModule } from '../graph/graph.module';
 
 import { SbomModule } from '../sbom/sbom.module';
 import { AlertModule } from '../alert/alert.module';
@@ -45,9 +45,9 @@ import { AlertModule } from '../alert/alert.module';
     GitManagerService,
     HealthAnalysisService,
     RepositorySetupProcessor,
-            PollingProcessor,
-        VulnerabilityCheckProcessor,
-        HealthCheckProcessor,
+    PollingProcessor,
+    VulnerabilityCheckProcessor,
+    HealthCheckProcessor,
 
     GitHubApiService,
     BusFactorService,

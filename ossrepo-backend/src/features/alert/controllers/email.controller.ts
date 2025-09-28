@@ -1,8 +1,15 @@
-import { 
-  Controller, Post, Body, Get, Query, Param, Logger,
-  BadRequestException, BadGatewayException 
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Query,
+  Param,
+  Logger,
+  BadRequestException,
+  BadGatewayException,
 } from '@nestjs/common';
-import { EmailService } from '../services/email.service'; 
+import { EmailService } from '../services/email.service';
 import { EmailTimeInput, User } from '../dto/email.dto';
 
 @Controller('email')
@@ -21,7 +28,10 @@ export class EmailController {
       await this.emailService.sendConfirmation(body.user_id);
       return { success: true, message: 'Confirmation email sent' };
     } catch (err) {
-      this.logger.error(`Failed to send confirmation email for user: ${body.user_id}`, err.stack);
+      this.logger.error(
+        `Failed to send confirmation email for user: ${body.user_id}`,
+        err.stack,
+      );
       throw new BadGatewayException('Failed to send confirmation email');
     }
   }
@@ -35,8 +45,13 @@ export class EmailController {
     try {
       return await this.emailService.checkConfirmation(user_id);
     } catch (err) {
-      this.logger.error(`Failed to check email confirmation for user: ${user_id}`, err.stack);
-      throw new BadGatewayException('Failed to check email confirmation status');
+      this.logger.error(
+        `Failed to check email confirmation for user: ${user_id}`,
+        err.stack,
+      );
+      throw new BadGatewayException(
+        'Failed to check email confirmation status',
+      );
     }
   }
 
@@ -49,7 +64,10 @@ export class EmailController {
     try {
       return await this.emailService.getUserEmailTime(user_id);
     } catch (err) {
-      this.logger.error(`Failed to get email time for user: ${user_id}`, err.stack);
+      this.logger.error(
+        `Failed to get email time for user: ${user_id}`,
+        err.stack,
+      );
       throw new BadGatewayException('Failed to retrieve email time');
     }
   }
@@ -63,7 +81,10 @@ export class EmailController {
     try {
       return await this.emailService.confirmEmail(token);
     } catch (err) {
-      this.logger.error(`Failed to confirm email with token: ${token}`, err.stack);
+      this.logger.error(
+        `Failed to confirm email with token: ${token}`,
+        err.stack,
+      );
       throw new BadGatewayException('Failed to confirm email');
     }
   }

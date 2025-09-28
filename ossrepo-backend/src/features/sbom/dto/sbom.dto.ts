@@ -1,5 +1,4 @@
-import { IsString, IsOptional, IsJSON, IsDate } from "class-validator";
-
+import { IsString, IsOptional, IsJSON, IsDate } from 'class-validator';
 
 export class CreateSbomDto {
   @IsString()
@@ -33,4 +32,3 @@ export class SearchParamsDto {
   @IsString()
   search: string;
 }
-

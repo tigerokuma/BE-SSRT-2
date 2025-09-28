@@ -21,4 +21,4 @@ export class UserRepository {
   async getAllUsers() {
     return this.prisma.user.findMany();
   }
-} 
+}

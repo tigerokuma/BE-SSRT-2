@@ -95,9 +95,12 @@ export class RepositorySummaryService {
 
       let busFactorResult;
       try {
-        busFactorResult = await this.busFactorService.calculateBusFactor(watchlistId);
+        busFactorResult =
+          await this.busFactorService.calculateBusFactor(watchlistId);
       } catch (error) {
-        this.logger.warn(`Failed to calculate bus factor for ${owner}/${repo}: ${error.message}`);
+        this.logger.warn(
+          `Failed to calculate bus factor for ${owner}/${repo}: ${error.message}`,
+        );
         busFactorResult = {
           busFactor: 0,
           totalContributors: 0,
@@ -206,6 +209,4 @@ export class RepositorySummaryService {
       return undefined;
     }
   }
-
-
 }

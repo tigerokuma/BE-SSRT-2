@@ -350,61 +350,87 @@ export class GitManagerService {
           continue;
         }
 
-        const commitPromises = newCommits.map(async (commit) => {
-          let commitDate: Date;
-          try {
-            commitDate = new Date(commit.date);
-            if (isNaN(commitDate.getTime())) {
+        // Process commits in reasonable batches to avoid connection pool issues
+        const commitBatchSize = 50; // Process 50 commits at a time - good balance between speed and connection pool
+        const commitBatches: any[][] = [];
+        for (let i = 0; i < newCommits.length; i += commitBatchSize) {
+          commitBatches.push(newCommits.slice(i, i + commitBatchSize));
+        }
+
+        for (const commitBatch of commitBatches) {
+          const batchPromises = commitBatch.map(async (commit) => {
+            let commitDate: Date;
+            try {
+              commitDate = new Date(commit.date);
+              if (isNaN(commitDate.getTime())) {
+                this.logger.warn(
+                  `Invalid date for commit ${commit.sha}: "${commit.date}", using current date`,
+                );
+                commitDate = new Date();
+              }
+            } catch (error) {
               this.logger.warn(
-                `Invalid date for commit ${commit.sha}: "${commit.date}", using current date`,
+                `Error parsing date for commit ${commit.sha}: "${commit.date}", using current date`,
               );
               commitDate = new Date();
             }
-          } catch (error) {
-            this.logger.warn(
-              `Error parsing date for commit ${commit.sha}: "${commit.date}", using current date`,
-            );
-            commitDate = new Date();
-          }
 
-          const payload = {
-            sha: commit.sha,
-            message: commit.message,
-            email: commit.email,
-            files_changed: commit.files_changed || [],
-            lines_added: commit.lines_added || 0,
-            lines_deleted: commit.lines_deleted || 0,
-          };
+            const payload = {
+              sha: commit.sha,
+              message: commit.message,
+              email: commit.email,
+              files_changed: commit.files_changed || [],
+              lines_added: commit.lines_added || 0,
+              lines_deleted: commit.lines_deleted || 0,
+            };
 
-          const logData = {
-            watchlist_id: watchlistId,
-            event_type: 'COMMIT',
-            actor: commit.author,
-            timestamp: commitDate,
-            payload,
-            prev_event_hash: currentPrevHash,
-          };
-
-          const eventHash = this.createEventHash(logData);
-
-          await this.prisma.log.create({
-            data: {
-              event_id: `commit_${commit.sha}`,
+            const logData = {
+              watchlist_id: watchlistId,
               event_type: 'COMMIT',
               actor: commit.author,
               timestamp: commitDate,
               payload,
-              event_hash: eventHash,
               prev_event_hash: currentPrevHash,
-              watchlist_id: watchlistId,
-            },
+            };
+
+            const eventHash = this.createEventHash(logData);
+
+            // Retry logic for Prisma connection pool issues
+            let retryCount = 0;
+            const maxRetries = 3;
+            while (retryCount < maxRetries) {
+              try {
+                await this.prisma.log.create({
+                  data: {
+                    event_id: `commit_${commit.sha}`,
+                    event_type: 'COMMIT',
+                    actor: commit.author,
+                    timestamp: commitDate,
+                    payload,
+                    event_hash: eventHash,
+                    prev_event_hash: currentPrevHash,
+                    watchlist_id: watchlistId,
+                  },
+                });
+                break; // Success, exit retry loop
+              } catch (error: any) {
+                retryCount++;
+                if (error.message?.includes('connection pool') && retryCount < maxRetries) {
+                  this.logger.warn(`Prisma connection pool timeout, retrying ${retryCount}/${maxRetries}...`);
+                  await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+                } else {
+                  throw error; // Re-throw if not a connection pool error or max retries reached
+                }
+              }
+            }
+
+            currentPrevHash = eventHash;
+            processedCount++;
           });
 
-          currentPrevHash = eventHash;
-          processedCount++;
-        });
-
-        await Promise.all(commitPromises);
+          // Wait for this batch to complete before starting the next batch
+          await Promise.all(batchPromises);
+        }
         skippedCount += batch.length - newCommits.length;
       }
 
@@ -460,7 +486,9 @@ export class GitManagerService {
 
   async updateContributorStats(watchlistId: string): Promise<void> {
     try {
-      this.logger.log(`📊 Updating contributor stats for watchlist ${watchlistId}`);
+      this.logger.log(
+        `📊 Updating contributor stats for watchlist ${watchlistId}`,
+      );
 
       const logs = await this.prisma.log.findMany({
         where: { watchlist_id: watchlistId, event_type: 'COMMIT' },
@@ -483,29 +511,46 @@ export class GitManagerService {
       for (const [email, entries] of Object.entries(statsByEmail)) {
         const author_name = entries[0].actor;
         const total_commits = entries.length;
-        
+
         if (total_commits === 0) continue;
-        
-        const lines_added_arr = entries.map(e => (e.payload as any)?.lines_added || 0);
-        const lines_deleted_arr = entries.map(e => (e.payload as any)?.lines_deleted || 0);
-        const files_changed_arr = entries.map(e => ((e.payload as any)?.files_changed?.length || 0));
-        
-        const avg_lines_added = lines_added_arr.reduce((a, b) => a + b, 0) / total_commits;
-        const avg_lines_deleted = lines_deleted_arr.reduce((a, b) => a + b, 0) / total_commits;
-        const avg_files_changed = files_changed_arr.reduce((a, b) => a + b, 0) / total_commits;
-        
-        const stddev = (arr: number[], avg: number) => Math.sqrt(arr.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / arr.length);
+
+        const lines_added_arr = entries.map((e) => e.payload?.lines_added || 0);
+        const lines_deleted_arr = entries.map(
+          (e) => e.payload?.lines_deleted || 0,
+        );
+        const files_changed_arr = entries.map(
+          (e) => e.payload?.files_changed?.length || 0,
+        );
+
+        const avg_lines_added =
+          lines_added_arr.reduce((a, b) => a + b, 0) / total_commits;
+        const avg_lines_deleted =
+          lines_deleted_arr.reduce((a, b) => a + b, 0) / total_commits;
+        const avg_files_changed =
+          files_changed_arr.reduce((a, b) => a + b, 0) / total_commits;
+
+        const stddev = (arr: number[], avg: number) =>
+          Math.sqrt(
+            arr.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / arr.length,
+          );
         const stddev_lines_added = stddev(lines_added_arr, avg_lines_added);
-        const stddev_lines_deleted = stddev(lines_deleted_arr, avg_lines_deleted);
-        const stddev_files_changed = stddev(files_changed_arr, avg_files_changed);
-        
+        const stddev_lines_deleted = stddev(
+          lines_deleted_arr,
+          avg_lines_deleted,
+        );
+        const stddev_files_changed = stddev(
+          files_changed_arr,
+          avg_files_changed,
+        );
+
         const commit_time_histogram: Record<string, number> = {};
         for (const e of entries) {
           const hour = new Date(e.timestamp).getHours();
-          commit_time_histogram[hour.toString()] = (commit_time_histogram[hour.toString()] || 0) + 1;
+          commit_time_histogram[hour.toString()] =
+            (commit_time_histogram[hour.toString()] || 0) + 1;
         }
-        
-        const daysOfWeek = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+        const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const dayCounts: Record<string, number> = {};
         for (const e of entries) {
           const day = daysOfWeek[new Date(e.timestamp).getDay()];
@@ -516,15 +561,17 @@ export class GitManagerService {
         const typical_days_active = Object.entries(dayCounts)
           .filter(([_, count]) => count >= threshold)
           .map(([day]) => day);
-        
-        const last_commit_date = new Date(Math.max(...entries.map(e => new Date(e.timestamp).getTime())));
-        
+
+        const last_commit_date = new Date(
+          Math.max(...entries.map((e) => new Date(e.timestamp).getTime())),
+        );
+
         await this.prisma.contributorStats.upsert({
-          where: { 
-            watchlist_id_author_email: { 
-              watchlist_id: watchlistId, 
-              author_email: email 
-            } 
+          where: {
+            watchlist_id_author_email: {
+              watchlist_id: watchlistId,
+              author_email: email,
+            },
           },
           update: {
             author_name,
@@ -556,13 +603,17 @@ export class GitManagerService {
           },
         });
       }
-      
-      this.logger.log(`✅ Contributor stats updated for watchlist ${watchlistId}`);
-      
+
+      this.logger.log(
+        `✅ Contributor stats updated for watchlist ${watchlistId}`,
+      );
+
       await this.updateRepoStats(watchlistId);
-      
     } catch (err) {
-      this.logger.error(`Error updating contributor stats for watchlist ${watchlistId}:`, err);
+      this.logger.error(
+        `Error updating contributor stats for watchlist ${watchlistId}:`,
+        err,
+      );
       throw err;
     }
   }
@@ -571,20 +622,32 @@ export class GitManagerService {
     try {
       const logs = await this.prisma.log.findMany({
         where: { watchlist_id: watchlistId, event_type: 'COMMIT' },
-        select: { timestamp: true, payload: true }
+        select: { timestamp: true, payload: true },
       });
 
       if (logs.length === 0) return;
 
-      const linesAddedArr = logs.map(log => (log.payload as any)?.lines_added || 0);
-      const linesDeletedArr = logs.map(log => (log.payload as any)?.lines_deleted || 0);
-      const filesChangedArr = logs.map(log => (log.payload as any)?.files_changed?.length || 0);
+      const linesAddedArr = logs.map(
+        (log) => (log.payload as any)?.lines_added || 0,
+      );
+      const linesDeletedArr = logs.map(
+        (log) => (log.payload as any)?.lines_deleted || 0,
+      );
+      const filesChangedArr = logs.map(
+        (log) => (log.payload as any)?.files_changed?.length || 0,
+      );
 
-      const avgLinesAdded = linesAddedArr.reduce((sum, val) => sum + val, 0) / logs.length;
-      const avgLinesDeleted = linesDeletedArr.reduce((sum, val) => sum + val, 0) / logs.length;
-      const avgFilesChanged = filesChangedArr.reduce((sum, val) => sum + val, 0) / logs.length;
+      const avgLinesAdded =
+        linesAddedArr.reduce((sum, val) => sum + val, 0) / logs.length;
+      const avgLinesDeleted =
+        linesDeletedArr.reduce((sum, val) => sum + val, 0) / logs.length;
+      const avgFilesChanged =
+        filesChangedArr.reduce((sum, val) => sum + val, 0) / logs.length;
 
-      const stddev = (arr: number[], avg: number) => Math.sqrt(arr.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / arr.length);
+      const stddev = (arr: number[], avg: number) =>
+        Math.sqrt(
+          arr.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / arr.length,
+        );
 
       const stddevLinesAdded = stddev(linesAddedArr, avgLinesAdded);
       const stddevLinesDeleted = stddev(linesDeletedArr, avgLinesDeleted);
@@ -593,7 +656,8 @@ export class GitManagerService {
       const commitTimeHistogram: Record<string, number> = {};
       for (const log of logs) {
         const hour = new Date(log.timestamp).getHours();
-        commitTimeHistogram[hour.toString()] = (commitTimeHistogram[hour.toString()] || 0) + 1;
+        commitTimeHistogram[hour.toString()] =
+          (commitTimeHistogram[hour.toString()] || 0) + 1;
       }
 
       const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -615,7 +679,7 @@ export class GitManagerService {
           stddev_files_changed: stddevFilesChanged,
           commit_time_histogram: commitTimeHistogram,
           typical_days_active: dayCounts,
-          last_updated: new Date()
+          last_updated: new Date(),
         },
         create: {
           watchlist_id: watchlistId,
@@ -627,38 +691,51 @@ export class GitManagerService {
           stddev_lines_deleted: stddevLinesDeleted,
           stddev_files_changed: stddevFilesChanged,
           commit_time_histogram: commitTimeHistogram,
-          typical_days_active: dayCounts
-        }
+          typical_days_active: dayCounts,
+        },
       });
 
       this.logger.log(`📊 Repo stats updated for watchlist ${watchlistId}`);
     } catch (error) {
-      this.logger.error(`Error updating repo stats for watchlist ${watchlistId}:`, error);
+      this.logger.error(
+        `Error updating repo stats for watchlist ${watchlistId}:`,
+        error,
+      );
       throw error;
     }
   }
 
   async ensureStatsExist(watchlistId: string): Promise<void> {
     try {
-      this.logger.log(`🔍 Checking if stats exist for watchlist ${watchlistId}`);
+      this.logger.log(
+        `🔍 Checking if stats exist for watchlist ${watchlistId}`,
+      );
 
       const existingRepoStats = await this.prisma.repoStats.findUnique({
-        where: { watchlist_id: watchlistId }
+        where: { watchlist_id: watchlistId },
       });
 
-      const existingContributorStats = await this.prisma.contributorStats.findFirst({
-        where: { watchlist_id: watchlistId }
-      });
+      const existingContributorStats =
+        await this.prisma.contributorStats.findFirst({
+          where: { watchlist_id: watchlistId },
+        });
 
       if (!existingRepoStats || !existingContributorStats) {
-        this.logger.log(`📊 Stats missing for watchlist ${watchlistId}, calculating...`);
+        this.logger.log(
+          `📊 Stats missing for watchlist ${watchlistId}, calculating...`,
+        );
         await this.updateContributorStats(watchlistId);
-        this.logger.log(`✅ Stats calculation completed for watchlist ${watchlistId}`);
+        this.logger.log(
+          `✅ Stats calculation completed for watchlist ${watchlistId}`,
+        );
       } else {
         this.logger.log(`✅ Stats already exist for watchlist ${watchlistId}`);
       }
     } catch (error) {
-      this.logger.error(`Error ensuring stats exist for watchlist ${watchlistId}:`, error);
+      this.logger.error(
+        `Error ensuring stats exist for watchlist ${watchlistId}:`,
+        error,
+      );
       throw error;
     }
   }

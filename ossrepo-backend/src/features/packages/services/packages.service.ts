@@ -24,7 +24,9 @@ export class PackagesService {
       : this.transformToCard(packageData);
   }
 
-  async forceRefreshCache(repoUrl?: string): Promise<{ clearedCount?: number; refreshed?: boolean }> {
+  async forceRefreshCache(
+    repoUrl?: string,
+  ): Promise<{ clearedCount?: number; refreshed?: boolean }> {
     return await this.packageSearchService.forceRefreshCache(repoUrl);
   }
 
@@ -50,7 +52,7 @@ export class PackagesService {
         : '',
       version: pkg.version || '',
       license: pkg.license || '',
-      osv_vulnerabilities: pkg.osv_vulnerabilities || []
+      osv_vulnerabilities: pkg.osv_vulnerabilities || [],
     };
   }
 

@@ -1,7 +1,17 @@
-import { 
-  Controller, Get, Post, Res, Body, Query, Param, Logger,
-  BadGatewayException, BadRequestException, InternalServerErrorException, UnauthorizedException 
-} from '@nestjs/common'; 
+import {
+  Controller,
+  Get,
+  Post,
+  Res,
+  Body,
+  Query,
+  Param,
+  Logger,
+  BadGatewayException,
+  BadRequestException,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { SlackService } from '../services/slack.service';
 import { SlackOauthConnect, UserChannel, UserMessage } from '../dto/slack.dto';
 import { Response } from 'express';
@@ -22,7 +32,10 @@ export class SlackController {
     try {
       return await this.slackService.getSlackChannel(user_id);
     } catch (err) {
-      this.logger.error(`Failed to get Slack channel for user: ${user_id}`, err.stack);
+      this.logger.error(
+        `Failed to get Slack channel for user: ${user_id}`,
+        err.stack,
+      );
       throw new BadGatewayException('Failed to fetch Slack channel');
     }
   }
@@ -86,7 +99,9 @@ export class SlackController {
       return res.redirect(slackUrl);
     } catch (err) {
       this.logger.error('startSlackOAuth error:', err.stack);
-      throw new InternalServerErrorException('Could not generate Slack OAuth URL');
+      throw new InternalServerErrorException(
+        'Could not generate Slack OAuth URL',
+      );
     }
   }
 

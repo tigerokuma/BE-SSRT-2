@@ -56,8 +56,8 @@ export class NpmPackagesRepository {
         risk_score: packageData.risk_score,
         repo_url: packageData.repo_url,
         has_osvvulnerabilities: packageData.has_osvvulnerabilities || false,
-        fetched_at: new Date()
-      }
+        fetched_at: new Date(),
+      },
     });
   }
 

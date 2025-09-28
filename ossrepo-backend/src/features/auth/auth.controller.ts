@@ -1,22 +1,27 @@
-import { Controller, Get, Post, UseGuards, Req, Res, Body, HttpCode, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  UseGuards,
+  Req,
+  Res,
+  Body,
+  HttpCode,
+  Query,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { DeviceFlowService } from './services/device-flow.service';
 import { GithubAuthGuard } from './guards/github-auth.guard';
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
-import { 
-  DeviceCodeRequestDto, 
-  DeviceCodeResponseDto, 
+import {
+  DeviceCodeRequestDto,
+  DeviceCodeResponseDto,
   DeviceTokenRequestDto,
   TokenResponseDto,
-  LoginResponseDto 
+  LoginResponseDto,
 } from './dto/auth.dto';
-import { 
-  ApiTags, 
-  ApiOperation, 
-  ApiResponse, 
-  ApiBody 
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -32,10 +37,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Initialize device flow authentication' })
   @ApiResponse({ status: 200, type: DeviceCodeResponseDto })
   @ApiBody({ type: DeviceCodeRequestDto })
-  async initiateDeviceFlow(@Body() request: DeviceCodeRequestDto): Promise<DeviceCodeResponseDto> {
+  async initiateDeviceFlow(
+    @Body() request: DeviceCodeRequestDto,
+  ): Promise<DeviceCodeResponseDto> {
     return this.deviceFlowService.initiateDeviceFlow(
       request.client_id,
-      request.scope
+      request.scope,
     );
   }
 
@@ -48,7 +55,7 @@ export class AuthController {
   async pollDeviceToken(@Body() request: DeviceTokenRequestDto) {
     const tokenResponse = await this.deviceFlowService.pollForToken(
       request.client_id,
-      request.device_code
+      request.device_code,
     );
 
     // If we got a token, get the user info
@@ -74,7 +81,7 @@ export class AuthController {
   async githubAuthCallback(@Req() req: any, @Res() res: Response) {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL');
     const user = req.user;
-    
+
     // Redirect to frontend with token
     res.redirect(`${frontendUrl}/auth/callback?token=${user.access_token}`);
   }

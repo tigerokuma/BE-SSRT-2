@@ -29,7 +29,7 @@ describe('NpmPackagesRepository', () => {
 
     repository = module.get<NpmPackagesRepository>(NpmPackagesRepository);
     prismaService = module.get<PrismaService>(PrismaService);
-    
+
     jest.clearAllMocks();
   });
 
@@ -61,7 +61,7 @@ describe('NpmPackagesRepository', () => {
       const result = await repository.findByName('test-package');
 
       expect(mockPrismaService.npmPackage.findUnique).toHaveBeenCalledWith({
-        where: { package_name: 'test-package' }
+        where: { package_name: 'test-package' },
       });
       expect(result).toEqual(mockPackage);
     });
@@ -108,7 +108,7 @@ describe('NpmPackagesRepository', () => {
         risk_score: 3,
         repo_url: null,
         fetched_at: new Date('2024-01-02'),
-      }
+      },
     ];
 
     it('should search packages by name with correct query', async () => {
@@ -118,13 +118,10 @@ describe('NpmPackagesRepository', () => {
 
       expect(mockPrismaService.npmPackage.findMany).toHaveBeenCalledWith({
         where: {
-          package_name: { contains: 'test', mode: 'insensitive' }
+          package_name: { contains: 'test', mode: 'insensitive' },
         },
-        orderBy: [
-          { downloads: 'desc' },
-          { fetched_at: 'desc' }
-        ],
-        take: 10
+        orderBy: [{ downloads: 'desc' }, { fetched_at: 'desc' }],
+        take: 10,
       });
       expect(result).toEqual(mockPackages);
     });
@@ -143,9 +140,9 @@ describe('NpmPackagesRepository', () => {
       expect(mockPrismaService.npmPackage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            package_name: { contains: 'TEST', mode: 'insensitive' }
-          }
-        })
+            package_name: { contains: 'TEST', mode: 'insensitive' },
+          },
+        }),
       );
     });
   });
@@ -173,7 +170,9 @@ describe('NpmPackagesRepository', () => {
     };
 
     it('should create new package when it does not exist', async () => {
-      mockPrismaService.npmPackage.upsert.mockResolvedValue(expectedUpsertResult);
+      mockPrismaService.npmPackage.upsert.mockResolvedValue(
+        expectedUpsertResult,
+      );
 
       const result = await repository.createOrUpdate(mockPackageData);
 
@@ -192,7 +191,7 @@ describe('NpmPackagesRepository', () => {
           maintainers: mockPackageData.maintainers,
           risk_score: mockPackageData.risk_score,
           repo_url: mockPackageData.repo_url,
-          fetched_at: expect.any(Date)
+          fetched_at: expect.any(Date),
         },
         create: {
           package_name: 'test-package',
@@ -208,8 +207,8 @@ describe('NpmPackagesRepository', () => {
           maintainers: mockPackageData.maintainers,
           risk_score: mockPackageData.risk_score,
           repo_url: mockPackageData.repo_url,
-          fetched_at: expect.any(Date)
-        }
+          fetched_at: expect.any(Date),
+        },
       });
       expect(result).toEqual(expectedUpsertResult);
     });
@@ -234,8 +233,8 @@ describe('NpmPackagesRepository', () => {
           update: expect.objectContaining({
             version: '1.1.0',
             downloads: 2000,
-          })
-        })
+          }),
+        }),
       );
       expect(result.version).toBe('1.1.0');
       expect(result.downloads).toBe(2000);
@@ -272,8 +271,8 @@ describe('NpmPackagesRepository', () => {
             package_name: 'minimal-package',
             keywords: [],
             maintainers: [],
-          })
-        })
+          }),
+        }),
       );
     });
   });
@@ -315,6 +314,4 @@ describe('NpmPackagesRepository', () => {
       expect(result).toBe(false);
     });
   });
-
-
-}); 
+});
