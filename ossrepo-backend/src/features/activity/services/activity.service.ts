@@ -15,6 +15,8 @@ export class ActivityService {
     private readonly prisma: PrismaService,
     @InjectQueue('repository-setup')
     private readonly repositorySetupQueue: Queue,
+    @InjectQueue('polling')
+    private readonly pollingQueue: Queue,
     private readonly githubApiService: GitHubApiService,
     private readonly graphService: GraphService,
     private readonly sbomQueueService: SbomQueueService
@@ -550,5 +552,60 @@ export class ActivityService {
     }
 
     this.logger.log(`✅ Successfully removed repository ${userWatchlist.watchlist.package.repo_name} from watchlist for user ${userId}`)
+  }
+
+  async triggerPollingJob(
+    type: 'daily-poll' | 'poll-repo' = 'daily-poll',
+    watchlistId?: string,
+    owner?: string,
+    repo?: string,
+    branch?: string,
+    delay: number = 0
+  ): Promise<void> {
+    try {
+      const jobData = {
+        type,
+        ...(watchlistId && { watchlistId }),
+        ...(owner && { owner }),
+        ...(repo && { repo }),
+        ...(branch && { branch }),
+      };
+
+      let finalDelay = delay * 1000; // Convert seconds to milliseconds
+
+      // For daily-poll, calculate delay to next midnight if no specific delay provided
+      if (type === 'daily-poll' && delay === 0) {
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        finalDelay = tomorrow.getTime() - now.getTime();
+        
+        this.logger.log(`📅 Daily polling scheduled for ${tomorrow.toISOString()}`);
+      }
+
+      await this.pollingQueue.add(
+        type,
+        jobData,
+        {
+          delay: finalDelay,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
+          removeOnComplete: 10,
+          removeOnFail: 50,
+        }
+      );
+
+      const delayHours = Math.round(finalDelay / (1000 * 60 * 60));
+      this.logger.log(
+        `✅ Polling job queued: ${type}${finalDelay > 0 ? ` (delayed by ${delayHours}h)` : ''}${watchlistId ? ` for watchlist ${watchlistId}` : ''}`
+      );
+    } catch (error) {
+      this.logger.error(`Failed to queue polling job:`, error);
+      throw error;
+    }
   }
 }

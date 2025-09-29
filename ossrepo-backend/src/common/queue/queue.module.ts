@@ -9,8 +9,20 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       useFactory: async (configService: ConfigService) => ({
         redis: {
           host: configService.get('REDIS_HOST', 'localhost'),
-          port: configService.get('REDIS_PORT', 6379),
-          password: configService.get('REDIS_PASSWORD'),
+          port: parseInt(configService.get('REDIS_PORT', '6379')),
+          // Add authentication if provided
+          ...(configService.get('REDIS_PASSWORD') && { password: configService.get('REDIS_PASSWORD') }),
+          ...(configService.get('REDIS_USERNAME') && { username: configService.get('REDIS_USERNAME') }),
+          // Add connection options for cloud Redis
+          connectTimeout: 10000,
+          lazyConnect: true,
+          retryDelayOnFailover: 100,
+          // Additional options for cloud Redis
+          family: 4, // Force IPv4
+          keepAlive: 30000,
+          retryDelayOnClusterDown: 300,
+          enableReadyCheck: false,
+          maxRetriesPerRequest: null,
         },
         defaultJobOptions: {
           removeOnComplete: 100,
