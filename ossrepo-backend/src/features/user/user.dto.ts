@@ -8,4 +8,4 @@ export class UserResponse {
   email: string;
   name?: string;
   created_at: Date;
-} 
+}

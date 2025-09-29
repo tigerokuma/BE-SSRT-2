@@ -1,4 +1,3 @@
-
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { NPMService } from './npm.service';
@@ -35,12 +34,12 @@ describe('NPMService', () => {
               version: '1.0.0',
               date: '2024-01-01T00:00:00Z',
               links: {
-                repository: 'https://github.com/test/repo'
-              }
+                repository: 'https://github.com/test/repo',
+              },
             },
             score: {
-              final: 0.85
-            }
+              final: 0.85,
+            },
           },
           {
             package: {
@@ -49,21 +48,21 @@ describe('NPMService', () => {
               version: '2.0.0',
               date: '2024-01-02T00:00:00Z',
               links: {
-                repository: 'git+https://github.com/test/another.git'
-              }
+                repository: 'git+https://github.com/test/another.git',
+              },
             },
             score: {
-              final: 0.75
-            }
-          }
-        ]
-      }
+              final: 0.75,
+            },
+          },
+        ],
+      },
     };
 
     const mockDownloadsResponse = {
       data: {
-        downloads: 1000
-      }
+        downloads: 1000,
+      },
     };
 
     beforeEach(() => {
@@ -91,9 +90,9 @@ describe('NPMService', () => {
             size: 5,
             quality: 0.5,
             popularity: 0.3,
-            maintenance: 0.2
-          }
-        }
+            maintenance: 0.2,
+          },
+        },
       );
       expect(result).toHaveLength(2);
     });
@@ -109,7 +108,7 @@ describe('NPMService', () => {
         repoUrl: 'https://github.com/test/repo',
         lastUpdated: new Date('2024-01-01T00:00:00Z'),
         score: 0.85,
-        weeklyDownloads: 1000
+        weeklyDownloads: 1000,
       });
     });
 
@@ -123,17 +122,19 @@ describe('NPMService', () => {
     it('should handle packages without repository links', async () => {
       const responseWithoutRepo = {
         data: {
-          objects: [{
-            package: {
-              name: 'no-repo-package',
-              description: 'Package without repo',
-              version: '1.0.0',
-              date: '2024-01-01T00:00:00Z',
-              links: {}
+          objects: [
+            {
+              package: {
+                name: 'no-repo-package',
+                description: 'Package without repo',
+                version: '1.0.0',
+                date: '2024-01-01T00:00:00Z',
+                links: {},
+              },
+              score: { final: 0.5 },
             },
-            score: { final: 0.5 }
-          }]
-        }
+          ],
+        },
       };
 
       mockedAxios.get.mockImplementation((url) => {
@@ -176,9 +177,9 @@ describe('NPMService', () => {
         expect.stringContaining('search'),
         expect.objectContaining({
           params: expect.objectContaining({
-            size: 10
-          })
-        })
+            size: 10,
+          }),
+        }),
       );
     });
 
@@ -186,7 +187,10 @@ describe('NPMService', () => {
       mockedAxios.get.mockRejectedValue(new Error('NPM API Error'));
 
       await expect(service.searchPackages('test')).rejects.toThrow(
-        new HttpException('Failed to search NPM registry', HttpStatus.SERVICE_UNAVAILABLE)
+        new HttpException(
+          'Failed to search NPM registry',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        ),
       );
     });
   });
@@ -199,7 +203,7 @@ describe('NPMService', () => {
         'dist-tags': { latest: '1.0.0' },
         repository: {
           type: 'git',
-          url: 'https://github.com/test/repo'
+          url: 'https://github.com/test/repo',
         },
         homepage: 'https://test-package.com',
         keywords: ['test', 'utility'],
@@ -207,9 +211,9 @@ describe('NPMService', () => {
         time: {
           created: '2024-01-01T00:00:00Z',
           modified: '2024-01-01T00:00:00Z',
-          '1.0.0': '2024-01-01T00:00:00Z'
-        }
-      }
+          '1.0.0': '2024-01-01T00:00:00Z',
+        },
+      },
     };
 
     it('should get package details successfully', async () => {
@@ -218,7 +222,7 @@ describe('NPMService', () => {
       const result = await service.getPackageDetails('test-package');
 
       expect(mockedAxios.get).toHaveBeenCalledWith(
-        'https://registry.npmjs.org/test-package'
+        'https://registry.npmjs.org/test-package',
       );
       expect(result).toEqual({
         name: 'test-package',
@@ -228,7 +232,7 @@ describe('NPMService', () => {
         license: 'MIT',
         repoUrl: 'https://github.com/test/repo',
         homepage: 'https://test-package.com',
-        lastUpdated: new Date('2024-01-01T00:00:00Z')
+        lastUpdated: new Date('2024-01-01T00:00:00Z'),
       });
     });
 
@@ -240,9 +244,9 @@ describe('NPMService', () => {
           time: {
             created: '2024-01-01T00:00:00Z',
             modified: '2024-01-01T00:00:00Z',
-            '1.0.0': '2024-01-01T00:00:00Z'
-          }
-        }
+            '1.0.0': '2024-01-01T00:00:00Z',
+          },
+        },
       };
 
       mockedAxios.get.mockResolvedValue(minimalResponse);
@@ -270,8 +274,8 @@ describe('NPMService', () => {
     it('should get weekly downloads successfully', async () => {
       const mockResponse = {
         data: {
-          downloads: 5000
-        }
+          downloads: 5000,
+        },
       };
 
       mockedAxios.get.mockResolvedValue(mockResponse);
@@ -279,14 +283,14 @@ describe('NPMService', () => {
       const result = await service.getWeeklyDownloads('test-package');
 
       expect(mockedAxios.get).toHaveBeenCalledWith(
-        'https://api.npmjs.org/downloads/point/last-week/test-package'
+        'https://api.npmjs.org/downloads/point/last-week/test-package',
       );
       expect(result).toBe(5000);
     });
 
     it('should return null when downloads data is not available', async () => {
       const mockResponse = {
-        data: {}
+        data: {},
       };
 
       mockedAxios.get.mockResolvedValue(mockResponse);
@@ -308,24 +312,36 @@ describe('NPMService', () => {
   describe('extractGitHubUrl', () => {
     it('should extract GitHub URL from various formats', () => {
       // Test direct GitHub URL
-      expect(service['extractGitHubUrl']('https://github.com/user/repo')).toBe('https://github.com/user/repo');
-      
+      expect(service['extractGitHubUrl']('https://github.com/user/repo')).toBe(
+        'https://github.com/user/repo',
+      );
+
       // Test git+https format
-      expect(service['extractGitHubUrl']('git+https://github.com/user/repo.git')).toBe('https://github.com/user/repo');
-      
+      expect(
+        service['extractGitHubUrl']('git+https://github.com/user/repo.git'),
+      ).toBe('https://github.com/user/repo');
+
       // Test git format
-      expect(service['extractGitHubUrl']('git://github.com/user/repo.git')).toBe('https://github.com/user/repo');
-      
+      expect(
+        service['extractGitHubUrl']('git://github.com/user/repo.git'),
+      ).toBe('https://github.com/user/repo');
+
       // Test SSH format
-      expect(service['extractGitHubUrl']('git@github.com:user/repo.git')).toBe('https://github.com/user/repo');
+      expect(service['extractGitHubUrl']('git@github.com:user/repo.git')).toBe(
+        'https://github.com/user/repo',
+      );
     });
 
     it('should return null for non-GitHub URLs', () => {
-      expect(service['extractGitHubUrl']('https://gitlab.com/user/repo')).toBeNull();
-      expect(service['extractGitHubUrl']('https://bitbucket.org/user/repo')).toBeNull();
+      expect(
+        service['extractGitHubUrl']('https://gitlab.com/user/repo'),
+      ).toBeNull();
+      expect(
+        service['extractGitHubUrl']('https://bitbucket.org/user/repo'),
+      ).toBeNull();
       expect(service['extractGitHubUrl']('')).toBeNull();
       expect(service['extractGitHubUrl'](null as any)).toBeNull();
       expect(service['extractGitHubUrl'](undefined as any)).toBeNull();
     });
   });
-}); 
+});

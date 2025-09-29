@@ -22,11 +22,14 @@ export class PollingController {
     description: 'Daily polling job triggered successfully',
   })
   async triggerDailyPolling(
-    @Body() body: {
+    @Body()
+    body: {
       delay?: number;
-    } = {}
+    } = {},
   ) {
-    this.logger.log(`🔄 Triggering daily polling job${body.delay ? ` (delayed by ${body.delay}s)` : ''}`);
+    this.logger.log(
+      `🔄 Triggering daily polling job${body.delay ? ` (delayed by ${body.delay}s)` : ''}`,
+    );
 
     try {
       await this.activityService.triggerPollingJob(
@@ -35,7 +38,7 @@ export class PollingController {
         undefined,
         undefined,
         undefined,
-        body.delay || 0
+        body.delay || 0,
       );
 
       return {

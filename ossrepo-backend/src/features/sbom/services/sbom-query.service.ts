@@ -1,11 +1,8 @@
 import { Injectable, Logger, Body } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
 
-
-
 @Injectable()
 export class SbomQueryService {
-
   private readonly logger = new Logger(SbomQueryService.name);
 
   constructor(private readonly sbomRepo: SbomRepository) {}
@@ -31,9 +28,9 @@ export class SbomQueryService {
     const totalComponents = components.length;
     const licenseSummary: Record<string, number> = {};
 
-    const sbomPackage = sbomJson.metadata.component["bom-ref"];
+    const sbomPackage = sbomJson.metadata.component['bom-ref'];
     const rootDep = (sbomJson.dependencies || []).find(
-      (dep: any) => dep.ref === sbomPackage
+      (dep: any) => dep.ref === sbomPackage,
     );
 
     const directDependencies = rootDep?.dependsOn?.length || 0;
@@ -53,11 +50,11 @@ export class SbomQueryService {
     const enrichedLicenses = await this.getLicenseInfo(licenseIds);
 
     // Merge counts into enriched licenses
-    const licenseDetails = enrichedLicenses.map(lic => ({
-        id: lic.id,
-        count: licenseSummary[lic.id] || 0,
-        link: lic.link,
-        category: lic.category,
+    const licenseDetails = enrichedLicenses.map((lic) => ({
+      id: lic.id,
+      count: licenseSummary[lic.id] || 0,
+      link: lic.link,
+      category: lic.category,
     }));
 
     return {
@@ -69,31 +66,35 @@ export class SbomQueryService {
   }
 
   async getLicenseInfo(licenses: string[]) {
-    const spdxUrl = "https://raw.githubusercontent.com/spdx/license-list-data/main/json/licenses.json";
+    const spdxUrl =
+      'https://raw.githubusercontent.com/spdx/license-list-data/main/json/licenses.json';
     const res = await fetch(spdxUrl);
     const data = await res.json();
 
     const results = licenses.map((id) => {
-      const match = data.licenses.find((l) => l.licenseId.toLowerCase() === id.toLowerCase());
+      const match = data.licenses.find(
+        (l) => l.licenseId.toLowerCase() === id.toLowerCase(),
+      );
       if (!match) return { id, link: null, category: null };
 
       return {
         id: match.licenseId,
         link: match.seeAlso[0] || null,
-        category: match.licenseCategory || (match.isOsiApproved ? "Permissive" : "Other")
+        category:
+          match.licenseCategory ||
+          (match.isOsiApproved ? 'Permissive' : 'Other'),
       };
     });
 
     return results;
   }
 
-
   // Get the dependencies that are directly linked to the node
   getNodeDeps(sbomText: string, node_id: string, vulnerablePackages: string[]) {
     const sbomJson = JSON.parse(sbomText);
 
     const depMap = new Map<string, string[]>(
-      sbomJson.dependencies.map((d: any) => [d.ref, d.dependsOn || []])
+      sbomJson.dependencies.map((d: any) => [d.ref, d.dependsOn || []]),
     );
 
     // Get the main node
@@ -103,7 +104,10 @@ export class SbomQueryService {
     const directDeps = node.dependsOn || [];
 
     // Recursive check for vulnerability
-    const isNodeVulnerable = (pkgId: string, seen = new Set<string>()): boolean => {
+    const isNodeVulnerable = (
+      pkgId: string,
+      seen = new Set<string>(),
+    ): boolean => {
       if (seen.has(pkgId)) return false;
       seen.add(pkgId);
 
@@ -116,23 +120,26 @@ export class SbomQueryService {
     };
 
     // Build nodes: main node + direct dependencies only
-    const nodes = [{ id: node.ref, color: "grey", license: node.license }];
+    const nodes = [{ id: node.ref, color: 'grey', license: node.license }];
     const links: { source: string; target: string }[] = [];
 
     for (const dep of directDeps) {
       const isVuln = isNodeVulnerable(dep);
-      const copLic = sbomJson.components.find((d: any) => d['bom-ref'] === dep).licenses;
+      const copLic = sbomJson.components.find(
+        (d: any) => d['bom-ref'] === dep,
+      ).licenses;
       let license;
       try {
         license = copLic[0].license.id;
       } catch (e) {
-        license = undefined;  // fallback if copLic or license is missing
+        license = undefined; // fallback if copLic or license is missing
       }
 
       nodes.push({
-         id: dep, 
-         color: isVuln ? "red" : "lightblue" , 
-         license: license });
+        id: dep,
+        color: isVuln ? 'red' : 'lightblue',
+        license: license,
+      });
       links.push({ source: node.ref, target: dep });
     }
 
@@ -140,41 +147,41 @@ export class SbomQueryService {
   }
 
   // Search the node deps
-  searchNodeDeps(
-    sbomText: string,
-    search: string
-  ) {
+  searchNodeDeps(sbomText: string, search: string) {
     const sbomJson = JSON.parse(sbomText);
     const searchLower = search.toLowerCase();
 
     // Filter dependencies whose ref or name contains the search string
     const matchedNodes = sbomJson.dependencies.filter((node: any) => {
-      const ref = node.ref?.toLowerCase() || "";
-      const name = node.name?.toLowerCase() || "";
+      const ref = node.ref?.toLowerCase() || '';
+      const name = node.name?.toLowerCase() || '';
       return ref.includes(searchLower) || name.includes(searchLower);
     });
 
     // Sort by ref
     matchedNodes.sort((a: any, b: any) =>
-      (a.ref || "").localeCompare(b.ref || "", undefined, { sensitivity: "base" })
+      (a.ref || '').localeCompare(b.ref || '', undefined, {
+        sensitivity: 'base',
+      }),
     );
 
     return matchedNodes.map((node: any) => {
       // Find the component in sbomJson.components
-      const component = sbomJson.components.find((c: any) => c['bom-ref'] === node.ref);
+      const component = sbomJson.components.find(
+        (c: any) => c['bom-ref'] === node.ref,
+      );
       const license = component?.licenses?.[0]?.license?.id; // grab the first license ID if exists
 
       return {
         node: {
           id: node.ref,
           name: node.name,
-          license: license,           // <-- include the license
+          license: license, // <-- include the license
           dependsOn: node.dependsOn || [],
         },
       };
     });
   }
-
 
   async getDepList(user_id: string) {
     return await this.sbomRepo.getWatchFollows(user_id);

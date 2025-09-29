@@ -31,14 +31,19 @@ export class AuthService {
       });
 
       // Get user's email from GitHub
-      const emailsResponse = await axios.get('https://api.github.com/user/emails', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/json',
+      const emailsResponse = await axios.get(
+        'https://api.github.com/user/emails',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
         },
-      });
+      );
 
-      const primaryEmail = emailsResponse.data.find(email => email.primary)?.email;
+      const primaryEmail = emailsResponse.data.find(
+        (email) => email.primary,
+      )?.email;
       if (!primaryEmail) {
         throw new UnauthorizedException('No primary email found');
       }
@@ -62,11 +67,8 @@ export class AuthService {
     // Find existing user by GitHub ID or email
     let user = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { github_id: githubUser.github_id },
-          { email: githubUser.email }
-        ]
-      }
+        OR: [{ github_id: githubUser.github_id }, { email: githubUser.email }],
+      },
     });
 
     if (!user) {
@@ -81,7 +83,7 @@ export class AuthService {
           refresh_token: githubUser.refresh_token,
           email_confirmed: true, // Auto-confirm email for GitHub users
           last_login: new Date(),
-        }
+        },
       });
     } else {
       // Update existing user with latest GitHub info
@@ -93,7 +95,7 @@ export class AuthService {
           access_token: githubUser.access_token,
           refresh_token: githubUser.refresh_token,
           last_login: new Date(),
-        }
+        },
       });
     }
 
@@ -102,7 +104,7 @@ export class AuthService {
 
   async validateUserById(userId: string) {
     const user = await this.prisma.user.findUnique({
-      where: { user_id: userId }
+      where: { user_id: userId },
     });
 
     if (!user) {
@@ -114,7 +116,7 @@ export class AuthService {
 
   private createAuthResponse(user: any) {
     const payload = { sub: user.user_id, email: user.email };
-    
+
     const userDto: AuthUserDto = {
       user_id: user.user_id,
       email: user.email,

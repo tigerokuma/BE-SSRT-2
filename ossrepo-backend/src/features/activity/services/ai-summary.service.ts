@@ -73,7 +73,8 @@ export class AISummaryService {
   private async checkOllamaAvailability(): Promise<boolean> {
     try {
       const envPath = process.env.OLLAMA_PATH;
-      const ollamaPath = envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
+      const ollamaPath =
+        envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
       await execAsync(`"${ollamaPath}" --version`);
       return true;
     } catch (error) {
@@ -87,7 +88,8 @@ export class AISummaryService {
   private async ensureModelDownloaded(): Promise<void> {
     try {
       const envPath = process.env.OLLAMA_PATH;
-      const ollamaPath = envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
+      const ollamaPath =
+        envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
       const { stdout } = await execAsync(`"${ollamaPath}" list`);
       if (!stdout.includes(this.modelName)) {
         this.logger.log(`📥 Downloading ${this.modelName} model...`);
@@ -160,7 +162,8 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
     try {
       // Check for environment variable first
       const envPath = process.env.OLLAMA_PATH;
-      const ollamaPath = envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
+      const ollamaPath =
+        envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
 
       this.logger.log(
         `🔍 Executing Ollama: ${ollamaPath} run ${this.modelName}`,
@@ -194,7 +197,9 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       }
 
       this.logger.log(`📝 Raw AI output length: ${stdout.length} characters`);
-      this.logger.log(`📝 Raw AI output preview: ${stdout.substring(0, 100)}...`);
+      this.logger.log(
+        `📝 Raw AI output preview: ${stdout.substring(0, 100)}...`,
+      );
 
       const cleanOutput = this.cleanMistralOutput(stdout);
       this.logger.log(
@@ -210,15 +215,21 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       return cleanOutput;
     } catch (error) {
       this.logger.error(`❌ Ollama execution failed: ${error.message}`);
-      
+
       if (error.message.includes('timeout')) {
-        this.logger.error('❌ AI model timed out - consider increasing timeout or using a faster model');
+        this.logger.error(
+          '❌ AI model timed out - consider increasing timeout or using a faster model',
+        );
       } else if (error.message.includes('ENOENT')) {
-        this.logger.error('❌ Ollama not found - check if Ollama is installed and in PATH');
+        this.logger.error(
+          '❌ Ollama not found - check if Ollama is installed and in PATH',
+        );
       } else if (error.message.includes('empty response')) {
-        this.logger.error('❌ AI model returned empty response - check model availability');
+        this.logger.error(
+          '❌ AI model returned empty response - check model availability',
+        );
       }
-      
+
       throw error;
     }
   }
@@ -229,7 +240,7 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       return 'No summary available.';
     }
 
-    let cleaned = output
+    const cleaned = output
       .replace(/^[^a-zA-Z]*/, '')
       .replace(/\n+/g, ' ')
       .replace(/\s+/g, ' ')
@@ -363,7 +374,10 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
     }
   }
 
-  private buildCommitSummaryPrompt(commits: CommitData[], repoName: string): string {
+  private buildCommitSummaryPrompt(
+    commits: CommitData[],
+    repoName: string,
+  ): string {
     const commitDetails = commits
       .map((commit, index) => {
         const date = commit.timestamp.toISOString().split('T')[0];
@@ -382,7 +396,7 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
       { linesAdded: 0, linesDeleted: 0, filesChanged: 0 },
     );
 
-    const uniqueAuthors = [...new Set(commits.map(c => c.author))];
+    const uniqueAuthors = [...new Set(commits.map((c) => c.author))];
     const dateRange = `${commits[commits.length - 1].timestamp.toISOString().split('T')[0]} to ${commits[0].timestamp.toISOString().split('T')[0]}`;
 
     return `Analyze the following recent commits from the ${repoName} repository and provide a very concise summary (max 300 characters) that focuses on:
@@ -407,7 +421,7 @@ Summary:`;
     if (commits.length === 0) return 0;
 
     let score = 0;
-    let total = commits.length;
+    const total = commits.length;
 
     for (const commit of commits) {
       if (commit.message && commit.message.length > 5) score += 1;
@@ -443,7 +457,7 @@ Summary:`;
       { linesAdded: 0, linesDeleted: 0, filesChanged: 0 },
     );
 
-    const uniqueAuthors = [...new Set(commits.map(c => c.author))];
+    const uniqueAuthors = [...new Set(commits.map((c) => c.author))];
     const summary = `Recent activity in ${repoName}: ${commits.length} commits by ${uniqueAuthors.length} authors, with ${totalStats.linesAdded} lines added and ${totalStats.linesDeleted} lines deleted across ${totalStats.filesChanged} files.`;
 
     return {

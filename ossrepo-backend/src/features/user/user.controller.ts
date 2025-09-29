@@ -20,4 +20,4 @@ export class UserController {
   async getAllUsers() {
     return this.userService.getAllUsers();
   }
-} 
+}

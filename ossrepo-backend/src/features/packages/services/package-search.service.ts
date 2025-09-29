@@ -15,143 +15,181 @@ export class PackageSearchService {
     private readonly npmService: NPMService,
     private readonly githubService: GitHubService,
     private readonly osvVulnerabilityService: OsvVulnerabilityService,
-    private readonly osvVulnerabilityRepository: OsvVulnerabilityRepository
+    private readonly osvVulnerabilityRepository: OsvVulnerabilityRepository,
   ) {}
 
-
-
   async searchPackages(name: string) {
-    console.log(`================== PARALLEL SEARCH: Searching for packages: ${name} ==================`);
-    
+    console.log(
+      `================== PARALLEL SEARCH: Searching for packages: ${name} ==================`,
+    );
+
     // 1. Check NPM cache first (fast path)
     const cachedPackages = await this.npmRepo.searchByName(name);
-    
+
     // 2. Check if we have exact match with fresh data
-    const exactMatch = cachedPackages.find(pkg => 
-      pkg.package_name.toLowerCase() === name.toLowerCase()
+    const exactMatch = cachedPackages.find(
+      (pkg) => pkg.package_name.toLowerCase() === name.toLowerCase(),
     );
-    
-    if (exactMatch && await this.npmRepo.isDataFresh(exactMatch.fetched_at)) {
-      console.log(`Found fresh exact match for "${name}" + ${cachedPackages.length - 1} related packages`);
-      
+
+    if (exactMatch && (await this.npmRepo.isDataFresh(exactMatch.fetched_at))) {
+      console.log(
+        `Found fresh exact match for "${name}" + ${cachedPackages.length - 1} related packages`,
+      );
+
       // HYBRID APPROACH: Always include OSV data for cached packages
-      const withSecurity = await Promise.all(cachedPackages.slice(0, 10).map(async pkg => {
-        if (pkg.has_osvvulnerabilities) {
-          // Fetch stored vulnerabilities from database
-          const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(pkg.package_name);
-          return { ...pkg, osv_vulnerabilities };
-        } else {
-          // Check if package has vulnerabilities we haven't stored yet
-          const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
-          
-          // Store vulnerabilities if found
-          if (osv_vulnerabilities.length > 0) {
-            try {
-              const vulnerabilitiesToStore = osv_vulnerabilities.map(vuln => ({
-                ...vuln,
-                package_name: pkg.package_name
-              }));
-              await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
-              
-              // Update has_osvvulnerabilities flag
-              await this.npmRepo.createOrUpdate({
-                package_name: pkg.package_name,
-                has_osvvulnerabilities: true
-              });
-            } catch (error) {
-              console.warn(`Failed to store vulnerabilities for ${pkg.package_name}:`, error.message);
+      const withSecurity = await Promise.all(
+        cachedPackages.slice(0, 10).map(async (pkg) => {
+          if (pkg.has_osvvulnerabilities) {
+            // Fetch stored vulnerabilities from database
+            const osv_vulnerabilities =
+              await this.osvVulnerabilityRepository.findByPackageName(
+                pkg.package_name,
+              );
+            return { ...pkg, osv_vulnerabilities };
+          } else {
+            // Check if package has vulnerabilities we haven't stored yet
+            const osv_vulnerabilities =
+              await this.osvVulnerabilityService.getNpmVulnerabilities(
+                pkg.package_name || '',
+              );
+
+            // Store vulnerabilities if found
+            if (osv_vulnerabilities.length > 0) {
+              try {
+                const vulnerabilitiesToStore = osv_vulnerabilities.map(
+                  (vuln) => ({
+                    ...vuln,
+                    package_name: pkg.package_name,
+                  }),
+                );
+                await this.osvVulnerabilityRepository.createOrUpdateMany(
+                  vulnerabilitiesToStore,
+                );
+
+                // Update has_osvvulnerabilities flag
+                await this.npmRepo.createOrUpdate({
+                  package_name: pkg.package_name,
+                  has_osvvulnerabilities: true,
+                });
+              } catch (error) {
+                console.warn(
+                  `Failed to store vulnerabilities for ${pkg.package_name}:`,
+                  error.message,
+                );
+              }
             }
+
+            return { ...pkg, osv_vulnerabilities };
           }
-          
-          return { ...pkg, osv_vulnerabilities };
-        }
-      }));
-      
+        }),
+      );
+
       return withSecurity;
     }
-    
+
     // 3. No exact match OR stale - fetch from NPM API (fast)
-    console.log(exactMatch 
-      ? `Exact match "${name}" is stale - fetching fresh NPM data`
-      : `No exact match for "${name}" - fetching from NPM API`
+    console.log(
+      exactMatch
+        ? `Exact match "${name}" is stale - fetching fresh NPM data`
+        : `No exact match for "${name}" - fetching from NPM API`,
     );
-    
+
     try {
       const npmResults = await this.npmService.searchPackages(name, 5);
-      
+
       if (npmResults.length === 0) {
         console.log('No NPM results found - returning cached matches');
         return cachedPackages;
       }
-      
+
       // 4. Get NPM details and cache immediately (parallel)
       const cachePromises = npmResults.map(async (searchResult) => {
         try {
-          const detailsData = await this.npmService.getPackageDetails(searchResult.name);
+          const detailsData = await this.npmService.getPackageDetails(
+            searchResult.name,
+          );
           const npmData = this.transformNpmData(searchResult, detailsData);
           return await this.npmRepo.createOrUpdate(npmData);
         } catch (error) {
-          console.warn(`Failed to cache NPM package ${searchResult.name}:`, error.message);
+          console.warn(
+            `Failed to cache NPM package ${searchResult.name}:`,
+            error.message,
+          );
           return null;
         }
       });
-      
+
       const cachedResults = await Promise.all(cachePromises);
-      const validResults = cachedResults.filter(pkg => pkg !== null);
-      
+      const validResults = cachedResults.filter((pkg) => pkg !== null);
+
       // 5. Combine with existing cached packages
       const combined = [...validResults];
       for (const cached of cachedPackages) {
-        const exists = combined.some(npm => 
-          npm.package_name.toLowerCase() === cached.package_name.toLowerCase()
+        const exists = combined.some(
+          (npm) =>
+            npm.package_name.toLowerCase() ===
+            cached.package_name.toLowerCase(),
         );
         if (!exists) {
           combined.push(cached);
         }
       }
-      
+
       // 6. Sort: exact match first, then by downloads
       const sorted = combined.sort((a, b) => {
         const aExact = a.package_name.toLowerCase() === name.toLowerCase();
         const bExact = b.package_name.toLowerCase() === name.toLowerCase();
-        
+
         if (aExact && !bExact) return -1;
         if (!aExact && bExact) return 1;
-        
+
         return (b.downloads || 0) - (a.downloads || 0);
       });
-      
-      console.log(`Returning ${sorted.length} NPM packages (GitHub data will be fetched separately)`);
+
+      console.log(
+        `Returning ${sorted.length} NPM packages (GitHub data will be fetched separately)`,
+      );
       // Fetch OSV vulnerabilities for each package (in parallel) and store in database
-      const withSecurity = await Promise.all(sorted.slice(0, 10).map(async pkg => {
-        const osv_vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(pkg.package_name || '');
-        
-        // Store vulnerabilities in database if any found
-        if (osv_vulnerabilities.length > 0) {
-          try {
-            const vulnerabilitiesToStore = osv_vulnerabilities.map(vuln => ({
-              ...vuln,
-              package_name: pkg.package_name
-            }));
-            await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
-            
-            // Update has_osvvulnerabilities flag
-            await this.npmRepo.createOrUpdate({
-              package_name: pkg.package_name,
-              has_osvvulnerabilities: true
-            });
-          } catch (error) {
-            console.warn(`Failed to store vulnerabilities for ${pkg.package_name}:`, error.message);
+      const withSecurity = await Promise.all(
+        sorted.slice(0, 10).map(async (pkg) => {
+          const osv_vulnerabilities =
+            await this.osvVulnerabilityService.getNpmVulnerabilities(
+              pkg.package_name || '',
+            );
+
+          // Store vulnerabilities in database if any found
+          if (osv_vulnerabilities.length > 0) {
+            try {
+              const vulnerabilitiesToStore = osv_vulnerabilities.map(
+                (vuln) => ({
+                  ...vuln,
+                  package_name: pkg.package_name,
+                }),
+              );
+              await this.osvVulnerabilityRepository.createOrUpdateMany(
+                vulnerabilitiesToStore,
+              );
+
+              // Update has_osvvulnerabilities flag
+              await this.npmRepo.createOrUpdate({
+                package_name: pkg.package_name,
+                has_osvvulnerabilities: true,
+              });
+            } catch (error) {
+              console.warn(
+                `Failed to store vulnerabilities for ${pkg.package_name}:`,
+                error.message,
+              );
+            }
           }
-        }
-        
-        return {
-          ...pkg,
-          osv_vulnerabilities
-        };
-      }));
+
+          return {
+            ...pkg,
+            osv_vulnerabilities,
+          };
+        }),
+      );
       return withSecurity;
-      
     } catch (error) {
       console.warn('NPM search failed:', error.message);
       return cachedPackages;
@@ -160,18 +198,25 @@ export class PackageSearchService {
 
   async getPackageDetails(name: string) {
     console.log(`🚀 GETTING PACKAGE DETAILS: ${name}`);
-    
+
     // 1. Get NPM data (should be cached from search)
     let npmPackage = await this.npmRepo.findByName(name);
-    
-    if (!npmPackage || !await this.npmRepo.isDataFresh(npmPackage.fetched_at)) {
-      console.log(`NPM data for "${name}" is missing or stale - fetching from API`);
-      
+
+    if (
+      !npmPackage ||
+      !(await this.npmRepo.isDataFresh(npmPackage.fetched_at))
+    ) {
+      console.log(
+        `NPM data for "${name}" is missing or stale - fetching from API`,
+      );
+
       // Fetch fresh NPM data
       try {
         const npmResults = await this.npmService.searchPackages(name, 1);
         if (npmResults.length > 0) {
-          const detailsData = await this.npmService.getPackageDetails(npmResults[0].name);
+          const detailsData = await this.npmService.getPackageDetails(
+            npmResults[0].name,
+          );
           const npmData = this.transformNpmData(npmResults[0], detailsData);
           npmPackage = await this.npmRepo.createOrUpdate(npmData);
         }
@@ -179,47 +224,64 @@ export class PackageSearchService {
         console.warn(`Failed to fetch NPM data for ${name}:`, error.message);
       }
     }
-    
+
     if (!npmPackage) {
       return null;
     }
-    
+
     // 2. Get GitHub data (if repo URL exists) - manually fetch and combine
     let githubData: GitHubRepository | null = null;
     if (npmPackage.repo_url) {
       githubData = await this.githubRepo.findByUrl(npmPackage.repo_url);
-      
-      if (!githubData || !await this.githubRepo.isDataFresh(githubData.fetched_at)) {
-        console.log(`GitHub data for "${npmPackage.repo_url}" is missing or stale - fetching from API`);
-        
+
+      if (
+        !githubData ||
+        !(await this.githubRepo.isDataFresh(githubData.fetched_at))
+      ) {
+        console.log(
+          `GitHub data for "${npmPackage.repo_url}" is missing or stale - fetching from API`,
+        );
+
         // Fetch fresh GitHub data
         try {
-          const match = npmPackage.repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+          const match = npmPackage.repo_url.match(
+            /github\.com\/([^\/]+)\/([^\/]+)/,
+          );
           if (match) {
             const [, owner, repo] = match;
-            const githubRepoData = await this.githubService.getRepositoryDetails(owner, repo);
-            const transformedGithubData = this.transformGithubData(githubRepoData);
-            githubData = await this.githubRepo.createOrUpdate(transformedGithubData);
+            const githubRepoData =
+              await this.githubService.getRepositoryDetails(owner, repo);
+            const transformedGithubData =
+              this.transformGithubData(githubRepoData);
+            githubData = await this.githubRepo.createOrUpdate(
+              transformedGithubData,
+            );
           }
         } catch (error) {
-          console.warn(`Failed to fetch GitHub data for ${npmPackage.repo_url}:`, error.message);
+          console.warn(
+            `Failed to fetch GitHub data for ${npmPackage.repo_url}:`,
+            error.message,
+          );
           githubData = null;
         }
       }
     }
-    
+
     // 3. Always include OSV data for complete package info
-    const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(name);
-    
+    const osv_vulnerabilities =
+      await this.osvVulnerabilityRepository.findByPackageName(name);
+
     // 4. Manually combine NPM + GitHub + OSV data
     return {
       ...npmPackage,
       githubRepo: githubData,
-      osv_vulnerabilities
+      osv_vulnerabilities,
     };
   }
 
-  async forceRefreshCache(repoUrl?: string): Promise<{ clearedCount?: number; refreshed?: boolean }> {
+  async forceRefreshCache(
+    repoUrl?: string,
+  ): Promise<{ clearedCount?: number; refreshed?: boolean }> {
     if (repoUrl) {
       // Force refresh specific repository
       await this.githubRepo.forceRefresh(repoUrl);
@@ -245,7 +307,7 @@ export class PackageSearchService {
       last_updated: searchData.lastUpdated || detailsData?.lastUpdated,
       maintainers: [],
       risk_score: searchData.score ? Math.round(searchData.score * 100) : null,
-      repo_url: searchData.repoUrl || detailsData?.repoUrl
+      repo_url: searchData.repoUrl || detailsData?.repoUrl,
     };
   }
 
@@ -262,7 +324,7 @@ export class PackageSearchService {
       created_at: new Date(githubRepoData.created_at),
       updated_at: new Date(githubRepoData.updated_at),
       default_branch: githubRepoData.default_branch,
-      language: githubRepoData.language
+      language: githubRepoData.language,
     };
   }
 
@@ -273,27 +335,33 @@ export class PackageSearchService {
 
   async searchVulnerabilities(packageName: string) {
     // Fetch fresh vulnerabilities from OSV API
-    const vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(packageName);
-    
+    const vulnerabilities =
+      await this.osvVulnerabilityService.getNpmVulnerabilities(packageName);
+
     // Store vulnerabilities if found
     if (vulnerabilities.length > 0) {
       try {
-        const vulnerabilitiesToStore = vulnerabilities.map(vuln => ({
+        const vulnerabilitiesToStore = vulnerabilities.map((vuln) => ({
           ...vuln,
-          package_name: packageName
+          package_name: packageName,
         }));
-        await this.osvVulnerabilityRepository.createOrUpdateMany(vulnerabilitiesToStore);
-        
+        await this.osvVulnerabilityRepository.createOrUpdateMany(
+          vulnerabilitiesToStore,
+        );
+
         // Update has_osvvulnerabilities flag
         await this.npmRepo.createOrUpdate({
           package_name: packageName,
-          has_osvvulnerabilities: true
+          has_osvvulnerabilities: true,
         });
       } catch (error) {
-        console.warn(`Failed to store vulnerabilities for ${packageName}:`, error.message);
+        console.warn(
+          `Failed to store vulnerabilities for ${packageName}:`,
+          error.message,
+        );
       }
     }
-    
+
     return vulnerabilities;
   }
-} 
+}

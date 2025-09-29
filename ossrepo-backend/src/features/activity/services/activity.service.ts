@@ -1,10 +1,16 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { AddToWatchlistDto } from '../dto/add-to-watchlist.dto';
 import { GitHubApiService } from './github-api.service';
-import {GraphService} from "../../graph/services/graph.service";
+import { GraphService } from '../../graph/services/graph.service';
 import { SbomQueueService } from 'src/features/sbom/services/sbom-queue.service';
 
 @Injectable()
@@ -19,7 +25,7 @@ export class ActivityService {
     private readonly pollingQueue: Queue,
     private readonly githubApiService: GitHubApiService,
     private readonly graphService: GraphService,
-    private readonly sbomQueueService: SbomQueueService
+    private readonly sbomQueueService: SbomQueueService,
   ) {}
 
   async addToWatchlist(dto: AddToWatchlistDto) {
@@ -116,7 +122,10 @@ export class ActivityService {
           },
         });
 
-        await this.sbomQueueService.fullProcessSbom(userWatchlistEntry.watchlist_id, user.user_id);
+        await this.sbomQueueService.fullProcessSbom(
+          userWatchlistEntry.watchlist_id,
+          user.user_id,
+        );
 
         shouldQueueSetup = true;
       }
@@ -134,12 +143,15 @@ export class ActivityService {
 
       const repoId = `${owner}/${repo}`;
 
-      try {
-        await this.graphService.triggerBuild(repoId, {});
-        this.logger.log(`Triggered graph build for ${repoId}`);
-      } catch (e) {
-        this.logger.error(`Failed to trigger graph build for ${repoId}: ${e?.message || e}`);
-      }
+      // TODO: Temporarily disabled graph build due to connection issues
+      // try {
+      //   await this.graphService.triggerBuild(repoId, {});
+      //   this.logger.log(`Triggered graph build for ${repoId}`);
+      // } catch (e) {
+      //   this.logger.error(
+      //     `Failed to trigger graph build for ${repoId}: ${e?.message || e}`,
+      //   );
+      // }
 
       return {
         message: shouldQueueSetup
@@ -416,11 +428,14 @@ export class ActivityService {
     }
   }
 
-  async updateUserWatchlistAlerts(userWatchlistId: string, alerts: any): Promise<void> {
+  async updateUserWatchlistAlerts(
+    userWatchlistId: string,
+    alerts: any,
+  ): Promise<void> {
     await this.prisma.userWatchlist.update({
       where: { id: userWatchlistId },
-      data: { alerts: JSON.stringify(alerts) }
-    })
+      data: { alerts: JSON.stringify(alerts) },
+    });
   }
 
   async removeFromWatchlist(userWatchlistId: string): Promise<void> {
@@ -430,128 +445,132 @@ export class ActivityService {
         user: true,
         watchlist: {
           include: {
-            package: true
-          }
-        }
-      }
-    })
+            package: true,
+          },
+        },
+      },
+    });
 
     if (!userWatchlist) {
-      throw new NotFoundException('User watchlist not found')
+      throw new NotFoundException('User watchlist not found');
     }
 
-    const userId = userWatchlist.user_id
-    const watchlistId = userWatchlist.watchlist_id
-    const packageId = userWatchlist.watchlist.package_id
+    const userId = userWatchlist.user_id;
+    const watchlistId = userWatchlist.watchlist_id;
+    const packageId = userWatchlist.watchlist.package_id;
 
     const watchlistUserCount = await this.prisma.userWatchlist.count({
-      where: { watchlist_id: watchlistId }
-    })
+      where: { watchlist_id: watchlistId },
+    });
 
     await this.prisma.userWatchlist.delete({
-      where: { id: userWatchlistId }
-    })
+      where: { id: userWatchlistId },
+    });
 
     if (watchlistUserCount === 1) {
-      this.logger.log(`🧹 Cleaning up all data for watchlist ${watchlistId} as this was the only user watching it`)
+      this.logger.log(
+        `🧹 Cleaning up all data for watchlist ${watchlistId} as this was the only user watching it`,
+      );
 
       await this.prisma.vulnerability.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.vulnerabilitySummary.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.repoStats.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.log.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.healthData.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.contributorStats.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.busFactorData.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.alertTriggered.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.aISummaryData.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.aIAnomaliesDetected.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.activityData.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.graphSnapshot.deleteMany({
-        where: { repo_id: packageId }
-      })
+        where: { repo_id: packageId },
+      });
 
       const snapshotIds = await this.prisma.graphSnapshot.findMany({
         where: { repo_id: packageId },
-        select: { snapshot_id: true }
-      })
-      
+        select: { snapshot_id: true },
+      });
+
       if (snapshotIds.length > 0) {
-        const snapshotIdList = snapshotIds.map(s => s.snapshot_id)
+        const snapshotIdList = snapshotIds.map((s) => s.snapshot_id);
         await this.prisma.graphNode.deleteMany({
-          where: { snapshot_id: { in: snapshotIdList } }
-        })
+          where: { snapshot_id: { in: snapshotIdList } },
+        });
         await this.prisma.graphEdge.deleteMany({
-          where: { snapshot_id: { in: snapshotIdList } }
-        })
+          where: { snapshot_id: { in: snapshotIdList } },
+        });
       }
 
       await this.prisma.buildTask.deleteMany({
-        where: { repo_id: packageId }
-      })
+        where: { repo_id: packageId },
+      });
 
       const buildTaskIds = await this.prisma.buildTask.findMany({
         where: { repo_id: packageId },
-        select: { task_id: true }
-      })
-      
+        select: { task_id: true },
+      });
+
       if (buildTaskIds.length > 0) {
-        const taskIdList = buildTaskIds.map(t => t.task_id)
+        const taskIdList = buildTaskIds.map((t) => t.task_id);
         await this.prisma.buildSubtask.deleteMany({
-          where: { task_id: { in: taskIdList } }
-        })
+          where: { task_id: { in: taskIdList } },
+        });
       }
 
       await this.prisma.graphExport.deleteMany({
-        where: { repo_id: packageId }
-      })
+        where: { repo_id: packageId },
+      });
 
       await this.prisma.weeklySummaryData.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.watchlistSbom.deleteMany({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
 
       await this.prisma.watchlist.delete({
-        where: { watchlist_id: watchlistId }
-      })
+        where: { watchlist_id: watchlistId },
+      });
     }
 
-    this.logger.log(`✅ Successfully removed repository ${userWatchlist.watchlist.package.repo_name} from watchlist for user ${userId}`)
+    this.logger.log(
+      `✅ Successfully removed repository ${userWatchlist.watchlist.package.repo_name} from watchlist for user ${userId}`,
+    );
   }
 
   async triggerPollingJob(
@@ -560,7 +579,7 @@ export class ActivityService {
     owner?: string,
     repo?: string,
     branch?: string,
-    delay: number = 0
+    delay: number = 0,
   ): Promise<void> {
     try {
       const jobData = {
@@ -580,28 +599,26 @@ export class ActivityService {
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(0, 0, 0, 0);
         finalDelay = tomorrow.getTime() - now.getTime();
-        
-        this.logger.log(`📅 Daily polling scheduled for ${tomorrow.toISOString()}`);
+
+        this.logger.log(
+          `📅 Daily polling scheduled for ${tomorrow.toISOString()}`,
+        );
       }
 
-      await this.pollingQueue.add(
-        type,
-        jobData,
-        {
-          delay: finalDelay,
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
-          },
-          removeOnComplete: 10,
-          removeOnFail: 50,
-        }
-      );
+      await this.pollingQueue.add(type, jobData, {
+        delay: finalDelay,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: 10,
+        removeOnFail: 50,
+      });
 
       const delayHours = Math.round(finalDelay / (1000 * 60 * 60));
       this.logger.log(
-        `✅ Polling job queued: ${type}${finalDelay > 0 ? ` (delayed by ${delayHours}h)` : ''}${watchlistId ? ` for watchlist ${watchlistId}` : ''}`
+        `✅ Polling job queued: ${type}${finalDelay > 0 ? ` (delayed by ${delayHours}h)` : ''}${watchlistId ? ` for watchlist ${watchlistId}` : ''}`,
       );
     } catch (error) {
       this.logger.error(`Failed to queue polling job:`, error);

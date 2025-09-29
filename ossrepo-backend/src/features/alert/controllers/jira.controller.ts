@@ -1,6 +1,16 @@
-import { 
-  Body, Controller, Get, Param, Post, Query, Res, 
-  BadGatewayException, BadRequestException, InternalServerErrorException, UnauthorizedException, Logger 
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Res,
+  BadGatewayException,
+  BadRequestException,
+  InternalServerErrorException,
+  UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { JiraService } from '../services/jira.service';
 import { Response } from 'express';
@@ -14,9 +24,9 @@ export class JiraController {
 
   @Get('oAuth/:user_id')
   async jiraAuth(
-    @Query('code') code: string, 
+    @Query('code') code: string,
     @Param('user_id') user_id: string,
-    @Res() res: Response
+    @Res() res: Response,
   ) {
     if (!code) {
       this.logger.warn(`Missing Jira authorization code for user: ${user_id}`);
@@ -29,7 +39,10 @@ export class JiraController {
       await this.jiraService.linkProject(link_jira);
       return res.json({ id: user_id });
     } catch (err) {
-      this.logger.error(`Failed to link Jira project for user: ${user_id}`, err.stack);
+      this.logger.error(
+        `Failed to link Jira project for user: ${user_id}`,
+        err.stack,
+      );
       throw new BadGatewayException('Failed to link Jira project');
     }
   }
@@ -69,7 +82,10 @@ export class JiraController {
     try {
       return await this.jiraService.getUserInfo(user_id);
     } catch (err) {
-      this.logger.error(`Failed to fetch Jira user info for user: ${user_id}`, err.stack);
+      this.logger.error(
+        `Failed to fetch Jira user info for user: ${user_id}`,
+        err.stack,
+      );
       if (err.response?.status === 401) {
         throw new UnauthorizedException('Invalid Jira credentials');
       }

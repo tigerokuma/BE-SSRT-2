@@ -63,4 +63,3 @@ describe('Graph Build Task (e2e)', () => {
     expect(res.body).toHaveProperty('status');
   });
 });
-

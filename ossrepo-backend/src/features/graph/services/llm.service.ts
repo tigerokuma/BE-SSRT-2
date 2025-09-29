@@ -64,7 +64,11 @@ RETURN n
 
   // === 2) Optional query-aware hint to bias the model toward contributor patterns ===
   private contributorHint(userQuery: string) {
-    if (/\b(author|contributor|contributors|blame|owner|who wrote|who touched|who last)\b/i.test(userQuery)) {
+    if (
+      /\b(author|contributor|contributors|blame|owner|who wrote|who touched|who last)\b/i.test(
+        userQuery,
+      )
+    ) {
       return `
 The user is asking about contributors. Prefer:
 - OPTIONAL MATCH (n)-[r:CODE_EDGE]->(m:Contributor {snapshot_id: $snapshot_id})
@@ -82,7 +86,9 @@ The user is asking about contributors. Prefer:
     let s = (cypherRaw || '').trim();
 
     // Remove fenced blocks but keep their content
-    s = s.replace(/```+([a-z]*)\n?([\s\S]*?)```+/gi, (_, _lang, inner) => inner.trim());
+    s = s.replace(/```+([a-z]*)\n?([\s\S]*?)```+/gi, (_, _lang, inner) =>
+      inner.trim(),
+    );
 
     // Remove obvious non-cypher lines
     const lines = s
@@ -105,9 +111,16 @@ The user is asking about contributors. Prefer:
     if (semi !== -1) s = s.slice(0, semi).trim();
 
     // Ensure it starts with a Cypher keyword
-    const okStart = /^(match|optional|with|unwind|call|create|merge|return|explain)\b/i.test(s);
+    const okStart =
+      /^(match|optional|with|unwind|call|create|merge|return|explain)\b/i.test(
+        s,
+      );
     if (!okStart) {
-      const idx = lines.findIndex((l) => /^(match|optional|with|unwind|call|create|merge|return|explain)\b/i.test(l));
+      const idx = lines.findIndex((l) =>
+        /^(match|optional|with|unwind|call|create|merge|return|explain)\b/i.test(
+          l,
+        ),
+      );
       if (idx >= 0) s = lines.slice(idx).join('\n').trim();
     }
 
@@ -132,7 +145,9 @@ The user is asking about contributors. Prefer:
     }
 
     // Must use OPTIONAL MATCH for relationships (edge expansion)
-    const hasRel = /\-\s*\[\s*[^]]*\bCODE_EDGE\b[^]]*\]\s*->\s*\(/i.test(cypher);
+    const hasRel = /\-\s*\[\s*[^]]*\bCODE_EDGE\b[^]]*\]\s*->\s*\(/i.test(
+      cypher,
+    );
     const hasOptional = /optional\s+match/i.test(cypher);
     if (hasRel && !hasOptional) {
       return 'Edges must be expanded with OPTIONAL MATCH.';
@@ -154,9 +169,15 @@ The user is asking about contributors. Prefer:
     const res = await fetch(this.OLLAMA_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.MODEL, prompt, stream: false, options: { temperature: 0 } }),
+      body: JSON.stringify({
+        model: this.MODEL,
+        prompt,
+        stream: false,
+        options: { temperature: 0 },
+      }),
     });
-    if (!res.ok) throw new Error(`Ollama error: ${res.status} ${await res.text()}`);
+    if (!res.ok)
+      throw new Error(`Ollama error: ${res.status} ${await res.text()}`);
     const data = await res.json();
     return (data.response || '').trim();
   }
@@ -194,7 +215,10 @@ LIMIT 100
   }
 
   // === Public: generate with retry & repair ===
-  async generateGraphCypher(userQuery: string, snapshotId: string): Promise<GenCypherResult> {
+  async generateGraphCypher(
+    userQuery: string,
+    snapshotId: string,
+  ): Promise<GenCypherResult> {
     const basePrompt = `
 ${this.systemPrompt()}
 

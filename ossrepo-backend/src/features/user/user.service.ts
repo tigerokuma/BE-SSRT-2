@@ -22,4 +22,4 @@ export class UserService {
   async getAllUsers() {
     return this.userRepository.getAllUsers();
   }
-} 
+}

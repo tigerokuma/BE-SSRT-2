@@ -12,28 +12,17 @@ import { EmailRepository } from './repositories/email.repository';
 import { UserModule } from '../user/user.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
-
 @Module({
-  imports: [
-    ConfigModule,
-    UserModule,
-    ScheduleModule.forRoot(),
-  ],
-  controllers: [
-    EmailController,
-    SlackController,
-    JiraController
-  ],
+  imports: [ConfigModule, UserModule, ScheduleModule.forRoot()],
+  controllers: [EmailController, SlackController, JiraController],
   providers: [
     EmailService,
     SlackService,
     JiraService,
     SlackRepository,
     JiraRepository,
-    EmailRepository
+    EmailRepository,
   ],
-  exports: [
-    SlackService
-  ]
+  exports: [SlackService],
 })
 export class AlertModule {}

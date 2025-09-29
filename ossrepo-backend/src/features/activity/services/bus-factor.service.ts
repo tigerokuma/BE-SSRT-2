@@ -33,7 +33,7 @@ export class BusFactorService {
 
   async calculateBusFactor(watchlistId: string): Promise<BusFactorResult> {
     this.logger.log(`🚀 Starting bus factor calculation for ${watchlistId}`);
-    
+
     try {
       const commits = await this.prisma.log.findMany({
         where: {
@@ -50,16 +50,23 @@ export class BusFactorService {
         },
       });
 
-      this.logger.log(`🔍 Found ${commits.length} total commits for ${watchlistId}`);
+      this.logger.log(
+        `🔍 Found ${commits.length} total commits for ${watchlistId}`,
+      );
 
       if (commits.length === 0) {
         return this.createEmptyResult();
       }
 
-      const contributorStats = await this.analyzeContributors(commits, watchlistId);
+      const contributorStats = await this.analyzeContributors(
+        commits,
+        watchlistId,
+      );
       const totalContributors = contributorStats.length;
 
-      this.logger.log(`👥 Found ${totalContributors} human contributors for ${watchlistId}`);
+      this.logger.log(
+        `👥 Found ${totalContributors} human contributors for ${watchlistId}`,
+      );
 
       if (totalContributors === 0) {
         return this.createEmptyResult();
@@ -71,13 +78,22 @@ export class BusFactorService {
 
       this.logger.log(`🏆 Top 5 contributors:`);
       sortedContributors.slice(0, 5).forEach((contributor, index) => {
-        this.logger.log(`  ${index + 1}. ${contributor.author}: ${contributor.totalCommits} commits`);
+        this.logger.log(
+          `  ${index + 1}. ${contributor.author}: ${contributor.totalCommits} commits`,
+        );
       });
 
       const busFactor = this.calculateBusFactorScore(sortedContributors);
-      const riskLevel = this.determineRiskLevel(busFactor, totalContributors, sortedContributors);
-      const totalCommits = sortedContributors.reduce((sum, contributor) => sum + contributor.totalCommits, 0);
-      
+      const riskLevel = this.determineRiskLevel(
+        busFactor,
+        totalContributors,
+        sortedContributors,
+      );
+      const totalCommits = sortedContributors.reduce(
+        (sum, contributor) => sum + contributor.totalCommits,
+        0,
+      );
+
       this.logger.log(`🔢 Total commits (human only): ${totalCommits}`);
 
       const riskReason = this.getRiskReason(
@@ -97,15 +113,23 @@ export class BusFactorService {
         analysisDate: new Date(),
       };
 
-      this.logger.log(`✅ Bus factor calculation complete: ${busFactor} (${riskLevel}) for ${watchlistId}`);
+      this.logger.log(
+        `✅ Bus factor calculation complete: ${busFactor} (${riskLevel}) for ${watchlistId}`,
+      );
       return result;
     } catch (error) {
-      this.logger.error(`❌ Bus factor calculation failed for ${watchlistId}:`, error);
+      this.logger.error(
+        `❌ Bus factor calculation failed for ${watchlistId}:`,
+        error,
+      );
       throw error;
     }
   }
 
-  private async analyzeContributors(commits: any[], watchlistId: string): Promise<ContributorStats[]> {
+  private async analyzeContributors(
+    commits: any[],
+    watchlistId: string,
+  ): Promise<ContributorStats[]> {
     const contributorMap = new Map<string, ContributorStats>();
 
     for (const commit of commits) {
@@ -145,11 +169,13 @@ export class BusFactorService {
     }
 
     const sortedContributors = Array.from(contributorMap.values()).sort(
-      (a, b) => b.totalCommits - a.totalCommits
+      (a, b) => b.totalCommits - a.totalCommits,
     );
 
     const topContributors = sortedContributors.slice(0, 5);
-    this.logger.log(`📊 Getting lines changed data for top ${topContributors.length} contributors from contributor_stats`);
+    this.logger.log(
+      `📊 Getting lines changed data for top ${topContributors.length} contributors from contributor_stats`,
+    );
 
     for (const contributor of topContributors) {
       try {
@@ -161,32 +187,46 @@ export class BusFactorService {
         });
 
         if (contributorStats) {
-          contributor.totalLinesAdded = Math.round(contributorStats.avg_lines_added * contributorStats.total_commits);
-          contributor.totalLinesDeleted = Math.round(contributorStats.avg_lines_deleted * contributorStats.total_commits);
-          contributor.totalFilesChanged = Math.round(contributorStats.avg_files_changed * contributorStats.total_commits);
-          
-          this.logger.log(`📊 ${contributor.author}: ${contributor.totalLinesAdded} added, ${contributor.totalLinesDeleted} deleted`);
+          contributor.totalLinesAdded = Math.round(
+            contributorStats.avg_lines_added * contributorStats.total_commits,
+          );
+          contributor.totalLinesDeleted = Math.round(
+            contributorStats.avg_lines_deleted * contributorStats.total_commits,
+          );
+          contributor.totalFilesChanged = Math.round(
+            contributorStats.avg_files_changed * contributorStats.total_commits,
+          );
+
+          this.logger.log(
+            `📊 ${contributor.author}: ${contributor.totalLinesAdded} added, ${contributor.totalLinesDeleted} deleted`,
+          );
         } else {
-          const contributorCommits = commits.filter(c => c.actor === contributor.author);
+          const contributorCommits = commits.filter(
+            (c) => c.actor === contributor.author,
+          );
           let totalLinesAdded = 0;
           let totalLinesDeleted = 0;
           let totalFilesChanged = 0;
-          
+
           for (const commit of contributorCommits) {
-            const payload = commit.payload as any;
+            const payload = commit.payload;
             totalLinesAdded += payload.lines_added || 0;
             totalLinesDeleted += payload.lines_deleted || 0;
             totalFilesChanged += (payload.files_changed || []).length;
           }
-          
+
           contributor.totalLinesAdded = totalLinesAdded;
           contributor.totalLinesDeleted = totalLinesDeleted;
           contributor.totalFilesChanged = totalFilesChanged;
-          
-          this.logger.log(`📊 ${contributor.author}: ${totalLinesAdded} added, ${totalLinesDeleted} deleted (from logs fallback)`);
+
+          this.logger.log(
+            `📊 ${contributor.author}: ${totalLinesAdded} added, ${totalLinesDeleted} deleted (from logs fallback)`,
+          );
         }
       } catch (error) {
-        this.logger.warn(`Could not get contributor stats for ${contributor.author}: ${error.message}`);
+        this.logger.warn(
+          `Could not get contributor stats for ${contributor.author}: ${error.message}`,
+        );
       }
     }
 
@@ -248,15 +288,21 @@ export class BusFactorService {
 
     const topContributor = contributors[0];
     const topContributorPercentage = topContributor.totalCommits / totalCommits;
-    
-    this.logger.log(`👑 Top contributor: ${topContributor.author} with ${topContributor.totalCommits} commits (${(topContributorPercentage * 100).toFixed(1)}%)`);
-    
+
+    this.logger.log(
+      `👑 Top contributor: ${topContributor.author} with ${topContributor.totalCommits} commits (${(topContributorPercentage * 100).toFixed(1)}%)`,
+    );
+
     if (topContributorPercentage > 0.5) {
-      this.logger.log(`✅ Top contributor has >50% (${(topContributorPercentage * 100).toFixed(1)}%), returning bus factor = 1`);
+      this.logger.log(
+        `✅ Top contributor has >50% (${(topContributorPercentage * 100).toFixed(1)}%), returning bus factor = 1`,
+      );
       return 1;
     }
 
-    this.logger.log(`❌ Top contributor has ${(topContributorPercentage * 100).toFixed(1)}% (≤50%), calculating cumulative...`);
+    this.logger.log(
+      `❌ Top contributor has ${(topContributorPercentage * 100).toFixed(1)}% (≤50%), calculating cumulative...`,
+    );
 
     let cumulativeCommits = 0;
     let contributorsNeeded = 0;
@@ -268,10 +314,14 @@ export class BusFactorService {
       cumulativeCommits += contributor.totalCommits;
       contributorsNeeded++;
 
-      this.logger.log(`  + ${contributor.author}: ${contributor.totalCommits} commits, Cumulative: ${cumulativeCommits}/${targetCommits}, Contributors needed: ${contributorsNeeded}`);
+      this.logger.log(
+        `  + ${contributor.author}: ${contributor.totalCommits} commits, Cumulative: ${cumulativeCommits}/${targetCommits}, Contributors needed: ${contributorsNeeded}`,
+      );
 
       if (cumulativeCommits >= targetCommits) {
-        this.logger.log(`✅ Reached target! Bus factor = ${contributorsNeeded}`);
+        this.logger.log(
+          `✅ Reached target! Bus factor = ${contributorsNeeded}`,
+        );
         break;
       }
     }
@@ -284,12 +334,18 @@ export class BusFactorService {
     totalContributors: number,
     contributors: ContributorStats[],
   ): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
-    const totalCommits = contributors.reduce((sum, c) => sum + c.totalCommits, 0);
-    const topContributorPercentage = totalCommits > 0 
-      ? (contributors[0]?.totalCommits / totalCommits) 
-      : 0;
+    const totalCommits = contributors.reduce(
+      (sum, c) => sum + c.totalCommits,
+      0,
+    );
+    const topContributorPercentage =
+      totalCommits > 0 ? contributors[0]?.totalCommits / totalCommits : 0;
 
-    if (totalContributors <= 2 || busFactor === 1 || topContributorPercentage > 0.8) {
+    if (
+      totalContributors <= 2 ||
+      busFactor === 1 ||
+      topContributorPercentage > 0.8
+    ) {
       return 'CRITICAL';
     }
 

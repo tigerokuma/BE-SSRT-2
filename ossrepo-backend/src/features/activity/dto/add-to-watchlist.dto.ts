@@ -118,7 +118,8 @@ export class HealthScoreDecreasesAlertDto {
 
   @ApiProperty({
     example: 1.0,
-    description: 'Minimum health score change to trigger alert (0.5 to 5.0 points)',
+    description:
+      'Minimum health score change to trigger alert (0.5 to 5.0 points)',
     required: false,
   })
   @IsNumber()
