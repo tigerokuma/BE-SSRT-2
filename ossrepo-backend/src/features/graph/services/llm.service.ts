@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { GeminiService } from '../../../common/ai/gemini.service';
 
 type GenCypherResult = { cypher: string };
 
 @Injectable()
 export class LlmService {
-  private OLLAMA_URL = 'http://localhost:11434/api/generate';
-  private MODEL = 'mistral';
+  private MODEL = 'gemini-2.0-flash-exp';
+
+  constructor(private readonly geminiService: GeminiService) {}
 
   // === 1) Stronger system prompt w/ contributor rules & examples ===
   private systemPrompt() {
@@ -165,21 +167,8 @@ The user is asking about contributors. Prefer:
   }
 
   // === 4) Ask model ===
-  private async callOllama(prompt: string): Promise<string> {
-    const res = await fetch(this.OLLAMA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: this.MODEL,
-        prompt,
-        stream: false,
-        options: { temperature: 0 },
-      }),
-    });
-    if (!res.ok)
-      throw new Error(`Ollama error: ${res.status} ${await res.text()}`);
-    const data = await res.json();
-    return (data.response || '').trim();
+  private async callGemini(prompt: string): Promise<string> {
+    return this.geminiService.generateCypherQuery(prompt);
   }
 
   // === 5) Repair prompt that includes the exact DB error ===
@@ -234,14 +223,14 @@ Write ONLY the Cypher. Obey the strict rules.
 `.trim();
 
     // try 1: direct
-    let raw = await this.callOllama(basePrompt);
+    let raw = await this.callGemini(basePrompt);
     let cypher = this.sanitize(raw);
     let why = this.validateShape(cypher);
     if (!why) return { cypher };
 
     // try 2: self-repair without DB error
     const repair1 = this.makeRepairPrompt(cypher, `Static validation: ${why}`);
-    raw = await this.callOllama(repair1);
+    raw = await this.callGemini(repair1);
     cypher = this.sanitize(raw);
     why = this.validateShape(cypher);
     if (!why) return { cypher };

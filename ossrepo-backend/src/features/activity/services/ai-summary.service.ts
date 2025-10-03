@@ -1,9 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { spawn } from 'child_process';
-import { promisify } from 'util';
-import { exec } from 'child_process';
-
-const execAsync = promisify(exec);
+import { GeminiService } from '../../../common/ai/gemini.service';
 
 export interface RepositoryData {
   name: string;
@@ -50,18 +46,21 @@ export interface AISummaryResult {
 @Injectable()
 export class AISummaryService {
   private readonly logger = new Logger(AISummaryService.name);
-  private readonly modelName = 'gemma2:2b';
+  private readonly modelName = 'gemini-2.0-flash-exp';
   private readonly maxSummaryLength = 300;
 
-  constructor() {
-    this.initializeModel();
+  constructor(private readonly geminiService: GeminiService) {
+    this.initializeService();
   }
 
-  private async initializeModel() {
+  private async initializeService() {
     try {
-      await this.checkOllamaAvailability();
-      await this.ensureModelDownloaded();
-      this.logger.log('✅ AI Summary service initialized with Mistral model');
+      const isConnected = await this.geminiService.testConnection();
+      if (isConnected) {
+        this.logger.log('✅ AI Summary service initialized with Gemini API');
+      } else {
+        this.logger.warn('⚠️ Gemini API connection failed, will use fallback summaries');
+      }
     } catch (error) {
       this.logger.warn(
         '⚠️ AI Summary service initialization failed, will use fallback summaries',
@@ -70,39 +69,6 @@ export class AISummaryService {
     }
   }
 
-  private async checkOllamaAvailability(): Promise<boolean> {
-    try {
-      const envPath = process.env.OLLAMA_PATH;
-      const ollamaPath =
-        envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
-      await execAsync(`"${ollamaPath}" --version`);
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        'Ollama not found. Please install Ollama to enable AI summaries.',
-      );
-      return false;
-    }
-  }
-
-  private async ensureModelDownloaded(): Promise<void> {
-    try {
-      const envPath = process.env.OLLAMA_PATH;
-      const ollamaPath =
-        envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
-      const { stdout } = await execAsync(`"${ollamaPath}" list`);
-      if (!stdout.includes(this.modelName)) {
-        this.logger.log(`📥 Downloading ${this.modelName} model...`);
-        await execAsync(`"${ollamaPath}" pull ${this.modelName}`);
-        this.logger.log(`✅ ${this.modelName} model downloaded successfully`);
-      } else {
-        this.logger.log(`✅ ${this.modelName} model already available`);
-      }
-    } catch (error) {
-      this.logger.error('Failed to download model:', error);
-      throw error;
-    }
-  }
 
   async generateRepositorySummary(
     repoData: RepositoryData,
@@ -110,7 +76,7 @@ export class AISummaryService {
     try {
       const prompt = this.buildSummaryPrompt(repoData);
       const startTime = Date.now();
-      const summary = await this.generateWithMistral(prompt);
+      const summary = await this.geminiService.generateRepositorySummary(prompt);
       const generationTimeMs = Date.now() - startTime;
 
       return {
@@ -158,102 +124,6 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
     return context;
   }
 
-  private async generateWithMistral(prompt: string): Promise<string> {
-    try {
-      // Check for environment variable first
-      const envPath = process.env.OLLAMA_PATH;
-      const ollamaPath =
-        envPath || (process.platform === 'win32' ? 'ollama.exe' : 'ollama');
-
-      this.logger.log(
-        `🔍 Executing Ollama: ${ollamaPath} run ${this.modelName}`,
-      );
-      this.logger.log(`🔍 Prompt length: ${prompt.length} characters`);
-
-      const fs = require('fs');
-      const os = require('os');
-      const path = require('path');
-
-      const tempFile = path.join(
-        os.tmpdir(),
-        `ollama-prompt-${Date.now()}.txt`,
-      );
-      fs.writeFileSync(tempFile, prompt, 'utf8');
-
-      const command = `"${ollamaPath}" run ${this.modelName} < "${tempFile}"`;
-
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-      });
-
-      if (stderr) {
-        this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
-      }
-
-      if (!stdout || typeof stdout !== 'string') {
-        this.logger.error('❌ Ollama returned empty or invalid stdout');
-        throw new Error('AI model returned empty response');
-      }
-
-      this.logger.log(`📝 Raw AI output length: ${stdout.length} characters`);
-      this.logger.log(
-        `📝 Raw AI output preview: ${stdout.substring(0, 100)}...`,
-      );
-
-      const cleanOutput = this.cleanMistralOutput(stdout);
-      this.logger.log(
-        `✅ Ollama execution successful, cleaned output length: ${cleanOutput.length}`,
-      );
-
-      try {
-        fs.unlinkSync(tempFile);
-      } catch (error) {
-        this.logger.warn(`⚠️ Failed to clean up temp file: ${error.message}`);
-      }
-
-      return cleanOutput;
-    } catch (error) {
-      this.logger.error(`❌ Ollama execution failed: ${error.message}`);
-
-      if (error.message.includes('timeout')) {
-        this.logger.error(
-          '❌ AI model timed out - consider increasing timeout or using a faster model',
-        );
-      } else if (error.message.includes('ENOENT')) {
-        this.logger.error(
-          '❌ Ollama not found - check if Ollama is installed and in PATH',
-        );
-      } else if (error.message.includes('empty response')) {
-        this.logger.error(
-          '❌ AI model returned empty response - check model availability',
-        );
-      }
-
-      throw error;
-    }
-  }
-
-  private cleanMistralOutput(output: string): string {
-    if (!output || typeof output !== 'string') {
-      this.logger.warn('Received empty or invalid output from AI model');
-      return 'No summary available.';
-    }
-
-    const cleaned = output
-      .replace(/^[^a-zA-Z]*/, '')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!cleaned || cleaned.length === 0) {
-      this.logger.warn('Output was empty after cleaning');
-      return 'No summary available.';
-    }
-
-    this.logger.log(`Cleaned AI output: ${cleaned.length} characters`);
-    return cleaned;
-  }
 
   private calculateConfidence(repoData: RepositoryData): number {
     let score = 0;
@@ -332,7 +202,7 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
   async testModelConnection(): Promise<boolean> {
     try {
       const testPrompt = 'Generate a one-sentence summary of this test.';
-      await this.generateWithMistral(testPrompt);
+      await this.geminiService.generateRepositorySummary(testPrompt);
       return true;
     } catch (error) {
       this.logger.error('Model connection test failed:', error);
@@ -356,11 +226,11 @@ Generate a comprehensive 3-4 sentence summary of this repository highlighting wh
 
       const prompt = this.buildCommitSummaryPrompt(commits, repoName);
       const startTime = Date.now();
-      const summary = await this.generateWithMistral(prompt);
+      const summary = await this.geminiService.generateRepositorySummary(prompt);
       const generationTimeMs = Date.now() - startTime;
 
       return {
-        summary: this.cleanMistralOutput(summary),
+        summary: summary,
         confidence: this.calculateCommitSummaryConfidence(commits),
         generatedAt: new Date(),
         modelUsed: this.modelName,

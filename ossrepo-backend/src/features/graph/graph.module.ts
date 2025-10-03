@@ -7,9 +7,10 @@ import { GraphStorageService } from './services/graph-storage.service';
 import { HttpModule } from '@nestjs/axios';
 import { LlmService } from './services/llm.service';
 import { MemgraphService } from './services/memgraph.service';
+import { AiModule } from '../../common/ai/ai.module';
 @Module({
   controllers: [GraphController],
-  imports: [HttpModule],
+  imports: [HttpModule, AiModule],
   providers: [
     GraphService,
     GraphBuilderService,

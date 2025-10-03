@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-
-const execAsync = promisify(exec);
+import { GeminiService } from '../../../common/ai/gemini.service';
 
 interface CommitAnalysisData {
   sha: string;
@@ -44,7 +41,7 @@ interface AnomalyDetectionResult {
 @Injectable()
 export class AIAnomalyDetectionService {
   private readonly logger = new Logger(AIAnomalyDetectionService.name);
-  private readonly modelName = 'gemma2:2b';
+  private readonly modelName = 'gemini-2.0-flash-exp';
   private readonly maxPromptLength = 2000;
 
   private readonly botPatterns = [
@@ -65,17 +62,21 @@ export class AIAnomalyDetectionService {
     /\[bot\]/i,
   ];
 
-  constructor(private readonly prisma: PrismaService) {
-    this.initializeModel();
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly geminiService: GeminiService,
+  ) {
+    this.initializeService();
   }
 
-  private async initializeModel() {
+  private async initializeService() {
     try {
-      await this.checkOllamaAvailability();
-      await this.ensureModelDownloaded();
-      this.logger.log(
-        '✅ AI Anomaly Detection service initialized with Gemma2:2b model',
-      );
+      const isConnected = await this.geminiService.testConnection();
+      if (isConnected) {
+        this.logger.log('✅ AI Anomaly Detection service initialized with Gemini API');
+      } else {
+        this.logger.warn('⚠️ Gemini API connection failed, will use fallback detection');
+      }
     } catch (error) {
       this.logger.warn(
         '⚠️ AI Anomaly Detection service initialization failed, will use fallback detection',
@@ -84,42 +85,6 @@ export class AIAnomalyDetectionService {
     }
   }
 
-  private async checkOllamaAvailability(): Promise<void> {
-    try {
-      const ollamaPath = this.getOllamaPath();
-      await execAsync(`"${ollamaPath}" --version`);
-    } catch (error) {
-      throw new Error(`Ollama not available: ${error.message}`);
-    }
-  }
-
-  private getOllamaPath(): string {
-    // Check for environment variable first
-    const envPath = process.env.OLLAMA_PATH;
-    if (envPath) {
-      return envPath;
-    }
-
-    // Fallback to platform-specific defaults
-    return process.platform === 'win32' ? 'ollama.exe' : 'ollama';
-  }
-
-  private async ensureModelDownloaded(): Promise<void> {
-    try {
-      const ollamaPath = this.getOllamaPath();
-      const { stdout } = await execAsync(`"${ollamaPath}" list`);
-      if (!stdout.includes(this.modelName)) {
-        this.logger.log(`📥 Downloading ${this.modelName} model...`);
-        await execAsync(`"${ollamaPath}" pull ${this.modelName}`);
-        this.logger.log(`✅ ${this.modelName} model downloaded successfully`);
-      } else {
-        this.logger.log(`✅ ${this.modelName} model already available`);
-      }
-    } catch (error) {
-      this.logger.error('Failed to download model:', error);
-      throw error;
-    }
-  }
 
   private isBotCommit(data: CommitAnalysisData): boolean {
     const author = data.author || '';
@@ -268,7 +233,7 @@ export class AIAnomalyDetectionService {
       );
 
       const prompt = this.buildAnomalyDetectionPrompt(data);
-      const aiResponse = await this.generateWithGemma(prompt);
+      const aiResponse = await this.geminiService.generateAnomalyAnalysis(prompt);
       const result = this.parseAnomalyResponse(aiResponse);
 
       this.logger.log(
@@ -498,92 +463,6 @@ JSON response:
     return prompt;
   }
 
-  private async generateWithGemma(prompt: string): Promise<string> {
-    try {
-      const ollamaPath = this.getOllamaPath();
-      const fs = require('fs');
-      const os = require('os');
-      const path = require('path');
-
-      this.logger.log(
-        `🔍 Executing Ollama for anomaly detection: ${ollamaPath} run ${this.modelName}`,
-      );
-      this.logger.log(`🔍 Prompt length: ${prompt.length} characters`);
-
-      const tempFile = path.join(
-        os.tmpdir(),
-        `ollama-anomaly-${Date.now()}.txt`,
-      );
-      fs.writeFileSync(tempFile, prompt, 'utf8');
-
-      const command = `"${ollamaPath}" run ${this.modelName} < "${tempFile}"`;
-
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-      });
-
-      if (stderr) {
-        this.logger.warn(`⚠️ Ollama stderr: ${stderr}`);
-      }
-
-      if (!stdout || typeof stdout !== 'string') {
-        this.logger.error(
-          '❌ Ollama returned empty or invalid stdout for anomaly detection',
-        );
-        throw new Error(
-          'AI model returned empty response for anomaly detection',
-        );
-      }
-
-      this.logger.log(
-        `📝 Raw AI anomaly response length: ${stdout.length} characters`,
-      );
-      this.logger.log(
-        `📝 Raw AI anomaly response preview: ${stdout.substring(0, 100)}...`,
-      );
-
-      const cleanOutput = this.cleanGemmaOutput(stdout);
-      this.logger.log(
-        `✅ Ollama anomaly detection successful, cleaned output length: ${cleanOutput.length}`,
-      );
-
-      try {
-        fs.unlinkSync(tempFile);
-      } catch (error) {
-        this.logger.warn(`⚠️ Failed to clean up temp file: ${error.message}`);
-      }
-
-      return cleanOutput;
-    } catch (error) {
-      this.logger.error(`❌ Ollama anomaly detection failed: ${error.message}`);
-
-      if (error.message.includes('timeout')) {
-        this.logger.error(
-          '❌ AI model timed out for anomaly detection - consider increasing timeout',
-        );
-      } else if (error.message.includes('ENOENT')) {
-        this.logger.error(
-          '❌ Ollama not found for anomaly detection - check if Ollama is installed',
-        );
-      } else if (error.message.includes('empty response')) {
-        this.logger.error(
-          '❌ AI model returned empty response for anomaly detection',
-        );
-      }
-
-      throw error;
-    }
-  }
-
-  private cleanGemmaOutput(output: string): string {
-    return output
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```\s*$/i, '')
-      .replace(/^Here's the analysis:\s*/i, '')
-      .replace(/^Analysis:\s*/i, '')
-      .trim();
-  }
 
   private parseAnomalyResponse(response: string): AnomalyDetectionResult {
     try {
