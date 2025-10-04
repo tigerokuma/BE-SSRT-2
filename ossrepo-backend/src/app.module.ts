@@ -11,6 +11,7 @@ import { UserModule } from './features/user/user.module';
 import { AlertModule } from './features/alert/alert.module';
 import { AuthModule } from './features/auth/auth.module';
 import { SbomModule } from './features/sbom/sbom.module';
+import { ProjectModule } from './features/project/project.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { SbomModule } from './features/sbom/sbom.module';
     AuthModule,
     QueueModule,
     ActivityModule,
+    ProjectModule,
   ],
 })
 export class AppModule {}
