@@ -34,6 +34,9 @@ model User {
   refresh_token     String?
   last_login        DateTime?
 
+  // Project relationships
+  projectUsers      ProjectUser[]
+
   @@map("users")
 }
 
@@ -613,4 +616,35 @@ model VulnerabilitySummary {
 
   @@index([watchlist_id])
   @@map("vulnerability_summaries")
+}
+
+// NEW: Simple projects table for testing migrations
+model Project {
+  id        String   @id @default(uuid())
+  name      String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Project relationships
+  projectUsers ProjectUser[]
+
+  @@map("projects")
+}
+
+// NEW: Junction table for many-to-many relationship between projects and users
+model ProjectUser {
+  id        String   @id @default(uuid())
+  project_id String
+  user_id   String
+  role      String?  // Optional role field (e.g., "admin", "member", "viewer")
+  joined_at DateTime @default(now())
+
+  // Relations
+  project   Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([project_id, user_id])
+  @@index([project_id])
+  @@index([user_id])
+  @@map("project_users")
 }
