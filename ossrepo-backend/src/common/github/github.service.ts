@@ -1,0 +1,125 @@
+import { Injectable } from '@nestjs/common';
+import { Octokit } from '@octokit/rest';
+
+@Injectable()
+export class GitHubService {
+  private octokit: Octokit;
+
+  constructor() {
+    this.octokit = new Octokit({
+      auth: process.env.GITHUB_TOKEN,
+    });
+  }
+
+  async getPackageJson(owner: string, repo: string): Promise<any> {
+    try {
+      console.log(`Attempting to fetch package.json from: ${owner}/${repo}`);
+      
+      const response = await this.octokit.repos.getContent({
+        owner,
+        repo,
+        path: 'package.json',
+      });
+
+      if ('content' in response.data) {
+        const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
+        return JSON.parse(content);
+      }
+      
+      throw new Error('package.json not found or not a file');
+    } catch (error) {
+      console.error('Error fetching package.json:', error);
+      
+      // Provide more specific error messages
+      if (error.status === 404) {
+        throw new Error(`Repository not found: ${owner}/${repo}. Please check if the repository exists and is accessible.`);
+      } else if (error.status === 403) {
+        throw new Error(`Access denied to repository: ${owner}/${repo}. Please check if the repository is public or if your GitHub token has the necessary permissions.`);
+      }
+      
+      throw new Error(`Failed to fetch package.json: ${error.message}`);
+    }
+  }
+
+  async extractDependencies(repoUrl: string): Promise<{ name: string; version: string }[]> {
+    try {
+      console.log(`Extracting dependencies from URL: ${repoUrl}`);
+      
+      // Extract owner and repo from GitHub URL (handle various formats)
+      const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
+      if (!match) {
+        throw new Error(`Invalid GitHub repository URL: ${repoUrl}. Expected format: https://github.com/owner/repo`);
+      }
+
+      const [, owner, repo] = match;
+      console.log(`Parsed repository: ${owner}/${repo}`);
+      
+      const packageJson = await this.getPackageJson(owner, repo);
+      
+      const dependencies = [];
+      
+      // Helper function to clean and validate version
+      const cleanVersion = (version: string): string | null => {
+        if (!version || typeof version !== 'string') return null;
+        
+        // Remove common prefixes and clean up
+        let cleaned = version.trim();
+        
+        // Skip file paths and URLs
+        if (cleaned.startsWith('./') || cleaned.startsWith('../') || cleaned.startsWith('file:') || cleaned.startsWith('http')) {
+          return null;
+        }
+        
+        // Skip npm: prefixes
+        if (cleaned.startsWith('npm:')) {
+          cleaned = cleaned.replace('npm:', '');
+        }
+        
+        // Extract version from range notation (^1.2.3 -> 1.2.3)
+        const rangeMatch = cleaned.match(/^[\^~]?(\d+\.\d+\.\d+)/);
+        if (rangeMatch) {
+          return rangeMatch[1];
+        }
+        
+        // Extract version from other patterns
+        const versionMatch = cleaned.match(/(\d+\.\d+\.\d+)/);
+        if (versionMatch) {
+          return versionMatch[1];
+        }
+        
+        // If it looks like a valid semver, return as is
+        if (/^\d+\.\d+\.\d+/.test(cleaned)) {
+          return cleaned;
+        }
+        
+        return null; // Skip invalid versions
+      };
+      
+      // Extract production dependencies
+      if (packageJson.dependencies) {
+        for (const [name, version] of Object.entries(packageJson.dependencies)) {
+          const cleanedVersion = cleanVersion(version as string);
+          if (cleanedVersion) {
+            dependencies.push({ name, version: cleanedVersion });
+          }
+        }
+      }
+      
+      // Extract dev dependencies
+      if (packageJson.devDependencies) {
+        for (const [name, version] of Object.entries(packageJson.devDependencies)) {
+          const cleanedVersion = cleanVersion(version as string);
+          if (cleanedVersion) {
+            dependencies.push({ name, version: cleanedVersion });
+          }
+        }
+      }
+      
+      console.log(`Extracted ${dependencies.length} valid dependencies`);
+      return dependencies;
+    } catch (error) {
+      console.error('Error extracting dependencies:', error);
+      throw error;
+    }
+  }
+}
