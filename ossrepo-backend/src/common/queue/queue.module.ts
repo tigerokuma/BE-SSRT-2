@@ -32,10 +32,7 @@ import { ManualProcessorService } from './manual-processor.service';
               port: parseInt(configService.get('REDIS_PORT', '6379')),
               password: configService.get('REDIS_PASSWORD'),
               username: configService.get('REDIS_USERNAME'),
-              // Optimized settings for cloud Redis
-              maxRetriesPerRequest: 1,
-              enableReadyCheck: false,
-              lazyConnect: false,
+              // Basic settings for cloud Redis (compatible with bull v4)
               connectTimeout: 10000,
               commandTimeout: 5000,
               retryDelayOnFailover: 100,
@@ -54,10 +51,7 @@ import { ManualProcessorService } from './manual-processor.service';
               ...(configService.get('REDIS_PASSWORD') && {
                 password: configService.get('REDIS_PASSWORD'),
               }),
-              // Optimized settings for local Redis
-              maxRetriesPerRequest: 3,
-              enableReadyCheck: true,
-              lazyConnect: true,
+              // Basic settings for local Redis (compatible with bull v4)
               connectTimeout: 5000,
               commandTimeout: 3000,
               retryDelayOnFailover: 100,
