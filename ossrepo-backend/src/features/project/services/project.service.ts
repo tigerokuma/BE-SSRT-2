@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { ProjectRepository } from '../repositories/project.repository';
 import { CreateProjectDto } from '../dto/create-project.dto';
 import { CreateProjectCliDto } from '../dto/create-project-cli.dto';
 import { AnalyzeProjectDto } from '../dto/analyze-project.dto';
 import { GitHubService } from 'src/common/github/github.service';
+import { WebhookService } from 'src/common/webhook/webhook.service';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 
 @Injectable()
@@ -11,7 +14,9 @@ export class ProjectService {
   constructor(
     private readonly projectRepository: ProjectRepository,
     private readonly githubService: GitHubService,
+    private readonly webhookService: WebhookService,
     private readonly prisma: PrismaService,
+    @InjectQueue('project-setup') private readonly projectSetupQueue: Queue,
   ) {}
 
   async createProject(createProjectDto: CreateProjectDto) {
@@ -21,31 +26,18 @@ export class ProjectService {
     // Then associate the user with the project
     await this.projectRepository.createProjectUser(project.id, createProjectDto.userId, 'admin');
 
-    // If repository URL is provided, analyze dependencies and set up webhook
+    // If repository URL is provided, queue the setup work instead of doing it synchronously
     if (createProjectDto.repositoryUrl) {
-      // Get the project with its monitored branch to access the branch ID
-      const projectWithBranch = await this.projectRepository.getProjectWithBranch(project.id);
-      
-      // Try to extract dependencies (don't fail if this doesn't work)
-      try {
-        const dependencies = await this.githubService.extractDependencies(createProjectDto.repositoryUrl);
-        await this.projectRepository.createBranchDependencies(projectWithBranch.monitoredBranch.id, dependencies);
-        console.log(`✅ Extracted ${dependencies.length} dependencies`);
-      } catch (error) {
-        console.log(`⚠️ Could not extract dependencies: ${error.message}`);
-        console.log('📝 This is normal for repositories without package.json');
-      }
-      
-      // Always try to set up webhook (independent of dependency extraction)
-      try {
-        await this.setupRepositoryWebhook(createProjectDto.repositoryUrl, project.id);
-      } catch (error) {
-        console.error('❌ Error setting up webhook:', error);
-        // Don't fail project creation if webhook setup fails
-      }
+      await this.projectSetupQueue.add('setup-project', {
+        projectId: project.id,
+        repositoryUrl: createProjectDto.repositoryUrl,
+      });
+    } else {
+      // If no repository URL, mark as ready immediately
+      await this.projectRepository.updateProjectStatus(project.id, 'ready');
     }
 
-    return project;
+    return project; // Returns immediately with status: "creating"
   }
 
   async getProjectsByUserId(userId: string) {
@@ -373,6 +365,87 @@ export class ProjectService {
   }
 
   async deleteProject(projectId: string) {
-    return this.projectRepository.deleteProject(projectId);
+    // Get project info before deletion to check for webhook cleanup
+    const project = await this.projectRepository.getProjectWithBranch(projectId);
+    
+    // Check if we should clean up the webhook BEFORE deleting the project
+    if (project?.monitoredBranch?.repository_url) {
+      // First, try to sync webhook IDs in case they're missing
+      await this.webhookService.syncWebhookIdsForRepository(project.monitoredBranch.repository_url);
+      
+      const shouldDeleteWebhook = await this.webhookService.shouldDeleteWebhook(project.monitoredBranch.repository_url, projectId);
+      if (shouldDeleteWebhook) {
+        console.log(`🗑️ Cleaning up webhook for repository: ${project.monitoredBranch.repository_url}`);
+        await this.webhookService.deleteWebhookForRepository(project.monitoredBranch.repository_url);
+      } else {
+        console.log(`⚠️ Keeping webhook for repository: ${project.monitoredBranch.repository_url} (other projects still using it)`);
+      }
+    }
+    
+    // Delete the project AFTER webhook cleanup
+    const result = await this.projectRepository.deleteProject(projectId);
+    
+    return result;
+  }
+
+  async syncAllWebhookIds() {
+    console.log('🔄 Starting webhook ID sync for all projects...');
+    
+    // Get all unique repository URLs from monitored branches
+    const monitoredBranches = await this.prisma.monitoredBranch.findMany({
+      where: {
+        repository_url: {
+          not: null,
+        },
+      },
+      select: {
+        repository_url: true,
+      },
+      distinct: ['repository_url'],
+    });
+
+    const results = [];
+    
+    for (const branch of monitoredBranches) {
+      if (branch.repository_url) {
+        try {
+          await this.webhookService.syncWebhookIdsForRepository(branch.repository_url);
+          results.push({ repository: branch.repository_url, status: 'synced' });
+        } catch (error) {
+          results.push({ 
+            repository: branch.repository_url, 
+            status: 'error', 
+            error: error.message 
+          });
+        }
+      }
+    }
+
+    console.log(`✅ Webhook sync completed for ${results.length} repositories`);
+    return {
+      message: 'Webhook sync completed',
+      results,
+      total: results.length,
+      successful: results.filter(r => r.status === 'synced').length,
+      failed: results.filter(r => r.status === 'error').length,
+    };
+  }
+
+  async debugAllProjects() {
+    const allProjects = await this.prisma.project.findMany({
+      include: {
+        monitoredBranch: true,
+        projectUsers: true,
+      },
+    });
+
+    const allMonitoredBranches = await this.prisma.monitoredBranch.findMany();
+
+    return {
+      projects: allProjects,
+      monitoredBranches: allMonitoredBranches,
+      projectCount: allProjects.length,
+      branchCount: allMonitoredBranches.length,
+    };
   }
 }

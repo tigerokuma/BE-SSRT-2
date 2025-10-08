@@ -76,6 +76,9 @@ import { ManualProcessorService } from './manual-processor.service';
       {
         name: 'health-check',
       },
+      {
+        name: 'project-setup',
+      },
     ),
   ],
   providers: [ManualProcessorService],

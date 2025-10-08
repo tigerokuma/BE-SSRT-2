@@ -24,6 +24,16 @@ export class ProjectController {
     return this.projectService.getProjectById(id);
   }
 
+  @Get(':id/status')
+  async getProjectStatus(@Param('id') id: string) {
+    const project = await this.projectService.getProjectById(id);
+    return {
+      id: project.id,
+      status: project.status,
+      errorMessage: project.error_message,
+    };
+  }
+
   @Get(':id/users')
   async getProjectUsers(@Param('id') id: string) {
     return this.projectService.getProjectUsers(id);
@@ -128,5 +138,15 @@ export class ProjectController {
   @Delete(':id')
   async deleteProject(@Param('id') id: string) {
     return this.projectService.deleteProject(id);
+  }
+
+  @Post('sync-webhooks')
+  async syncAllWebhooks() {
+    return this.projectService.syncAllWebhookIds();
+  }
+
+  @Get('debug/all')
+  async debugAllProjects() {
+    return this.projectService.debugAllProjects();
   }
 }

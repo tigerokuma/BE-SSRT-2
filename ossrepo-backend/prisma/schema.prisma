@@ -629,6 +629,8 @@ model Project {
   name                 String
   description          String?
   monitored_branch_id  String
+  status               String   @default("creating") // "creating", "ready", "failed"
+  error_message        String?  // Store error if setup fails
   created_at           DateTime @default(now())
   updated_at           DateTime @updatedAt
 
@@ -646,6 +648,7 @@ model MonitoredBranch {
   repository_url String
   branch_name    String
   is_active      Boolean  @default(true)
+  webhook_id     String?  // GitHub webhook ID for this repository
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 

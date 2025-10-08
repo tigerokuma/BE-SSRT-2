@@ -332,6 +332,16 @@ export class ProjectRepository {
     });
   }
 
+  async updateProjectStatus(projectId: string, status: string, errorMessage?: string) {
+    return this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        status,
+        error_message: errorMessage,
+      },
+    });
+  }
+
   // CLI-specific methods
   async getProjectsForCli() {
     return this.prisma.project.findMany({
