@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 import { CreateProjectDto } from '../dto/create-project.dto';
+import { UpdateProjectDto } from '../dto/update-project.dto';
 
 @Injectable()
 export class ProjectRepository {
@@ -319,5 +320,67 @@ export class ProjectRepository {
         comment,
       },
     });
+  }
+
+  async updateProject(projectId: string, updateProjectDto: UpdateProjectDto) {
+    return this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        name: updateProjectDto.name,
+        description: updateProjectDto.description,
+      },
+    });
+  }
+
+  // CLI-specific methods
+  async getProjectsForCli() {
+    return this.prisma.project.findMany({
+      where: {
+        // For now, return all projects accessible via CLI
+        // You might want to add filtering based on visibility or other criteria
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+  }
+
+  async deleteProject(projectId: string) {
+    // First, get the project with its monitored branch
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        monitoredBranch: true,
+      },
+    });
+
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    // Check if this is the only project using this monitored branch
+    const projectsUsingBranch = await this.prisma.project.count({
+      where: {
+        monitored_branch_id: project.monitoredBranch.id,
+      },
+    });
+
+    // Delete the project (this will cascade delete project users and project watchlist)
+    await this.prisma.project.delete({
+      where: { id: projectId },
+    });
+
+    // If this was the only project using the monitored branch, delete the branch and its dependencies
+    if (projectsUsingBranch === 1) {
+      await this.prisma.monitoredBranch.delete({
+        where: { id: project.monitoredBranch.id },
+      });
+    }
+
+    return { success: true, deletedBranch: projectsUsingBranch === 1 };
   }
 }

@@ -1,6 +1,9 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Body, Param } from '@nestjs/common';
 import { ProjectService } from '../services/project.service';
 import { CreateProjectDto } from '../dto/create-project.dto';
+import { UpdateProjectDto } from '../dto/update-project.dto';
+import { CreateProjectCliDto } from '../dto/create-project-cli.dto';
+import { AnalyzeProjectDto } from '../dto/analyze-project.dto';
 
 @Controller('projects')
 export class ProjectController {
@@ -88,5 +91,42 @@ export class ProjectController {
     @Body() body: { userId: string; comment: string }
   ) {
     return this.projectService.addComment(watchlistId, body.userId, body.comment);
+  }
+
+  @Put(':id')
+  async updateProject(
+    @Param('id') id: string,
+    @Body() updateProjectDto: UpdateProjectDto
+  ) {
+    return this.projectService.updateProject(id, updateProjectDto);
+  }
+
+  // CLI-specific endpoints
+  @Post('cli')
+  async createProjectFromCli(@Body() createProjectCliDto: CreateProjectCliDto) {
+    return this.projectService.createProjectFromCli(createProjectCliDto);
+  }
+
+  @Get('cli')
+  async getProjectsForCli() {
+    return this.projectService.getProjectsForCli();
+  }
+
+  @Post(':id/analyze')
+  async analyzeProjectHealth(
+    @Param('id') id: string,
+    @Body() analyzeProjectDto: AnalyzeProjectDto
+  ) {
+    return this.projectService.analyzeProjectHealth(id, analyzeProjectDto);
+  }
+
+  @Get(':id/health')
+  async getProjectHealth(@Param('id') id: string) {
+    return this.projectService.getProjectHealth(id);
+  }
+
+  @Delete(':id')
+  async deleteProject(@Param('id') id: string) {
+    return this.projectService.deleteProject(id);
   }
 }
