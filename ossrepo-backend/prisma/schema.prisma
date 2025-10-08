@@ -623,22 +623,41 @@ model VulnerabilitySummary {
   @@map("vulnerability_summaries")
 }
 
-// NEW: Simple projects table for testing migrations
+// NEW: Projects table (with foreign key to monitored branch)
 model Project {
-  id             String   @id @default(uuid())
-  name           String
-  description    String?
-  repository_url String?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  name                 String
+  description          String?
+  monitored_branch_id  String
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
 
   // Project relationships
   projectUsers ProjectUser[]
-  projectDependencies ProjectDependency[]
-  watchlistDependencies WatchlistDependency[]
   projectWatchlist ProjectWatchlist[]
+  monitoredBranch MonitoredBranch @relation(fields: [monitored_branch_id], references: [id])
 
   @@map("projects")
+}
+
+// NEW: Monitored branches table (shared across projects)
+model MonitoredBranch {
+  id             String   @id @default(uuid())
+  repository_url String
+  branch_name    String
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // Relations
+  projects       Project[]
+  dependencies   BranchDependency[]
+
+  @@unique([repository_url, branch_name])
+  @@index([repository_url])
+  @@index([branch_name])
+  @@index([is_active])
+  @@map("monitored_branches")
 }
 
 // NEW: Junction table for many-to-many relationship between projects and users
@@ -659,38 +678,23 @@ model ProjectUser {
   @@map("project_users")
 }
 
-// NEW: Project dependencies table
-model ProjectDependency {
-  id        String   @id @default(uuid())
-  project_id String
-  name      String
-  version   String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+// NEW: Branch dependencies table (shared across projects monitoring the same branch)
+model BranchDependency {
+  id                String   @id @default(uuid())
+  monitored_branch_id String
+  name              String
+  version           String
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
   // Relations
-  project   Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  monitoredBranch   MonitoredBranch @relation(fields: [monitored_branch_id], references: [id], onDelete: Cascade)
 
-  @@unique([project_id, name])
-  @@index([project_id])
-  @@map("project_dependencies")
+  @@unique([monitored_branch_id, name])
+  @@index([monitored_branch_id])
+  @@map("branch_dependencies")
 }
 
-// NEW: Watchlist dependencies table
-model WatchlistDependency {
-  id        String   @id @default(uuid())
-  project_id String
-  name      String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  // Relations
-  project   Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
-
-  @@unique([project_id, name])
-  @@index([project_id])
-  @@map("watchlist_dependencies")
-}
 
 // NEW: Project watchlist table - tracks repositories added to project watchlist
 model ProjectWatchlist {

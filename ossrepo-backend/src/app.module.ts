@@ -12,6 +12,8 @@ import { AlertModule } from './features/alert/alert.module';
 import { AuthModule } from './features/auth/auth.module';
 import { SbomModule } from './features/sbom/sbom.module';
 import { ProjectModule } from './features/project/project.module';
+import { GitHubModule } from './features/github/github.module';
+import { WebhookModule } from './features/webhooks/webhook.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { ProjectModule } from './features/project/project.module';
     QueueModule,
     ActivityModule,
     ProjectModule,
+    GitHubModule,
+    WebhookModule,
   ],
 })
 export class AppModule {}

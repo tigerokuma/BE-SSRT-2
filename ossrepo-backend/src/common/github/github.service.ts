@@ -1,21 +1,44 @@
 import { Injectable } from '@nestjs/common';
 import { Octokit } from '@octokit/rest';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class GitHubService {
   private octokit: Octokit;
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
+    // Initialize with fallback token
     this.octokit = new Octokit({
       auth: process.env.GITHUB_TOKEN,
     });
+  }
+
+  async getAuthenticatedOctokit() {
+    try {
+      // Get the test user with GitHub token from database
+      const user = await this.prisma.user.findUnique({
+        where: { email: 'test@example.com' },
+        select: { access_token: true }
+      });
+
+      const token = user?.access_token || process.env.GITHUB_TOKEN;
+      
+      return new Octokit({
+        auth: token,
+      });
+    } catch (error) {
+      console.error('Error getting GitHub token:', error);
+      return this.octokit; // Fallback to default
+    }
   }
 
   async getPackageJson(owner: string, repo: string): Promise<any> {
     try {
       console.log(`Attempting to fetch package.json from: ${owner}/${repo}`);
       
-      const response = await this.octokit.repos.getContent({
+      const octokit = await this.getAuthenticatedOctokit();
+      
+      const response = await octokit.repos.getContent({
         owner,
         repo,
         path: 'package.json',

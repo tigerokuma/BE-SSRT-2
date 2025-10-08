@@ -7,11 +7,28 @@ export class ProjectRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async createProject(createProjectDto: CreateProjectDto) {
+    // First, find or create a MonitoredBranch
+    const monitoredBranch = await this.prisma.monitoredBranch.upsert({
+      where: {
+        repository_url_branch_name: {
+          repository_url: createProjectDto.repositoryUrl,
+          branch_name: createProjectDto.branch || 'main',
+        },
+      },
+      update: {},
+      create: {
+        repository_url: createProjectDto.repositoryUrl,
+        branch_name: createProjectDto.branch || 'main',
+        is_active: true
+      },
+    });
+
+    // Then create the project with reference to the MonitoredBranch
     return this.prisma.project.create({
       data: {
         name: createProjectDto.name,
         description: createProjectDto.description,
-        repository_url: createProjectDto.repositoryUrl,
+        monitored_branch_id: monitoredBranch.id,
       },
     });
   }
@@ -32,6 +49,17 @@ export class ProjectRepository {
     return this.prisma.project.findUnique({
       where: {
         id: projectId,
+      },
+    });
+  }
+
+  async getProjectWithBranch(projectId: string) {
+    return this.prisma.project.findUnique({
+      where: {
+        id: projectId,
+      },
+      include: {
+        monitoredBranch: true,
       },
     });
   }
@@ -63,23 +91,23 @@ export class ProjectRepository {
     });
   }
 
-  async createProjectDependencies(projectId: string, dependencies: { name: string; version: string }[]) {
+  async createBranchDependencies(monitoredBranchId: string, dependencies: { name: string; version: string }[]) {
     const dependencyData = dependencies.map(dep => ({
-      project_id: projectId,
+      monitored_branch_id: monitoredBranchId,
       name: dep.name,
       version: dep.version,
     }));
 
-    return this.prisma.projectDependency.createMany({
+    return this.prisma.branchDependency.createMany({
       data: dependencyData,
       skipDuplicates: true,
     });
   }
 
-  async getProjectDependencies(projectId: string) {
-    return this.prisma.projectDependency.findMany({
+  async getBranchDependencies(monitoredBranchId: string) {
+    return this.prisma.branchDependency.findMany({
       where: {
-        project_id: projectId,
+        monitored_branch_id: monitoredBranchId,
       },
       orderBy: {
         name: 'asc',
@@ -87,21 +115,11 @@ export class ProjectRepository {
     });
   }
 
-  async getWatchlistDependencies(projectId: string) {
-    return this.prisma.watchlistDependency.findMany({
-      where: {
-        project_id: projectId,
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    });
-  }
 
-  async clearProjectDependencies(projectId: string) {
-    return this.prisma.projectDependency.deleteMany({
+  async clearBranchDependencies(monitoredBranchId: string) {
+    return this.prisma.branchDependency.deleteMany({
       where: {
-        project_id: projectId,
+        monitored_branch_id: monitoredBranchId,
       },
     });
   }

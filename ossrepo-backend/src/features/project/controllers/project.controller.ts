@@ -31,10 +31,6 @@ export class ProjectController {
     return this.projectService.getProjectDependencies(id);
   }
 
-  @Get(':id/watchlist')
-  async getWatchlistDependencies(@Param('id') id: string) {
-    return this.projectService.getWatchlistDependencies(id);
-  }
 
   @Post(':id/refresh-dependencies')
   async refreshProjectDependencies(@Param('id') id: string) {

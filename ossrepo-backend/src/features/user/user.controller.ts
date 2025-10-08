@@ -20,4 +20,9 @@ export class UserController {
   async getAllUsers() {
     return this.userService.getAllUsers();
   }
+
+  @Get('test/github')
+  async getTestUserWithGitHub() {
+    return this.userService.getUserByEmail('test@example.com');
+  }
 }

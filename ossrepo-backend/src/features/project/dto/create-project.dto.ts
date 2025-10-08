@@ -12,6 +12,10 @@ export class CreateProjectDto {
   @IsUrl()
   repositoryUrl?: string;
 
+  @IsOptional()
+  @IsString()
+  branch?: string;
+
   @IsString()
   userId: string;
 }
