@@ -19,18 +19,15 @@ export class WebhookService {
       }
 
       const [, owner, repo] = match;
-      console.log(`🔗 Setting up webhook for: ${owner}/${repo}`);
 
       // Check if webhook already exists for this repository
       const existingWebhook = await this.findExistingWebhook(owner, repo);
       if (existingWebhook) {
-        console.log(`✅ Webhook already exists for ${owner}/${repo}: ${existingWebhook.id}`);
         // Update the monitored branch with the existing webhook ID
         await this.prisma.monitoredBranch.update({
           where: { id: monitoredBranchId },
           data: { webhook_id: existingWebhook.id.toString() },
         });
-        console.log(`💾 Stored webhook ID ${existingWebhook.id} for monitored branch ${monitoredBranchId}`);
         return existingWebhook.id.toString();
       }
 
@@ -57,15 +54,12 @@ export class WebhookService {
         active: true,
       });
 
-      console.log(`✅ Webhook created successfully for ${owner}/${repo}:`, webhook.data.id);
-      
       // Update the monitored branch with the new webhook ID
       await this.prisma.monitoredBranch.update({
         where: { id: monitoredBranchId },
         data: { webhook_id: webhook.data.id.toString() },
       });
       
-      console.log(`💾 Stored new webhook ID ${webhook.data.id} for monitored branch ${monitoredBranchId}`);
       return webhook.data.id.toString();
       
     } catch (error) {
@@ -92,17 +86,10 @@ export class WebhookService {
         select: { webhook_id: true },
       });
 
-      console.log(`🔍 Looking for webhook ID in database for: ${repositoryUrl}`);
-      console.log(`📊 Found monitored branch:`, monitoredBranch);
-
       if (!monitoredBranch?.webhook_id) {
-        console.log(`⚠️ No webhook ID found in database for repository: ${repositoryUrl}`);
-        console.log(`🔍 Attempting to find webhook on GitHub directly...`);
-        
         // Try to find the webhook directly on GitHub
         const existingWebhook = await this.findExistingWebhook(owner, repo);
         if (existingWebhook) {
-          console.log(`✅ Found webhook on GitHub: ${existingWebhook.id}, updating database...`);
           // Update the database with the found webhook ID
           await this.prisma.monitoredBranch.updateMany({
             where: { repository_url: repositoryUrl },
@@ -110,7 +97,6 @@ export class WebhookService {
           });
           // Continue with deletion using the found webhook ID
         } else {
-          console.log(`⚠️ No webhook found on GitHub for repository: ${repositoryUrl}`);
           return false;
         }
       }
@@ -122,7 +108,6 @@ export class WebhookService {
       const webhookId = monitoredBranch?.webhook_id || (await this.findExistingWebhook(owner, repo))?.id;
       
       if (!webhookId) {
-        console.log(`⚠️ No webhook ID available for deletion: ${owner}/${repo}`);
         return false;
       }
       
@@ -132,8 +117,6 @@ export class WebhookService {
           repo,
           hook_id: parseInt(webhookId.toString()),
         });
-
-        console.log(`✅ Webhook deleted successfully for ${owner}/${repo}`);
         
         // Clear the webhook ID from all monitored branches for this repository
         await this.prisma.monitoredBranch.updateMany({
@@ -200,7 +183,6 @@ export class WebhookService {
       },
     });
 
-    console.log(`🔍 Checking webhook deletion for ${repositoryUrl}: ${otherProjects} other projects found`);
     return otherProjects === 0;
   }
 
@@ -218,17 +200,11 @@ export class WebhookService {
       // Find existing webhook on GitHub
       const existingWebhook = await this.findExistingWebhook(owner, repo);
       if (existingWebhook) {
-        console.log(`🔄 Syncing webhook ID ${existingWebhook.id} for repository: ${repositoryUrl}`);
-        
         // Update all monitored branches for this repository with the webhook ID
         await this.prisma.monitoredBranch.updateMany({
           where: { repository_url: repositoryUrl },
           data: { webhook_id: existingWebhook.id.toString() },
         });
-        
-        console.log(`✅ Synced webhook ID for repository: ${repositoryUrl}`);
-      } else {
-        console.log(`⚠️ No webhook found on GitHub for repository: ${repositoryUrl}`);
       }
     } catch (error) {
       console.error('Error syncing webhook IDs:', error);

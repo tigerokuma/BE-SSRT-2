@@ -375,16 +375,14 @@ export class ProjectService {
       
       const shouldDeleteWebhook = await this.webhookService.shouldDeleteWebhook(project.monitoredBranch.repository_url, projectId);
       if (shouldDeleteWebhook) {
-        console.log(`🗑️ Cleaning up webhook for repository: ${project.monitoredBranch.repository_url}`);
         await this.webhookService.deleteWebhookForRepository(project.monitoredBranch.repository_url);
-      } else {
-        console.log(`⚠️ Keeping webhook for repository: ${project.monitoredBranch.repository_url} (other projects still using it)`);
       }
     }
     
     // Delete the project AFTER webhook cleanup
     const result = await this.projectRepository.deleteProject(projectId);
     
+    console.log(`✅ Project deleted: ${projectId}`);
     return result;
   }
 

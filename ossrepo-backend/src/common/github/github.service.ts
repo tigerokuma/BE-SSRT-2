@@ -34,8 +34,6 @@ export class GitHubService {
 
   async getPackageJson(owner: string, repo: string): Promise<any> {
     try {
-      console.log(`Attempting to fetch package.json from: ${owner}/${repo}`);
-      
       const octokit = await this.getAuthenticatedOctokit();
       
       const response = await octokit.repos.getContent({
@@ -66,8 +64,6 @@ export class GitHubService {
 
   async extractDependencies(repoUrl: string): Promise<{ name: string; version: string }[]> {
     try {
-      console.log(`Extracting dependencies from URL: ${repoUrl}`);
-      
       // Extract owner and repo from GitHub URL (handle various formats)
       const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
       if (!match) {
@@ -75,7 +71,6 @@ export class GitHubService {
       }
 
       const [, owner, repo] = match;
-      console.log(`Parsed repository: ${owner}/${repo}`);
       
       const packageJson = await this.getPackageJson(owner, repo);
       
@@ -138,7 +133,6 @@ export class GitHubService {
         }
       }
       
-      console.log(`Extracted ${dependencies.length} valid dependencies`);
       return dependencies;
     } catch (error) {
       console.error('Error extracting dependencies:', error);

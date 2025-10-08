@@ -26,8 +26,6 @@ export class ProjectSetupProcessor {
 
   @Process('setup-project')
   async handleProjectSetup(job: Job<ProjectSetupJobData>) {
-    this.logger.log(`🚀 Processing project setup job: ${job.id} for project ${job.data.projectId}`);
-    
     const { projectId, repositoryUrl } = job.data;
     const startTime = Date.now();
 
@@ -35,7 +33,7 @@ export class ProjectSetupProcessor {
       // Update project status to processing
       await this.projectRepository.updateProjectStatus(projectId, 'creating');
 
-      this.logger.log(`📊 Starting project setup for project ${projectId} with repository: ${repositoryUrl}`);
+      this.logger.log(`🚀 Starting project setup for project ${projectId}`);
 
       // Get the project with its monitored branch to access the branch ID
       const projectWithBranch = await this.projectRepository.getProjectWithBranch(projectId);
@@ -45,23 +43,21 @@ export class ProjectSetupProcessor {
       }
 
       // Extract dependencies from the repository
-      this.logger.log(`📦 Extracting dependencies from ${repositoryUrl}`);
       const dependencies = await this.githubService.extractDependencies(repositoryUrl);
       
       // Store dependencies in the database
       await this.projectRepository.createBranchDependencies(projectWithBranch.monitoredBranch.id, dependencies);
-      this.logger.log(`✅ Extracted and stored ${dependencies.length} dependencies`);
+      this.logger.log(`📦 Extracted ${dependencies.length} dependencies`);
 
       // Setup webhook for the repository
-      this.logger.log(`🔗 Setting up webhook for ${repositoryUrl}`);
       await this.webhookService.setupWebhookForRepository(repositoryUrl, projectWithBranch.monitoredBranch.id);
-      this.logger.log(`✅ Webhook setup completed`);
+      this.logger.log(`🔗 Set up webhook`);
 
       // Update project status to ready
       await this.projectRepository.updateProjectStatus(projectId, 'ready');
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-      this.logger.log(`✅ Project setup completed in ${duration}s for project ${projectId}`);
+      this.logger.log(`✅ Finished project setup in ${duration}s`);
 
       return {
         success: true,
