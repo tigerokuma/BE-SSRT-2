@@ -20,24 +20,32 @@ export class ProjectService {
   ) {}
 
   async createProject(createProjectDto: CreateProjectDto) {
-    // First create the project
-    const project = await this.projectRepository.createProject(createProjectDto);
+    try {
+      console.log('ProjectService: Creating project of type:', createProjectDto.type);
+      
+      // First create the project
+      const project = await this.projectRepository.createProject(createProjectDto);
     
     // Then associate the user with the project
     await this.projectRepository.createProjectUser(project.id, createProjectDto.userId, 'admin');
 
-    // If repository URL is provided, queue the setup work instead of doing it synchronously
-    if (createProjectDto.repositoryUrl) {
+    // Handle different project types
+    if (createProjectDto.type === 'repo' && createProjectDto.repositoryUrl) {
+      // For repo projects, queue the setup work
       await this.projectSetupQueue.add('setup-project', {
         projectId: project.id,
         repositoryUrl: createProjectDto.repositoryUrl,
       });
     } else {
-      // If no repository URL, mark as ready immediately
+      // For file and CLI projects, mark as ready immediately
       await this.projectRepository.updateProjectStatus(project.id, 'ready');
     }
 
-    return project; // Returns immediately with status: "creating"
+      return project; // Returns immediately with status: "creating" for repo projects, "ready" for others
+    } catch (error) {
+      console.error('Error creating project:', error);
+      throw error;
+    }
   }
 
   async getProjectsByUserId(userId: string) {
@@ -202,6 +210,9 @@ export class ProjectService {
       data: {
         name: createProjectCliDto.name,
         description: createProjectCliDto.description,
+        type: 'cli',
+        language: 'nodejs', // Default for CLI projects
+        license: createProjectCliDto.license,
         monitored_branch_id: monitoredBranch.id
       }
     });

@@ -18,4 +18,8 @@ export class CreateProjectCliDto {
   @IsOptional()
   @IsString()
   branch?: string;
+
+  @IsOptional()
+  @IsString()
+  license?: string; // License type or null if no license
 }

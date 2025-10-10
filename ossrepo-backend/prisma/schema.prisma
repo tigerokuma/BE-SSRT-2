@@ -628,16 +628,22 @@ model Project {
   id                   String   @id @default(uuid())
   name                 String
   description          String?
-  monitored_branch_id  String
+  monitored_branch_id  String?
   status               String   @default("creating") // "creating", "ready", "failed"
   error_message        String?  // Store error if setup fails
   created_at           DateTime @default(now())
   updated_at           DateTime @updatedAt
 
+  // New fields for project types
+  type                 String   // "repo", "file", "cli"
+  language             String?  // "nodejs", "python", "rust", "other", etc.
+  dependencies         Json?    // Store dependencies as JSON for file/cli projects
+  license              String?  // License type (MIT, Apache-2.0, etc.) or null if no license
+  
   // Project relationships
   projectUsers ProjectUser[]
   projectWatchlist ProjectWatchlist[]
-  monitoredBranch MonitoredBranch @relation(fields: [monitored_branch_id], references: [id])
+  monitoredBranch MonitoredBranch? @relation(fields: [monitored_branch_id], references: [id])
 
   @@map("projects")
 }

@@ -8,30 +8,65 @@ export class ProjectRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async createProject(createProjectDto: CreateProjectDto) {
-    // First, find or create a MonitoredBranch
-    const monitoredBranch = await this.prisma.monitoredBranch.upsert({
-      where: {
-        repository_url_branch_name: {
-          repository_url: createProjectDto.repositoryUrl,
-          branch_name: createProjectDto.branch || 'main',
-        },
-      },
-      update: {},
-      create: {
-        repository_url: createProjectDto.repositoryUrl,
-        branch_name: createProjectDto.branch || 'main',
-        is_active: true
-      },
+    console.log('Creating project with data:', {
+      name: createProjectDto.name,
+      type: createProjectDto.type,
+      repositoryUrl: createProjectDto.repositoryUrl,
+      hasPackageData: !!createProjectDto.packageData
     });
 
-    // Then create the project with reference to the MonitoredBranch
-    return this.prisma.project.create({
-      data: {
-        name: createProjectDto.name,
-        description: createProjectDto.description,
-        monitored_branch_id: monitoredBranch.id,
-      },
+    let monitoredBranchId: string | null = null;
+
+    // Only create MonitoredBranch for repo-type projects
+    if (createProjectDto.type === 'repo' && createProjectDto.repositoryUrl) {
+      const monitoredBranch = await this.prisma.monitoredBranch.upsert({
+        where: {
+          repository_url_branch_name: {
+            repository_url: createProjectDto.repositoryUrl,
+            branch_name: createProjectDto.branch || 'main',
+          },
+        },
+        update: {},
+        create: {
+          repository_url: createProjectDto.repositoryUrl,
+          branch_name: createProjectDto.branch || 'main',
+          is_active: true
+        },
+      });
+      monitoredBranchId = monitoredBranch.id;
+    }
+
+    // Create the project with the new fields
+    const projectData: any = {
+      name: createProjectDto.name,
+      description: createProjectDto.description,
+      type: createProjectDto.type,
+      language: createProjectDto.language,
+      license: createProjectDto.license,
+    };
+
+    // Add monitored branch ID only for repo projects
+    if (monitoredBranchId) {
+      projectData.monitored_branch_id = monitoredBranchId;
+    }
+
+    // Handle dependencies based on project type
+    if (createProjectDto.type === 'file' && createProjectDto.packageData) {
+      // For file uploads, store the parsed package.json data
+      projectData.dependencies = createProjectDto.packageData;
+    } else if (createProjectDto.type === 'cli' && createProjectDto.dependencies) {
+      // For CLI projects, store the dependencies list
+      projectData.dependencies = createProjectDto.dependencies;
+    }
+
+    console.log('Final project data being created:', projectData);
+    
+    const project = await this.prisma.project.create({
+      data: projectData,
     });
+
+    console.log('Project created successfully:', project.id);
+    return project;
   }
 
   async getProjectsByUserId(userId: string) {
