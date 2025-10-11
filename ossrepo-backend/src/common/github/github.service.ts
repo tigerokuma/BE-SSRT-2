@@ -1,0 +1,142 @@
+import { Injectable } from '@nestjs/common';
+import { Octokit } from '@octokit/rest';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class GitHubService {
+  private octokit: Octokit;
+
+  constructor(private readonly prisma: PrismaService) {
+    // Initialize with fallback token
+    this.octokit = new Octokit({
+      auth: process.env.GITHUB_TOKEN,
+    });
+  }
+
+  async getAuthenticatedOctokit() {
+    try {
+      // Get the test user with GitHub token from database
+      const user = await this.prisma.user.findUnique({
+        where: { email: 'test@example.com' },
+        select: { access_token: true }
+      });
+
+      const token = user?.access_token || process.env.GITHUB_TOKEN;
+      
+      return new Octokit({
+        auth: token,
+      });
+    } catch (error) {
+      console.error('Error getting GitHub token:', error);
+      return this.octokit; // Fallback to default
+    }
+  }
+
+  async getPackageJson(owner: string, repo: string): Promise<any> {
+    try {
+      const octokit = await this.getAuthenticatedOctokit();
+      
+      const response = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: 'package.json',
+      });
+
+      if ('content' in response.data) {
+        const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
+        return JSON.parse(content);
+      }
+      
+      throw new Error('package.json not found or not a file');
+    } catch (error) {
+      console.error('Error fetching package.json:', error);
+      
+      // Provide more specific error messages
+      if (error.status === 404) {
+        throw new Error(`Repository not found: ${owner}/${repo}. Please check if the repository exists and is accessible.`);
+      } else if (error.status === 403) {
+        throw new Error(`Access denied to repository: ${owner}/${repo}. Please check if the repository is public or if your GitHub token has the necessary permissions.`);
+      }
+      
+      throw new Error(`Failed to fetch package.json: ${error.message}`);
+    }
+  }
+
+  async extractDependencies(repoUrl: string): Promise<{ name: string; version: string }[]> {
+    try {
+      // Extract owner and repo from GitHub URL (handle various formats)
+      const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
+      if (!match) {
+        throw new Error(`Invalid GitHub repository URL: ${repoUrl}. Expected format: https://github.com/owner/repo`);
+      }
+
+      const [, owner, repo] = match;
+      
+      const packageJson = await this.getPackageJson(owner, repo);
+      
+      const dependencies = [];
+      
+      // Helper function to clean and validate version
+      const cleanVersion = (version: string): string | null => {
+        if (!version || typeof version !== 'string') return null;
+        
+        // Remove common prefixes and clean up
+        let cleaned = version.trim();
+        
+        // Skip file paths and URLs
+        if (cleaned.startsWith('./') || cleaned.startsWith('../') || cleaned.startsWith('file:') || cleaned.startsWith('http')) {
+          return null;
+        }
+        
+        // Skip npm: prefixes
+        if (cleaned.startsWith('npm:')) {
+          cleaned = cleaned.replace('npm:', '');
+        }
+        
+        // Extract version from range notation (^1.2.3 -> 1.2.3)
+        const rangeMatch = cleaned.match(/^[\^~]?(\d+\.\d+\.\d+)/);
+        if (rangeMatch) {
+          return rangeMatch[1];
+        }
+        
+        // Extract version from other patterns
+        const versionMatch = cleaned.match(/(\d+\.\d+\.\d+)/);
+        if (versionMatch) {
+          return versionMatch[1];
+        }
+        
+        // If it looks like a valid semver, return as is
+        if (/^\d+\.\d+\.\d+/.test(cleaned)) {
+          return cleaned;
+        }
+        
+        return null; // Skip invalid versions
+      };
+      
+      // Extract production dependencies
+      if (packageJson.dependencies) {
+        for (const [name, version] of Object.entries(packageJson.dependencies)) {
+          const cleanedVersion = cleanVersion(version as string);
+          if (cleanedVersion) {
+            dependencies.push({ name, version: cleanedVersion });
+          }
+        }
+      }
+      
+      // Extract dev dependencies
+      if (packageJson.devDependencies) {
+        for (const [name, version] of Object.entries(packageJson.devDependencies)) {
+          const cleanedVersion = cleanVersion(version as string);
+          if (cleanedVersion) {
+            dependencies.push({ name, version: cleanedVersion });
+          }
+        }
+      }
+      
+      return dependencies;
+    } catch (error) {
+      console.error('Error extracting dependencies:', error);
+      throw error;
+    }
+  }
+}

@@ -12,6 +12,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -33,6 +34,13 @@ model User {
   access_token      String?
   refresh_token     String?
   last_login        DateTime?
+
+  // Project relationships
+  projectUsers      ProjectUser[]
+  projectWatchlist  ProjectWatchlist[]
+  projectWatchlistApprovals ProjectWatchlistApproval[]
+  projectWatchlistDisapprovals ProjectWatchlistDisapproval[]
+  projectWatchlistComments ProjectWatchlistComment[]
 
   @@map("users")
 }
@@ -613,4 +621,160 @@ model VulnerabilitySummary {
 
   @@index([watchlist_id])
   @@map("vulnerability_summaries")
+}
+
+// NEW: Projects table (with foreign key to monitored branch)
+model Project {
+  id                   String   @id @default(uuid())
+  name                 String
+  description          String?
+  monitored_branch_id  String?
+  status               String   @default("creating") // "creating", "ready", "failed"
+  error_message        String?  // Store error if setup fails
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  // New fields for project types
+  type                 String   // "repo", "file", "cli"
+  language             String?  // "nodejs", "python", "rust", "other", etc.
+  dependencies         Json?    // Store dependencies as JSON for file/cli projects
+  license              String?  // License type (MIT, Apache-2.0, etc.) or null if no license
+  
+  // Project relationships
+  projectUsers ProjectUser[]
+  projectWatchlist ProjectWatchlist[]
+  monitoredBranch MonitoredBranch? @relation(fields: [monitored_branch_id], references: [id])
+
+  @@map("projects")
+}
+
+// NEW: Monitored branches table (shared across projects)
+model MonitoredBranch {
+  id             String   @id @default(uuid())
+  repository_url String
+  branch_name    String
+  is_active      Boolean  @default(true)
+  webhook_id     String?  // GitHub webhook ID for this repository
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // Relations
+  projects       Project[]
+  dependencies   BranchDependency[]
+
+  @@unique([repository_url, branch_name])
+  @@index([repository_url])
+  @@index([branch_name])
+  @@index([is_active])
+  @@map("monitored_branches")
+}
+
+// NEW: Junction table for many-to-many relationship between projects and users
+model ProjectUser {
+  id        String   @id @default(uuid())
+  project_id String
+  user_id   String
+  role      String?  // Optional role field (e.g., "admin", "member", "viewer")
+  joined_at DateTime @default(now())
+
+  // Relations
+  project   Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([project_id, user_id])
+  @@index([project_id])
+  @@index([user_id])
+  @@map("project_users")
+}
+
+// NEW: Branch dependencies table (shared across projects monitoring the same branch)
+model BranchDependency {
+  id                String   @id @default(uuid())
+  monitored_branch_id String
+  name              String
+  version           String
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  // Relations
+  monitoredBranch   MonitoredBranch @relation(fields: [monitored_branch_id], references: [id], onDelete: Cascade)
+
+  @@unique([monitored_branch_id, name])
+  @@index([monitored_branch_id])
+  @@map("branch_dependencies")
+}
+
+
+// NEW: Project watchlist table - tracks repositories added to project watchlist
+model ProjectWatchlist {
+  id        String   @id @default(uuid())
+  project_id String
+  user_id   String
+  repo_url  String
+  name      String
+  added_at  DateTime @default(now())
+  status    String   @default("pending") // pending, reviewed, approved, rejected
+
+  // Relations
+  project   Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  approvals ProjectWatchlistApproval[]
+  disapprovals ProjectWatchlistDisapproval[]
+  comments  ProjectWatchlistComment[]
+
+  @@unique([project_id, repo_url])
+  @@index([project_id])
+  @@index([user_id])
+  @@map("project_watchlist")
+}
+
+// NEW: Project watchlist approvals table
+model ProjectWatchlistApproval {
+  id        String   @id @default(uuid())
+  project_watchlist_id String
+  user_id   String
+  approved_at DateTime @default(now())
+
+  // Relations
+  projectWatchlist ProjectWatchlist @relation(fields: [project_watchlist_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([project_watchlist_id, user_id])
+  @@index([project_watchlist_id])
+  @@index([user_id])
+  @@map("project_watchlist_approvals")
+}
+
+// NEW: Project watchlist disapprovals table
+model ProjectWatchlistDisapproval {
+  id        String   @id @default(uuid())
+  project_watchlist_id String
+  user_id   String
+  disapproved_at DateTime @default(now())
+
+  // Relations
+  projectWatchlist ProjectWatchlist @relation(fields: [project_watchlist_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([project_watchlist_id, user_id])
+  @@index([project_watchlist_id])
+  @@index([user_id])
+  @@map("project_watchlist_disapprovals")
+}
+
+// NEW: Project watchlist comments table
+model ProjectWatchlistComment {
+  id        String   @id @default(uuid())
+  project_watchlist_id String
+  user_id   String
+  comment   String
+  created_at DateTime @default(now())
+
+  // Relations
+  projectWatchlist ProjectWatchlist @relation(fields: [project_watchlist_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([project_watchlist_id])
+  @@index([user_id])
+  @@map("project_watchlist_comments")
 }

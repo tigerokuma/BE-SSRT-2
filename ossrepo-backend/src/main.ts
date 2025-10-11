@@ -21,6 +21,7 @@ async function bootstrap() {
       new BullAdapter(app.get(getQueueToken('polling'))),
       new BullAdapter(app.get(getQueueToken('vulnerability-check'))),
       new BullAdapter(app.get(getQueueToken('health-check'))),
+      new BullAdapter(app.get(getQueueToken('project-setup'))),
     ],
     serverAdapter,
   });
