@@ -101,7 +101,7 @@ export class ProjectService {
   }
 
   async getProjectById(projectId: string) {
-    return this.projectRepository.getProjectById(projectId);
+    return this.projectRepository.getProjectWithBranch(projectId);
   }
 
   async getProjectUsers(projectId: string) {

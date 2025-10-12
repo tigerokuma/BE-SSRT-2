@@ -43,6 +43,9 @@ export class ProjectRepository {
       type: createProjectDto.type,
       language: createProjectDto.language,
       license: createProjectDto.license,
+      vulnerability_notifications: createProjectDto.vulnerability_notifications ?? { alerts: true, slack: false, discord: false },
+      license_notifications: createProjectDto.license_notifications ?? { alerts: true, slack: false, discord: false },
+      health_notifications: createProjectDto.health_notifications ?? { alerts: true, slack: false, discord: false },
     };
 
     // Add monitored branch ID only for repo projects
@@ -90,7 +93,7 @@ export class ProjectRepository {
   }
 
   async getProjectWithBranch(projectId: string) {
-    return this.prisma.project.findUnique({
+    const result = await this.prisma.project.findUnique({
       where: {
         id: projectId,
       },
@@ -98,6 +101,8 @@ export class ProjectRepository {
         monitoredBranch: true,
       },
     });
+    console.log('getProjectWithBranch result:', JSON.stringify(result, null, 2));
+    return result;
   }
 
   async createProjectUser(projectId: string, userId: string, role: string = 'admin') {
@@ -363,6 +368,10 @@ export class ProjectRepository {
       data: {
         name: updateProjectDto.name,
         description: updateProjectDto.description,
+        license: updateProjectDto.license,
+        vulnerability_notifications: updateProjectDto.vulnerability_notifications,
+        license_notifications: updateProjectDto.license_notifications,
+        health_notifications: updateProjectDto.health_notifications,
       },
     });
   }
