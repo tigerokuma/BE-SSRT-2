@@ -628,7 +628,7 @@ JSON response:
       const testData: CommitAnalysisData = {
         sha: 'test123',
         author: 'Test User',
-        email: 'test@example.com',
+        email: 'user@example.com',
         message: 'Test commit',
         date: new Date(),
         linesAdded: 10,

@@ -27,10 +27,10 @@ model User {
   userWatchlists               UserWatchlist[]
   sbom                         UserWatchlistSbom?
   projectUsers                 ProjectUser[]
-  projectWatchlist             ProjectWatchlist[]
-  projectWatchlistApprovals    ProjectWatchlistApproval[]
-  projectWatchlistComments     ProjectWatchlistComment[]
-  projectWatchlistDisapprovals ProjectWatchlistDisapproval[]
+  addedWatchlistPackages       ProjectWatchlistPackage[]
+  approvedWatchlistPackages    ProjectWatchlistPackage[] @relation("ApprovedByUser")
+  rejectedWatchlistPackages    ProjectWatchlistPackage[] @relation("RejectedByUser")
+  watchlistComments            WatchlistComment[]
 
   @@map("users")
 }
@@ -121,6 +121,37 @@ model Package {
   forks                Int?
   watchlists           Watchlist[]
   project_dependencies project_dependencies[]
+}
+
+// NEW: Packages table for optimized dependency tracking
+model Packages {
+  id                    String   @id @default(uuid())
+  name                  String   @unique
+  repo_url              String?
+  license               String?  // Package license (e.g., "MIT", "Apache-2.0", "GPL-3.0")
+  
+  // Processing status
+  status                String   @default("queued") // queued, fast, done
+  
+  // Health scores
+  activity_score        Float?
+  bus_factor_score      Float?
+  scorecard_score       Float?
+  vulnerability_score   Float?
+  license_score         Float?
+  total_score           Float?
+  
+  // Metadata
+  stars                 Int?
+  contributors          Int?
+  summary               String?  // AI-generated summary
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  
+  // Relations
+  projectWatchlist      ProjectWatchlistPackage[]
+  branchDependencies    BranchDependency[]
 }
 
 model Watchlist {
@@ -569,10 +600,11 @@ model Project {
   vulnerability_notifications Json?
   license_notifications       Json?
   health_notifications        Json?
+  health_score                Float?
   dependencies_json           Json?
   project_dependencies        project_dependencies[]
   projectUsers                ProjectUser[]
-  projectWatchlist            ProjectWatchlist[]
+  projectWatchlistPackages    ProjectWatchlistPackage[]
   monitoredBranch             MonitoredBranch?       @relation(fields: [monitored_branch_id], references: [id])
 
   @@map("projects")
@@ -617,76 +649,64 @@ model BranchDependency {
   monitored_branch_id String
   name                String
   version             String
+  package_id          String?
   created_at          DateTime        @default(now())
   updated_at          DateTime        @updatedAt
   monitoredBranch     MonitoredBranch @relation(fields: [monitored_branch_id], references: [id], onDelete: Cascade)
+  package             Packages?       @relation(fields: [package_id], references: [id])
 
   @@unique([monitored_branch_id, name])
   @@index([monitored_branch_id])
+  @@index([package_id])
   @@map("branch_dependencies")
 }
 
-model ProjectWatchlist {
-  id           String                        @id @default(uuid())
+// REMOVED: ProjectWatchlist table - replaced with direct Project → Packages relationship
+
+// NEW: ProjectWatchlistPackage - links projects directly to packages
+model ProjectWatchlistPackage {
+  id           String   @id @default(uuid())
   project_id   String
-  user_id      String
-  repo_url     String
-  name         String
-  added_at     DateTime                      @default(now())
-  status       String                        @default("pending")
-  project      Project                       @relation(fields: [project_id], references: [id], onDelete: Cascade)
-  user         User                          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-  approvals    ProjectWatchlistApproval[]
-  comments     ProjectWatchlistComment[]
-  disapprovals ProjectWatchlistDisapproval[]
-
-  @@unique([project_id, repo_url])
+  package_id   String
+  added_at     DateTime @default(now())
+  added_by     String   // User ID of who added the package
+  status       String   @default("pending") // pending, approved, rejected
+  approved_by  String?  // User ID of who approved the package
+  rejected_by  String?  // User ID of who rejected the package
+  approved_at  DateTime? // When the package was approved
+  rejected_at  DateTime? // When the package was rejected
+  
+  // Relations
+  project      Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  package      Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  addedByUser  User     @relation(fields: [added_by], references: [user_id], onDelete: Cascade)
+  approvedByUser User?  @relation("ApprovedByUser", fields: [approved_by], references: [user_id], onDelete: SetNull)
+  rejectedByUser User?  @relation("RejectedByUser", fields: [rejected_by], references: [user_id], onDelete: SetNull)
+  comments     WatchlistComment[]
+  
+  @@unique([project_id, package_id])
   @@index([project_id])
-  @@index([user_id])
-  @@map("project_watchlist")
+  @@index([package_id])
+  @@map("project_watchlist_packages")
 }
 
-model ProjectWatchlistApproval {
-  id                   String           @id @default(uuid())
-  project_watchlist_id String
-  user_id              String
-  approved_at          DateTime         @default(now())
-  projectWatchlist     ProjectWatchlist @relation(fields: [project_watchlist_id], references: [id], onDelete: Cascade)
-  user                 User             @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@unique([project_watchlist_id, user_id])
-  @@index([project_watchlist_id])
-  @@index([user_id])
-  @@map("project_watchlist_approvals")
+// WatchlistComment - comments on watchlisted packages
+model WatchlistComment {
+  id           String   @id @default(uuid())
+  project_watchlist_package_id String
+  user_id      String
+  comment      String
+  created_at   DateTime @default(now())
+  
+  // Relations
+  projectWatchlistPackage ProjectWatchlistPackage @relation(fields: [project_watchlist_package_id], references: [id], onDelete: Cascade)
+  user                   User                    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  
+  @@index([project_watchlist_package_id])
+  @@map("watchlist_comments")
 }
 
-model ProjectWatchlistDisapproval {
-  id                   String           @id @default(uuid())
-  project_watchlist_id String
-  user_id              String
-  disapproved_at       DateTime         @default(now())
-  projectWatchlist     ProjectWatchlist @relation(fields: [project_watchlist_id], references: [id], onDelete: Cascade)
-  user                 User             @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@unique([project_watchlist_id, user_id])
-  @@index([project_watchlist_id])
-  @@index([user_id])
-  @@map("project_watchlist_disapprovals")
-}
-
-model ProjectWatchlistComment {
-  id                   String           @id @default(uuid())
-  project_watchlist_id String
-  user_id              String
-  comment              String
-  created_at           DateTime         @default(now())
-  projectWatchlist     ProjectWatchlist @relation(fields: [project_watchlist_id], references: [id], onDelete: Cascade)
-  user                 User             @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@index([project_watchlist_id])
-  @@index([user_id])
-  @@map("project_watchlist_comments")
-}
+// REMOVED: Old watchlist approval/comment tables - replaced with ProjectWatchlistPackage
 
 model project_dependencies {
   id                  String           @id

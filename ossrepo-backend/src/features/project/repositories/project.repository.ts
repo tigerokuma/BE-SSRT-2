@@ -145,10 +145,41 @@ export class ProjectRepository {
     });
   }
 
+  async createBranchDependenciesWithReturn(monitoredBranchId: string, dependencies: { name: string; version: string }[]) {
+    const dependencyData = dependencies.map(dep => ({
+      monitored_branch_id: monitoredBranchId,
+      name: dep.name,
+      version: dep.version,
+    }));
+
+    // Create dependencies one by one to get the IDs back, using upsert to handle existing ones
+    const createdDependencies = [];
+    for (const dep of dependencyData) {
+      const created = await this.prisma.branchDependency.upsert({
+        where: {
+          monitored_branch_id_name: {
+            monitored_branch_id: monitoredBranchId,
+            name: dep.name,
+          },
+        },
+        update: {
+          version: dep.version, // Update version if dependency already exists
+        },
+        create: dep,
+      });
+      createdDependencies.push(created);
+    }
+
+    return createdDependencies;
+  }
+
   async getBranchDependencies(monitoredBranchId: string) {
     return this.prisma.branchDependency.findMany({
       where: {
         monitored_branch_id: monitoredBranchId,
+      },
+      include: {
+        package: true
       },
       orderBy: {
         name: 'asc',
@@ -217,12 +248,27 @@ export class ProjectRepository {
   }
 
   async addToProjectWatchlist(projectId: string, userId: string, repoUrl: string, name: string) {
-    // Check if repository is already in project watchlist
-    const existing = await this.prisma.projectWatchlist.findUnique({
-      where: {
-        project_id_repo_url: {
-          project_id: projectId,
+    // First, find or create the package
+    let packageRecord = await this.prisma.packages.findUnique({
+      where: { name },
+    });
+
+    if (!packageRecord) {
+      packageRecord = await this.prisma.packages.create({
+        data: {
+          name,
           repo_url: repoUrl,
+          status: 'queued',
+        },
+      });
+    }
+
+    // Check if package is already in project watchlist
+    const existing = await this.prisma.projectWatchlistPackage.findUnique({
+      where: {
+        project_id_package_id: {
+          project_id: projectId,
+          package_id: packageRecord.id,
         },
       },
     });
@@ -231,30 +277,54 @@ export class ProjectRepository {
       return existing;
     }
 
-    // Add repository to project watchlist
-    return this.prisma.projectWatchlist.create({
+    // Add package to project watchlist
+    return this.prisma.projectWatchlistPackage.create({
       data: {
         project_id: projectId,
-        user_id: userId,
-        repo_url: repoUrl,
-        name,
-        status: 'pending',
+        package_id: packageRecord.id,
+        added_by: 'user-123', // Default user for now
+        status: 'pending'
       },
     });
   }
 
   async getProjectWatchlist(projectId: string) {
-    return this.prisma.projectWatchlist.findMany({
+    return this.prisma.projectWatchlistPackage.findMany({
       where: {
         project_id: projectId,
       },
       include: {
-        user: {
+        package: true,
+        addedByUser: {
           select: {
-            user_id: true,
             name: true,
-            email: true,
+            email: true
+          }
+        },
+        approvedByUser: {
+          select: {
+            name: true,
+            email: true
+          }
+        },
+        rejectedByUser: {
+          select: {
+            name: true,
+            email: true
+          }
+        },
+        comments: {
+          orderBy: {
+            created_at: 'asc',
           },
+          include: {
+            user: {
+              select: {
+                name: true,
+                email: true
+              }
+            }
+          }
         },
       },
       orderBy: {
@@ -264,103 +334,62 @@ export class ProjectRepository {
   }
 
   async getProjectWatchlistReview(projectWatchlistId: string) {
-    return this.prisma.projectWatchlist.findUnique({
+    return this.prisma.projectWatchlistPackage.findUnique({
       where: {
         id: projectWatchlistId,
       },
       include: {
-        user: {
-          select: {
-            user_id: true,
-            name: true,
-            email: true,
-          },
-        },
-        approvals: {
-          include: {
-            user: {
-              select: {
-                user_id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-        disapprovals: {
-          include: {
-            user: {
-              select: {
-                user_id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
+        package: true,
+        project: true,
         comments: {
+          orderBy: {
+            created_at: 'asc',
+          },
           include: {
             user: {
               select: {
-                user_id: true,
                 name: true,
-                email: true,
-              },
-            },
-          },
-          orderBy: {
-            created_at: 'desc',
-          },
+                email: true
+              }
+            }
+          }
         },
       },
     });
   }
 
-  async addApproval(projectWatchlistId: string, userId: string) {
-    return this.prisma.projectWatchlistApproval.upsert({
+  async updateWatchlistPackageStatus(projectWatchlistId: string, status: string, userId?: string) {
+    const updateData: any = {
+      status: status,
+    };
+
+    if (status === 'approved' && userId) {
+      updateData.approved_by = userId;
+      updateData.approved_at = new Date();
+    } else if (status === 'rejected' && userId) {
+      updateData.rejected_by = userId;
+      updateData.rejected_at = new Date();
+    }
+
+    return this.prisma.projectWatchlistPackage.update({
       where: {
-        project_watchlist_id_user_id: {
-          project_watchlist_id: projectWatchlistId,
-          user_id: userId,
-        },
+        id: projectWatchlistId,
       },
-      update: {
-        approved_at: new Date(),
-      },
-      create: {
-        project_watchlist_id: projectWatchlistId,
-        user_id: userId,
-      },
+      data: updateData,
     });
   }
 
-  async addDisapproval(projectWatchlistId: string, userId: string) {
-    return this.prisma.projectWatchlistDisapproval.upsert({
-      where: {
-        project_watchlist_id_user_id: {
-          project_watchlist_id: projectWatchlistId,
-          user_id: userId,
-        },
-      },
-      update: {
-        disapproved_at: new Date(),
-      },
-      create: {
-        project_watchlist_id: projectWatchlistId,
-        user_id: userId,
-      },
-    });
-  }
-
-  async addComment(projectWatchlistId: string, userId: string, comment: string) {
-    return this.prisma.projectWatchlistComment.create({
+  async addWatchlistComment(projectWatchlistId: string, userId: string, comment: string) {
+    return this.prisma.watchlistComment.create({
       data: {
-        project_watchlist_id: projectWatchlistId,
+        project_watchlist_package_id: projectWatchlistId,
         user_id: userId,
-        comment,
+        comment: comment,
       },
     });
   }
+
+  // REMOVED: Old watchlist approval/comment methods - replaced with new Packages system
 
   async updateProject(projectId: string, updateProjectDto: UpdateProjectDto) {
     return this.prisma.project.update({

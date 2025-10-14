@@ -68,7 +68,7 @@ export class GitHubService {
     try {
       // Get the test user with GitHub token
       const user = await this.prisma.user.findUnique({
-        where: { email: 'test@example.com' },
+        where: { user_id: 'user-123' },
         select: { access_token: true, github_username: true }
       });
 

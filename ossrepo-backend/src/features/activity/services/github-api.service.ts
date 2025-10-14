@@ -72,6 +72,17 @@ export class GitHubApiService {
       'https://api.github.com',
     );
     this.token = this.configService.get<string>('GITHUB_TOKEN');
+    
+    // Debug logging
+    this.logger.log(`🔑 GitHub API Service initialized`);
+    this.logger.log(`🌐 Base URL: ${this.baseUrl}`);
+    this.logger.log(`🔐 Token present: ${!!this.token}`);
+    this.logger.log(`🔐 Token preview: ${this.token ? this.token.substring(0, 10) + '...' : 'None'}`);
+    
+    // Check if GITHUB_TOKEN is in process.env
+    const envToken = process.env.GITHUB_TOKEN;
+    this.logger.log(`🔍 Process.env.GITHUB_TOKEN present: ${!!envToken}`);
+    this.logger.log(`🔍 Process.env.GITHUB_TOKEN preview: ${envToken ? envToken.substring(0, 10) + '...' : 'None'}`);
   }
 
   async getCommits(
@@ -223,6 +234,32 @@ export class GitHubApiService {
     }
   }
 
+  async getPackageJson(owner: string, repo: string): Promise<any> {
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/package.json`;
+    this.logger.log(`📦 Fetching package.json from GitHub API: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: this.getHeaders(),
+    });
+
+    if (!response.ok) {
+      this.logger.log(`⚠️ Could not fetch package.json: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    // Decode base64 content
+    if (data.content) {
+      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+      const packageJson = JSON.parse(content);
+      this.logger.log(`✅ Fetched package.json with ${Object.keys(packageJson.dependencies || {}).length} dependencies`);
+      return packageJson;
+    }
+    
+    return null;
+  }
+
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.v3+json',
@@ -230,7 +267,10 @@ export class GitHubApiService {
     };
 
     if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+      headers['Authorization'] = `token ${this.token}`;
+      this.logger.log(`🔐 Using GitHub token for API calls`);
+    } else {
+      this.logger.warn(`⚠️ No GitHub token available - API calls may be rate limited`);
     }
 
     return headers;

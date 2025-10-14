@@ -279,6 +279,39 @@ export class PackageSearchService {
     };
   }
 
+  async getPackageById(id: string, version?: string) {
+    console.log(`================== GET PACKAGE BY ID: ${id} (version: ${version || 'latest'}) ==================`);
+    
+    // 1. Find package by ID in NPM cache
+    const cachedPackage = await this.npmRepo.findById(id);
+    
+    if (!cachedPackage) {
+      console.log(`Package with ID ${id} not found in cache`);
+      return null;
+    }
+    
+    // 2. If version is specified, check if it matches
+    if (version && cachedPackage.version !== version) {
+      console.log(`Version mismatch: cached ${cachedPackage.version}, requested ${version}`);
+      // For now, return the cached version. In the future, we could fetch specific version
+    }
+    
+    // 3. Get GitHub data if available
+    let githubData: GitHubRepository | null = null;
+    if (cachedPackage.repo_url) {
+      githubData = await this.githubRepo.findByUrl(cachedPackage.repo_url);
+    }
+    
+    // 4. Add OSV vulnerabilities if available
+    const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(cachedPackage.package_name);
+    
+    return {
+      ...cachedPackage,
+      githubRepo: githubData,
+      osv_vulnerabilities,
+    };
+  }
+
   async forceRefreshCache(
     repoUrl?: string,
   ): Promise<{ clearedCount?: number; refreshed?: boolean }> {

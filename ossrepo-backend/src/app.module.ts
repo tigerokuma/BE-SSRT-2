@@ -14,6 +14,7 @@ import { SbomModule } from './features/sbom/sbom.module';
 import { ProjectModule } from './features/project/project.module';
 import { GitHubModule } from './features/github/github.module';
 import { WebhookModule } from './features/webhooks/webhook.module';
+import { DependenciesModule } from './features/dependencies/dependencies.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { WebhookModule } from './features/webhooks/webhook.module';
     ProjectModule,
     GitHubModule,
     WebhookModule,
+    DependenciesModule,
   ],
 })
 export class AppModule {}

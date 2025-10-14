@@ -104,6 +104,28 @@ export class ProjectService {
     return this.projectRepository.getProjectWithBranch(projectId);
   }
 
+  async getProjectProgress(projectId: string) {
+    const project = await this.projectRepository.getProjectWithBranch(projectId);
+    if (!project?.monitoredBranch) {
+      return { progress: 0, totalDependencies: 0, completedDependencies: 0 };
+    }
+
+    const dependencies = await this.projectRepository.getBranchDependencies(project.monitoredBranch.id);
+    const completedDependencies = dependencies.filter(dep => 
+      dep.package_id && dep.package && dep.package.status === 'done'
+    );
+
+    const progress = dependencies.length > 0 
+      ? Math.round((completedDependencies.length / dependencies.length) * 100)
+      : 0;
+
+    return {
+      progress,
+      totalDependencies: dependencies.length,
+      completedDependencies: completedDependencies.length
+    };
+  }
+
   async getProjectUsers(projectId: string) {
     return this.projectRepository.getProjectUsers(projectId);
   }
@@ -175,17 +197,15 @@ export class ProjectService {
     return this.projectRepository.getProjectWatchlistReview(projectWatchlistId);
   }
 
-  async addApproval(projectWatchlistId: string, userId: string) {
-    return this.projectRepository.addApproval(projectWatchlistId, userId);
+  async updateWatchlistPackageStatus(watchlistId: string, status: string, userId?: string) {
+    return this.projectRepository.updateWatchlistPackageStatus(watchlistId, status, userId);
   }
 
-  async addDisapproval(projectWatchlistId: string, userId: string) {
-    return this.projectRepository.addDisapproval(projectWatchlistId, userId);
+  async addWatchlistComment(watchlistId: string, userId: string, comment: string) {
+    return this.projectRepository.addWatchlistComment(watchlistId, userId, comment);
   }
 
-  async addComment(projectWatchlistId: string, userId: string, comment: string) {
-    return this.projectRepository.addComment(projectWatchlistId, userId, comment);
-  }
+  // REMOVED: Old watchlist approval/comment methods - replaced with new Packages system
 
   async updateProject(projectId: string, updateProjectDto: any) {
     return this.projectRepository.updateProject(projectId, updateProjectDto);
@@ -456,5 +476,154 @@ export class ProjectService {
       projectCount: allProjects.length,
       branchCount: allMonitoredBranches.length,
     };
+  }
+
+  async getWatchlistPackagesStatus(projectId: string) {
+    try {
+      const watchlistPackages = await this.prisma.projectWatchlistPackage.findMany({
+        where: {
+          project_id: projectId,
+        },
+        include: {
+          package: true,
+        },
+      });
+
+      // Return status information for each package
+      return watchlistPackages.map(wp => ({
+        id: wp.id,
+        packageId: wp.package_id,
+        packageName: wp.package.name,
+        status: wp.package.status, // queued, fast, done
+        hasScores: !!(wp.package.total_score !== null && wp.package.total_score !== undefined),
+        addedAt: wp.added_at,
+        addedBy: wp.added_by,
+      }));
+    } catch (error) {
+      console.error('Error fetching watchlist packages status:', error);
+      throw error;
+    }
+  }
+
+  async refreshWatchlistPackages(projectId: string) {
+    try {
+      console.log('🔄 Refreshing watchlist packages for project:', projectId);
+      
+      const watchlistPackages = await this.prisma.projectWatchlistPackage.findMany({
+        where: {
+          project_id: projectId,
+        },
+        include: {
+          package: true,
+          addedByUser: {
+            select: {
+              name: true,
+              email: true,
+            }
+          },
+          approvedByUser: {
+            select: {
+              name: true,
+              email: true,
+            }
+          },
+          rejectedByUser: {
+            select: {
+              name: true,
+              email: true,
+            }
+          },
+          comments: {
+            include: {
+              user: {
+                select: {
+                  name: true,
+                  email: true,
+                }
+              }
+            }
+          }
+        },
+      });
+
+      console.log('📊 Found watchlist packages:', watchlistPackages.length);
+      watchlistPackages.forEach(wp => {
+        console.log(`Package ${wp.package.name}: status=${wp.package.status}, total_score=${wp.package.total_score}, hasScores=${wp.package.total_score !== null}`);
+      });
+
+      // Return full package data with all scores and metadata
+      return watchlistPackages.map(wp => ({
+        id: wp.id,
+        name: wp.package.name,
+        version: 'Unknown', // Version not stored in Packages model
+        addedBy: wp.addedByUser?.name || wp.addedByUser?.email || wp.added_by,
+        addedByUser: wp.addedByUser,
+        addedAt: wp.added_at,
+        added_at: wp.added_at,
+        comments: wp.comments,
+        riskScore: wp.package.total_score || 0,
+        status: wp.status,
+        approvedBy: wp.approvedByUser?.name || wp.approved_by,
+        approvedByUser: wp.approvedByUser,
+        rejectedBy: wp.rejectedByUser?.name || wp.rejected_by,
+        rejectedByUser: wp.rejectedByUser,
+        approvedAt: wp.approved_at,
+        rejectedAt: wp.rejected_at,
+        healthScore: wp.package.scorecard_score || 0,
+        activityScore: wp.package.activity_score || 0,
+        busFactor: wp.package.bus_factor_score || 0,
+        license: wp.package.license || 'Unknown',
+        vulnerabilities: wp.package.vulnerability_score || 0,
+        pastVulnerabilities: 0, // This would need to be calculated separately
+        package: {
+          id: wp.package.id,
+          name: wp.package.name,
+          total_score: wp.package.total_score,
+          vulnerability_score: wp.package.vulnerability_score,
+          activity_score: wp.package.activity_score,
+          bus_factor_score: wp.package.bus_factor_score,
+          license_score: wp.package.license_score,
+          scorecard_score: wp.package.scorecard_score,
+          health_score: wp.package.scorecard_score,
+          license: wp.package.license,
+          repo_url: wp.package.repo_url,
+          status: wp.package.status,
+          stars: wp.package.stars,
+          contributors: wp.package.contributors,
+          summary: wp.package.summary,
+        }
+      }));
+    } catch (error) {
+      console.error('Error refreshing watchlist packages:', error);
+      throw error;
+    }
+  }
+
+  async getQueueStatus() {
+    try {
+      // Check if there are any pending jobs in the fast setup queue
+      const fastSetupQueue = this.projectSetupQueue;
+      const waiting = await fastSetupQueue.getWaiting();
+      const active = await fastSetupQueue.getActive();
+      const completed = await fastSetupQueue.getCompleted();
+      const failed = await fastSetupQueue.getFailed();
+
+      return {
+        fastSetupQueue: {
+          waiting: waiting.length,
+          active: active.length,
+          completed: completed.length,
+          failed: failed.length,
+          total: waiting.length + active.length + completed.length + failed.length
+        },
+        message: 'Queue status retrieved successfully'
+      };
+    } catch (error) {
+      console.error('Error getting queue status:', error);
+      return {
+        error: error.message,
+        message: 'Failed to get queue status'
+      };
+    }
   }
 }
