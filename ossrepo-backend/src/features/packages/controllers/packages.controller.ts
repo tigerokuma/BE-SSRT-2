@@ -41,6 +41,39 @@ export class PackagesController {
     };
   }
 
+  @Get('id/:id')
+  async getPackageById(
+    @Param('id') id: string,
+    @Query('version') version?: string,
+    @Query('view') view?: 'summary' | 'details',
+  ) {
+    if (!id || id.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    // Validate view parameter
+    if (view && !['summary', 'details'].includes(view)) {
+      throw new BadRequestException(
+        'View parameter must be "summary" or "details"',
+      );
+    }
+
+    // Default to details view for dependency details screen
+    const selectedView = view || 'details';
+
+    const result = await this.packagesService.getPackageById(
+      id.trim(),
+      version,
+      selectedView,
+    );
+
+    if (!result) {
+      throw new NotFoundException(`Package with ID '${id}' not found`);
+    }
+
+    return result;
+  }
+
   @Get(':name')
   async getPackage(
     @Param('name') name: string,

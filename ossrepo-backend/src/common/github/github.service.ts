@@ -17,7 +17,7 @@ export class GitHubService {
     try {
       // Get the test user with GitHub token from database
       const user = await this.prisma.user.findUnique({
-        where: { email: 'test@example.com' },
+        where: { user_id: 'user-123' },
         select: { access_token: true }
       });
 
@@ -113,19 +113,9 @@ export class GitHubService {
         return null; // Skip invalid versions
       };
       
-      // Extract production dependencies
+      // Extract production dependencies only (exclude devDependencies)
       if (packageJson.dependencies) {
         for (const [name, version] of Object.entries(packageJson.dependencies)) {
-          const cleanedVersion = cleanVersion(version as string);
-          if (cleanedVersion) {
-            dependencies.push({ name, version: cleanedVersion });
-          }
-        }
-      }
-      
-      // Extract dev dependencies
-      if (packageJson.devDependencies) {
-        for (const [name, version] of Object.entries(packageJson.devDependencies)) {
           const cleanedVersion = cleanVersion(version as string);
           if (cleanedVersion) {
             dependencies.push({ name, version: cleanedVersion });

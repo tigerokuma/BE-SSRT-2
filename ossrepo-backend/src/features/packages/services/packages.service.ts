@@ -39,6 +39,20 @@ export class PackagesService {
     return await this.packageSearchService.searchVulnerabilities(packageName);
   }
 
+  async getPackageById(
+    id: string,
+    version?: string,
+    view: 'summary' | 'details' = 'details',
+  ): Promise<PackageCardDto | PackageDetailsDto | null> {
+    const packageData = await this.packageSearchService.getPackageById(id, version);
+
+    if (!packageData) return null;
+
+    return view === 'details'
+      ? this.transformToDetails(packageData)
+      : this.transformToCard(packageData);
+  }
+
   // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {
