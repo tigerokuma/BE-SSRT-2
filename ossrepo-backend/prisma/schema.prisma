@@ -152,6 +152,74 @@ model Packages {
   // Relations
   projectWatchlist      ProjectWatchlistPackage[]
   branchDependencies    BranchDependency[]
+  commits               PackageCommit[]
+  packageContributors   PackageContributor[]
+  scorecardHistory      PackageScorecardHistory[]
+}
+
+model PackageCommit {
+  id              String   @id @default(uuid())
+  package_id      String
+  sha             String
+  author          String
+  author_email    String
+  message         String
+  timestamp       DateTime
+  lines_added     Int      @default(0)
+  lines_deleted   Int      @default(0)
+  files_changed   Int      @default(0)
+  diff_data       Json?
+  created_at      DateTime @default(now())
+  
+  package         Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  
+  @@unique([package_id, sha])
+  @@index([package_id])
+  @@index([timestamp])
+  @@map("package_commits")
+}
+
+model PackageContributor {
+  id                    String   @id @default(uuid())
+  package_id            String
+  author_email          String
+  author_name           String?
+  total_commits         Int
+  avg_lines_added       Float
+  avg_lines_deleted     Float
+  avg_files_changed     Float
+  stddev_lines_added    Float
+  stddev_lines_deleted  Float
+  stddev_files_changed  Float
+  commit_time_histogram Json
+  typical_days_active   Json
+  files_worked_on       Json     // Histogram of files the contributor has worked on
+  first_commit_date     DateTime
+  last_commit_date      DateTime
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  
+  package               Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  
+  @@unique([package_id, author_email])
+  @@index([package_id])
+  @@map("package_contributors")
+}
+
+model PackageScorecardHistory {
+  id             String   @id @default(uuid())
+  package_id     String
+  commit_sha     String
+  score          Float
+  scorecard_data Json
+  source         String   // 'api' or 'local'
+  analyzed_at    DateTime @default(now())
+  
+  package        Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  
+  @@index([package_id])
+  @@index([commit_sha])
+  @@map("package_scorecard_history")
 }
 
 model Watchlist {

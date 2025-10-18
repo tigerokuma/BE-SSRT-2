@@ -137,6 +137,31 @@ export class PackagesController {
     };
   }
 
+  @Get('dependency/:id/:version')
+  async getDependencyById(
+    @Param('id') id: string,
+    @Param('version') version: string,
+  ) {
+    if (!id || id.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    if (!version || version.trim().length === 0) {
+      throw new BadRequestException('Version is required');
+    }
+
+    const result = await this.packagesService.getDependencyById(
+      id.trim(),
+      version.trim(),
+    );
+
+    if (!result) {
+      throw new NotFoundException(`Dependency with ID '${id}' and version '${version}' not found`);
+    }
+
+    return result;
+  }
+
   @Delete('cache/refresh')
   async forceRefreshCache(@Query('repo_url') repoUrl?: string) {
     const result = await this.packagesService.forceRefreshCache(repoUrl);

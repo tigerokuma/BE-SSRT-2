@@ -288,6 +288,17 @@ export class FastSetupProcessor {
 
       this.logger.log(`✅ Fast setup completed for package: ${packageName}`);
       
+      // Queue full setup job after fast setup completes
+      if (repoUrl && finalPackageId) {
+        await this.dependencyQueueService.queueFullSetup({
+          packageId: finalPackageId,
+          packageName: packageName,
+          repoUrl: repoUrl,
+          projectId: projectId,
+        });
+        this.logger.log(`📋 Queued full-setup job for package: ${packageName}`);
+      }
+      
       // If this was triggered by a branch dependency, link it and check completion
       if (branchDependencyId && branchId) {
         await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
