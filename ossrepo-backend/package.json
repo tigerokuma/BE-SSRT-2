@@ -36,7 +36,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schedule": "^6.0.0",
     "@nestjs/swagger": "^11.2.0",
-    "@octokit/rest": "^22.0.0",
+    "@octokit/rest": "^19.0.13",
     "axios": "^1.10.0",
     "bull": "^4.16.5",
     "bullmq": "^5.56.10",
