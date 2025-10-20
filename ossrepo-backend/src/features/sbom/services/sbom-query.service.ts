@@ -1,4 +1,4 @@
-import { Injectable, Logger, Body } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
 
 @Injectable()

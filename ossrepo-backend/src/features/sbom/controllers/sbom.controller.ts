@@ -1,13 +1,14 @@
-import { Body, Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param } from '@nestjs/common';
 import { SbomBuilderService } from '../services/sbom-builder.service';
 import { SbomQueryService } from '../services/sbom-query.service';
-import { GraphParamsDto, SearchParamsDto } from '../dto/sbom.dto';
+import { SbomMemgraph } from '../services/sbom-graph-builder.service';
 
 @Controller('sbom')
 export class SbomController {
   constructor(
     private readonly sbomBuilderService: SbomBuilderService,
     private readonly sbomQueryService: SbomQueryService,
+    private readonly sbomMemgraph: SbomMemgraph,
   ) {}
 
   @Get('dep-list/:user_id')
@@ -17,76 +18,79 @@ export class SbomController {
 
   @Get('watchlist-metadata/:watchlist_id')
   async getWatchlistMetadataSbom(@Param('watchlist_id') watchlist_id: string) {
-    const sbom = (await this.sbomQueryService.getWatchSbom(watchlist_id))?.sbom;
-    const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return await this.sbomQueryService.getWatchMetadataSbom(sbomText);
+    return await this.sbomMemgraph.getWatchSbom(watchlist_id);
   }
 
   @Get('user-watchlist-metadata/:user_id')
   async getUserWatchlistMetadataSbom(@Param('user_id') user_id: string) {
-    const sbom = (await this.sbomQueryService.getUserSbom(user_id))?.sbom;
-    const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return await this.sbomQueryService.getWatchMetadataSbom(sbomText);
+    return await this.sbomQueryService.getUserSbom(user_id);
   }
 
-  @Get('graph-dependencies/:id/:node_id')
-  async getWatchGraphDependencies(
-    @Param() params: GraphParamsDto,
-    @Query('vulns') vulns?: string,
-  ) {
-    const vulnerablePackages = vulns ? vulns.split(',') : [];
-    const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
-    const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomQueryService.getNodeDeps(
-      sbomText,
-      params.node_id,
-      vulnerablePackages,
-    );
-  }
+  // @Get('graph-dependencies/:id/:node_id')
+  // async getWatchGraphDependencies(
+  //   @Param() params: GraphParamsDto,
+  //   @Query('vulns') vulns?: string,
+  // ) {
+  //   const vulnerablePackages = vulns ? vulns.split(',') : [];
+  //   const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
+  //   const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
+  //   return this.sbomQueryService.getNodeDeps(
+  //     sbomText,
+  //     params.node_id,
+  //     vulnerablePackages,
+  //   );
+  // }
 
-  @Get('user-graph-dependencies/:id/:node_id')
-  async getUserGraphDependencies(
-    @Param() params: GraphParamsDto,
-    @Query('vulns') vulns?: string,
-  ) {
-    const vulnerablePackages = vulns ? vulns.split(',') : [];
-    const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
-    const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    const temp = this.sbomQueryService.getNodeDeps(
-      sbomText,
-      params.node_id,
-      vulnerablePackages,
-    );
-    return temp;
-  }
+  // @Get('user-graph-dependencies/:id/:node_id')
+  // async getUserGraphDependencies(
+  //   @Param() params: GraphParamsDto,
+  //   @Query('vulns') vulns?: string,
+  // ) {
+  //   const vulnerablePackages = vulns ? vulns.split(',') : [];
+  //   const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
+  //   const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
+  //   const temp = this.sbomQueryService.getNodeDeps(
+  //     sbomText,
+  //     params.node_id,
+  //     vulnerablePackages,
+  //   );
+  //   return temp;
+  // }
 
-  @Get('search/:id/:search')
-  async searchWatchGraphDependencies(@Param() params: SearchParamsDto) {
-    const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
-    const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
-  }
+  // @Get('search/:id/:search')
+  // async searchWatchGraphDependencies(@Param() params: SearchParamsDto) {
+  //   const sbom = (await this.sbomQueryService.getWatchSbom(params.id))?.sbom;
+  //   const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
+  //   return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
+  // }
 
-  @Get('user-search/:id/:search')
-  async searchUserGraphDependencies(@Param() params: SearchParamsDto) {
-    const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
-    const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
-    return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
-  }
+  // @Get('user-search/:id/:search')
+  // async searchUserGraphDependencies(@Param() params: SearchParamsDto) {
+  //   const sbom = (await this.sbomQueryService.getUserSbom(params.id))?.sbom;
+  //   const sbomText = typeof sbom === 'string' ? sbom : JSON.stringify(sbom);
+  //   return this.sbomQueryService.searchNodeDeps(sbomText, params.search);
+  // }
 
-  @Get('watchlist/:watchlist_id')
-  async getWatchlistSbom(@Param('watchlist_id') watchlist_id: string) {
-    return (await this.sbomQueryService.getWatchSbom(watchlist_id))?.sbom;
-  }
+  // @Get('watchlist/:watchlist_id')
+  // async getWatchlistSbom(@Param('watchlist_id') watchlist_id: string) {
+  //   return (await this.sbomQueryService.getWatchSbom(watchlist_id))?.sbom;
+  // }
 
-  @Get('user-watchlist/:user_id')
-  async getUserSbom(@Param('user_id') user_id: string) {
-    return (await this.sbomQueryService.getUserSbom(user_id))?.sbom;
-  }
+  // @Get('user-watchlist/:user_id')
+  // async getUserSbom(@Param('user_id') user_id: string) {
+  //   return (await this.sbomQueryService.getUserSbom(user_id))?.sbom;
+  // }
 
   @Post('generate-SBOM/:watchlist_id')
   async genSbom(@Param('watchlist_id') watchlist_id: string) {
-    return await this.sbomBuilderService.addSbom(watchlist_id);
+    // Generate SBOM synchronously
+    const sbomJson = await this.sbomBuilderService.addSbom(watchlist_id);
+    
+    // Store in Memgraph
+    await this.sbomMemgraph.createSbom(watchlist_id, 'watchlist', 'cdxgen', sbomJson.metadata);
+    await this.sbomMemgraph.importCycloneDxSbom(sbomJson, watchlist_id);
+    
+    return sbomJson;
   }
 
   @Post('merge-SBOM/:user_id')

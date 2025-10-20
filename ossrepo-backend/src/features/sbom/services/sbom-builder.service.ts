@@ -1,4 +1,4 @@
-import { Injectable, Logger, Body } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
 import { CreateSbomDto } from '../dto/sbom.dto';
 import { simpleGit } from 'simple-git';
@@ -146,6 +146,47 @@ export class SbomBuilderService {
       this.logger.log('SBOM generation was unsuccessful');
     }
     this.logger.log('SBOM generation successful');
+
+    // Post-process: ensure licenses are populated using purl (npm/GitHub)
+    try {
+      const raw = fs.readFileSync(outputPath, 'utf-8');
+      const sbom = JSON.parse(raw);
+
+      if (Array.isArray(sbom.components)) {
+        // Find components that need license enrichment
+        const componentsNeedingLicense = sbom.components.filter(component => {
+          const hasLicenseArray = Array.isArray(component.licenses) && component.licenses.length > 0;
+          const currentLicense = hasLicenseArray ? (component.licenses[0]?.license?.id || component.licenses[0]?.license?.name) : undefined;
+          return !currentLicense && component.purl;
+        });
+
+        if (componentsNeedingLicense.length > 0) {
+          // Fetch licenses in parallel (batch of 10 to avoid rate limits)
+          const batchSize = 10;
+          for (let i = 0; i < componentsNeedingLicense.length; i += batchSize) {
+            const batch = componentsNeedingLicense.slice(i, i + batchSize);
+            const licensePromises = batch.map(async (component) => {
+              try {
+                const fetched = await this.getLicenseFromPurl(component.purl);
+                if (fetched && typeof fetched === 'string') {
+                  component.licenses = [{ license: { id: fetched } }];
+                }
+              } catch (e) {
+                // ignore fetch errors per component
+              }
+            });
+            
+            await Promise.all(licensePromises);
+          }
+        }
+        
+        // write back enriched SBOM
+        fs.writeFileSync(outputPath, JSON.stringify(sbom, null, 2));
+      }
+    } catch (e) {
+      this.logger.warn(`License enrichment skipped: ${e?.message || e}`);
+    }
+
     return fs.readFileSync(outputPath, 'utf-8');
   }
 
@@ -157,6 +198,34 @@ export class SbomBuilderService {
       this.logger.error(`⚠️ Failed to clean up temp folder: ${err.message}`);
     }
   }
+
+  private async getLicenseFromPurl(purl: string): Promise<string> {
+    try {
+      // Example purl: "pkg:npm/lodash@4.17.21"
+      const match = purl.match(/^pkg:(\w+)\/([^@]+)(?:@(.+))?/);
+      if (!match) return "";
+
+      const [, type, name, version] = match;
+      if (type === 'npm') {
+        const res = await fetch(`https://registry.npmjs.org/${name}`);
+        if (res.ok) {
+          const data = await res.json();
+          // Handle different license formats from npm registry
+          if (typeof data.license === 'string') {
+            return data.license;
+          } else if (typeof data.license === 'object' && data.license !== null) {
+            return data.license.type || data.license.name || "";
+          }
+        }
+      }
+      // Add similar logic for PyPI, Maven, etc.
+      return "";
+    } catch (error) {
+      console.error(`Error fetching license for ${purl}: ${error}`);
+      return "";
+    }
+  }
+
 
   async addSbom(watchlistId: string) {
     const gitUrl = (await this.sbomRepo.getUrl(watchlistId))?.repo_url;

@@ -8,6 +8,7 @@ import { SbomController } from './controllers/sbom.controller';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { SbomProcessor } from './processors/sbom.processor';
+import { SbomMemgraph } from './services/sbom-graph-builder.service';
 
 @Module({
   imports: [BullModule.registerQueue({ name: 'sbom' })],
@@ -19,6 +20,7 @@ import { SbomProcessor } from './processors/sbom.processor';
     SbomProcessor,
     QueueModule,
     PrismaService,
+    SbomMemgraph,
   ],
   controllers: [SbomController],
   exports: [SbomBuilderService, SbomQueryService, SbomQueueService],
