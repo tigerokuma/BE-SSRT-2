@@ -2,10 +2,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Octokit } from '@octokit/rest';
+import { UserRepository } from '../user/user.repository';
+import {UserService} from "../user/user.service";
 
 @Injectable()
 export class GitHubService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly userService: UserService,
+  ) {}
 
   // ────────────────────────────────────────────────────────────────────────────
   // Helpers
@@ -30,6 +35,15 @@ export class GitHubService {
   // ────────────────────────────────────────────────────────────────────────────
   // Repositories (current)
   // ────────────────────────────────────────────────────────────────────────────
+
+  async getUserRepositoriesByClerkId(clerk_id: string) {
+    const user = await this.userService.getUserByClerkId(clerk_id);
+    if (!user) {
+      // choose your behavior: mock, 404, or create
+      throw new Error(`No local user for clerk_id=${clerk_id}`);
+    }
+    return this.getUserRepositoriesByUserId(user.user_id);
+  }
 
   /**
    * Return up to 100 repositories (public + private; owner + collaborator + org)
