@@ -282,7 +282,7 @@ export class ProjectRepository {
       data: {
         project_id: projectId,
         package_id: packageRecord.id,
-        added_by: 'user-123', // Default user for now
+        added_by: userId, // Default user for now
         status: 'pending'
       },
     });
