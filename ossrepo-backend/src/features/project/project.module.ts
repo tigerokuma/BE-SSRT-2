@@ -9,6 +9,7 @@ import { WebhookModule } from 'src/common/webhook/webhook.module';
 import { DependenciesModule } from '../dependencies/dependencies.module';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { ManualProcessorService } from 'src/common/queue/manual-processor.service';
+import {UserModule} from "../user/user.module";
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { ManualProcessorService } from 'src/common/queue/manual-processor.servic
     GitHubModule,
     WebhookModule,
     DependenciesModule,
-    QueueModule
+    QueueModule,
+    UserModule
   ],
   controllers: [ProjectController],
   providers: [ProjectService, ProjectRepository, ProjectSetupProcessor, ManualProcessorService],
