@@ -122,10 +122,11 @@ export class ActivityService {
           },
         });
 
-        await this.sbomQueueService.fullProcessSbom(
-          userWatchlistEntry.watchlist_id,
-          user.user_id,
-        );
+        // SBOM generation moved to project creation for optimization
+        // await this.sbomQueueService.fullProcessSbom(
+        //   userWatchlistEntry.watchlist_id,
+        //   user.user_id,
+        // );
 
         shouldQueueSetup = true;
       }

@@ -41,6 +41,39 @@ export class PackagesController {
     };
   }
 
+  @Get('id/:id')
+  async getPackageById(
+    @Param('id') id: string,
+    @Query('version') version?: string,
+    @Query('view') view?: 'summary' | 'details',
+  ) {
+    if (!id || id.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    // Validate view parameter
+    if (view && !['summary', 'details'].includes(view)) {
+      throw new BadRequestException(
+        'View parameter must be "summary" or "details"',
+      );
+    }
+
+    // Default to details view for dependency details screen
+    const selectedView = view || 'details';
+
+    const result = await this.packagesService.getPackageById(
+      id.trim(),
+      version,
+      selectedView,
+    );
+
+    if (!result) {
+      throw new NotFoundException(`Package with ID '${id}' not found`);
+    }
+
+    return result;
+  }
+
   @Get(':name')
   async getPackage(
     @Param('name') name: string,
@@ -102,6 +135,31 @@ export class PackagesController {
       count: vulnerabilities.length,
       source: 'osv_api',
     };
+  }
+
+  @Get('dependency/:id/:version')
+  async getDependencyById(
+    @Param('id') id: string,
+    @Param('version') version: string,
+  ) {
+    if (!id || id.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    if (!version || version.trim().length === 0) {
+      throw new BadRequestException('Version is required');
+    }
+
+    const result = await this.packagesService.getDependencyById(
+      id.trim(),
+      version.trim(),
+    );
+
+    if (!result) {
+      throw new NotFoundException(`Dependency with ID '${id}' and version '${version}' not found`);
+    }
+
+    return result;
   }
 
   @Delete('cache/refresh')

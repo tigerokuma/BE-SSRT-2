@@ -6,6 +6,7 @@ import { GitHubService } from './github.service';
 import { GitHubRepository } from 'generated/prisma';
 import { OsvVulnerabilityService } from './osv-vulnerability.service';
 import { OsvVulnerabilityRepository } from '../repositories/osv-vulnerability.repository';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
 export class PackageSearchService {
@@ -16,6 +17,7 @@ export class PackageSearchService {
     private readonly githubService: GitHubService,
     private readonly osvVulnerabilityService: OsvVulnerabilityService,
     private readonly osvVulnerabilityRepository: OsvVulnerabilityRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
   async searchPackages(name: string) {
@@ -274,6 +276,119 @@ export class PackageSearchService {
     // 4. Manually combine NPM + GitHub + OSV data
     return {
       ...npmPackage,
+      githubRepo: githubData,
+      osv_vulnerabilities,
+    };
+  }
+
+  async getPackageById(id: string, version?: string) {
+    console.log(`================== GET PACKAGE BY ID: ${id} (version: ${version || 'latest'}) ==================`);
+    
+    // Check if this is a watchlist package (version = 'watchlist')
+    if (version === 'watchlist') {
+      console.log(`Fetching watchlist package with ID: ${id}`);
+      
+      // Find package in the new Packages table
+      const watchlistPackage = await this.prisma.packages.findUnique({
+        where: { id: id },
+        include: {
+          commits: {
+            orderBy: { timestamp: 'desc' },
+            take: 100
+          },
+          packageContributors: true,
+          scorecardHistory: {
+            orderBy: { analyzed_at: 'desc' },
+            take: 10
+          }
+        }
+      });
+      
+      if (!watchlistPackage) {
+        console.log(`Watchlist package with ID ${id} not found`);
+        return null;
+      }
+      
+      // Transform to expected format
+      return {
+        id: watchlistPackage.id,
+        name: watchlistPackage.name,
+        version: 'watchlist', // Special version indicator
+        description: watchlistPackage.summary || 'No description available',
+        license: watchlistPackage.license,
+        repo_url: watchlistPackage.repo_url,
+        stars: watchlistPackage.stars,
+        contributors: watchlistPackage.contributors,
+        total_score: watchlistPackage.total_score,
+        activity_score: watchlistPackage.activity_score,
+        bus_factor_score: watchlistPackage.bus_factor_score,
+        scorecard_score: watchlistPackage.scorecard_score,
+        vulnerability_score: watchlistPackage.vulnerability_score,
+        license_score: watchlistPackage.license_score,
+        status: watchlistPackage.status,
+        created_at: watchlistPackage.created_at,
+        updated_at: watchlistPackage.updated_at,
+        // Include related data
+        commits: watchlistPackage.commits,
+        contributorProfiles: watchlistPackage.packageContributors,
+        scorecardHistory: watchlistPackage.scorecardHistory,
+        isWatchlistPackage: true
+      };
+    }
+    
+    // Original logic for regular packages
+    // 1. Find package by ID in NPM cache
+    const cachedPackage = await this.npmRepo.findById(id);
+    
+    if (!cachedPackage) {
+      console.log(`Package with ID ${id} not found in cache`);
+      return null;
+    }
+    
+    // 2. If version is specified, check if it matches
+    if (version && cachedPackage.version !== version) {
+      console.log(`Version mismatch: cached ${cachedPackage.version}, requested ${version}`);
+      // For now, return the cached version. In the future, we could fetch specific version
+    }
+    
+    // 3. Get GitHub data if available
+    let githubData: GitHubRepository | null = null;
+    if (cachedPackage.repo_url) {
+      githubData = await this.githubRepo.findByUrl(cachedPackage.repo_url);
+    }
+    
+    // 4. Add OSV vulnerabilities if available
+    const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(cachedPackage.package_name);
+    
+    return {
+      ...cachedPackage,
+      githubRepo: githubData,
+      osv_vulnerabilities,
+    };
+  }
+
+  async getDependencyById(id: string, version: string) {
+    console.log(`================== GET DEPENDENCY BY ID: ${id} (version: ${version}) ==================`);
+    
+    // 1. Find package by ID in Packages table
+    const packageData = await this.npmRepo.findDependencyById(id);
+    
+    if (!packageData) {
+      console.log(`Dependency with ID ${id} not found`);
+      return null;
+    }
+    
+    // 2. Get GitHub data if available
+    let githubData: GitHubRepository | null = null;
+    if (packageData.repo_url) {
+      githubData = await this.githubRepo.findByUrl(packageData.repo_url);
+    }
+    
+    // 3. Add OSV vulnerabilities if available
+    const osv_vulnerabilities = await this.osvVulnerabilityRepository.findByPackageName(packageData.name);
+    
+    return {
+      ...packageData,
       githubRepo: githubData,
       osv_vulnerabilities,
     };

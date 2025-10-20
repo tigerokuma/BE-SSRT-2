@@ -12,6 +12,18 @@ export class NpmPackagesRepository {
     });
   }
 
+  async findById(packageId: string): Promise<any | null> {
+    return this.prisma.packages.findUnique({
+      where: { id: packageId },
+    });
+  }
+
+  async findDependencyById(packageId: string): Promise<any | null> {
+    return this.prisma.packages.findUnique({
+      where: { id: packageId },
+    });
+  }
+
   async searchByName(name: string): Promise<NpmPackage[]> {
     return this.prisma.npmPackage.findMany({
       where: {

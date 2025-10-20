@@ -22,6 +22,10 @@ async function bootstrap() {
       new BullAdapter(app.get(getQueueToken('vulnerability-check'))),
       new BullAdapter(app.get(getQueueToken('health-check'))),
       new BullAdapter(app.get(getQueueToken('project-setup'))),
+      new BullAdapter(app.get(getQueueToken('dependency-fast-setup'))),
+      new BullAdapter(app.get(getQueueToken('dependency-full-setup'))),
+      new BullAdapter(app.get(getQueueToken('scorecard-priority'))),
+      new BullAdapter(app.get(getQueueToken('scorecard-background'))),
     ],
     serverAdapter,
   });

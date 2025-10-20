@@ -3,11 +3,17 @@ import { ProjectService } from '../services/project.service';
 import { CreateProjectDto } from '../dto/create-project.dto';
 import { UpdateProjectDto } from '../dto/update-project.dto';
 import { CreateProjectCliDto } from '../dto/create-project-cli.dto';
+import { DependencyQueueService } from '../../dependencies/services/dependency-queue.service';
 import { AnalyzeProjectDto } from '../dto/analyze-project.dto';
+import { PrismaService } from 'src/common/prisma/prisma.service';
 
 @Controller('projects')
 export class ProjectController {
-  constructor(private readonly projectService: ProjectService) {}
+  constructor(
+    private readonly projectService: ProjectService,
+    private readonly dependencyQueueService: DependencyQueueService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Post()
   async createProject(@Body() createProjectDto: CreateProjectDto) {
@@ -27,10 +33,16 @@ export class ProjectController {
   @Get(':id/status')
   async getProjectStatus(@Param('id') id: string) {
     const project = await this.projectService.getProjectById(id);
+    const progress = await this.projectService.getProjectProgress(id);
     return {
       id: project.id,
       status: project.status,
       errorMessage: project.error_message,
+      progress: progress.progress,
+      totalDependencies: progress.totalDependencies,
+      completedDependencies: progress.completedDependencies,
+      health_score: project.health_score,
+      created_at: project.created_at,
     };
   }
 
@@ -74,33 +86,136 @@ export class ProjectController {
     return this.projectService.getProjectWatchlist(id);
   }
 
+  @Get(':id/watchlist/status')
+  async getWatchlistPackagesStatus(@Param('id') id: string) {
+    return this.projectService.getWatchlistPackagesStatus(id);
+  }
+
+  @Get(':id/watchlist/refresh')
+  async refreshWatchlistPackages(@Param('id') id: string) {
+    console.log('🔄 Refresh endpoint called for project:', id);
+    try {
+      const result = await this.projectService.refreshWatchlistPackages(id);
+      console.log('✅ Refresh endpoint success, returning', result.length, 'packages');
+      return result;
+    } catch (error) {
+      console.error('❌ Refresh endpoint error:', error);
+      throw error;
+    }
+  }
+
   @Get('watchlist/:watchlistId/review')
   async getProjectWatchlistReview(@Param('watchlistId') watchlistId: string) {
     return this.projectService.getProjectWatchlistReview(watchlistId);
   }
 
   @Post('watchlist/:watchlistId/approve')
-  async addApproval(
+  async approveWatchlistPackage(
     @Param('watchlistId') watchlistId: string,
     @Body() body: { userId: string }
   ) {
-    return this.projectService.addApproval(watchlistId, body.userId);
+    return this.projectService.updateWatchlistPackageStatus(watchlistId, 'approved', body.userId);
   }
 
-  @Post('watchlist/:watchlistId/disapprove')
-  async addDisapproval(
+  @Post('watchlist/:watchlistId/reject')
+  async rejectWatchlistPackage(
     @Param('watchlistId') watchlistId: string,
     @Body() body: { userId: string }
   ) {
-    return this.projectService.addDisapproval(watchlistId, body.userId);
+    return this.projectService.updateWatchlistPackageStatus(watchlistId, 'rejected', body.userId);
   }
 
   @Post('watchlist/:watchlistId/comment')
-  async addComment(
+  async addWatchlistComment(
     @Param('watchlistId') watchlistId: string,
     @Body() body: { userId: string; comment: string }
   ) {
-    return this.projectService.addComment(watchlistId, body.userId, body.comment);
+    return this.projectService.addWatchlistComment(watchlistId, body.userId, body.comment);
+  }
+
+  // REMOVED: Old watchlist approval/comment endpoints - replaced with new Packages system
+
+  @Post(':projectId/watchlist/add-package')
+  async addPackageToWatchlist(
+    @Param('projectId') projectId: string,
+    @Body() body: { packageName: string; repoUrl?: string; userId: string }
+  ) {
+    console.log('🎯 Adding package to watchlist:', {
+      projectId,
+      packageName: body.packageName,
+      repoUrl: body.repoUrl,
+      userId: body.userId,
+      timestamp: new Date().toISOString()
+    });
+    
+    try {
+      // Create or find the package
+      let packageRecord = await this.prisma.packages.findUnique({
+        where: { name: body.packageName }
+      });
+
+      if (!packageRecord) {
+        // Fetch license from npm API
+        let packageLicense = 'MIT'; // Default fallback
+        try {
+          const npmUrl = `https://registry.npmjs.org/${body.packageName}`;
+          const response = await fetch(npmUrl);
+          if (response.ok) {
+            const data = await response.json();
+            packageLicense = data.license || 'MIT';
+          }
+        } catch (error) {
+          console.log(`⚠️ Could not fetch license for ${body.packageName}, using MIT as default`);
+        }
+
+        packageRecord = await this.prisma.packages.create({
+          data: {
+            name: body.packageName,
+            repo_url: body.repoUrl,
+            license: packageLicense,
+            status: 'queued',
+          }
+        });
+      }
+
+      // Create the project watchlist package link
+      const projectWatchlistPackage = await this.prisma.projectWatchlistPackage.create({
+        data: {
+          project_id: projectId,
+          package_id: packageRecord.id,
+          added_by: body.userId,
+          status: 'pending'
+        }
+      });
+
+      // Queue the fast setup job
+      await this.dependencyQueueService.queueFastSetup({
+        packageId: packageRecord.id,
+        packageName: body.packageName,
+        repoUrl: body.repoUrl,
+        projectId: projectId,
+      });
+
+      console.log('✅ Package added to watchlist and queued for fast setup:', {
+        packageId: packageRecord.id,
+        projectWatchlistPackageId: projectWatchlistPackage.id
+      });
+
+      return {
+        success: true,
+        message: 'Package added to watchlist and queued for analysis',
+        data: {
+          projectId,
+          packageName: body.packageName,
+          repoUrl: body.repoUrl,
+          packageId: packageRecord.id,
+          status: 'queued'
+        }
+      };
+    } catch (error) {
+      console.error('❌ Error adding package to watchlist:', error);
+      throw error;
+    }
   }
 
   @Put(':id')

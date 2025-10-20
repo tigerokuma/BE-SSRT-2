@@ -39,6 +39,31 @@ export class PackagesService {
     return await this.packageSearchService.searchVulnerabilities(packageName);
   }
 
+  async getPackageById(
+    id: string,
+    version?: string,
+    view: 'summary' | 'details' = 'details',
+  ): Promise<PackageCardDto | PackageDetailsDto | null> {
+    const packageData = await this.packageSearchService.getPackageById(id, version);
+
+    if (!packageData) return null;
+
+    return view === 'details'
+      ? this.transformToDetails(packageData)
+      : this.transformToCard(packageData);
+  }
+
+  async getDependencyById(
+    id: string,
+    version: string,
+  ): Promise<PackageDetailsDto | null> {
+    const packageData = await this.packageSearchService.getDependencyById(id, version);
+
+    if (!packageData) return null;
+
+    return this.transformDependencyToDetails(packageData, version);
+  }
+
   // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {
@@ -78,6 +103,39 @@ export class PackagesService {
       published_at: pkg.published_at,
       risk_score: pkg.risk_score || 0,
       npm_url: pkg.npm_url || '',
+      // Optional GitHub fields (only included if available)
+      ...(pkg.repo_url && { repo_url: pkg.repo_url }),
+      ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),
+      ...(pkg.homepage && { homepage: pkg.homepage }),
+      ...(pkg.githubRepo?.stars && { stars: pkg.githubRepo.stars }),
+      ...(pkg.githubRepo?.forks && { forks: pkg.githubRepo.forks }),
+      ...(pkg.githubRepo?.contributors && {
+        contributors: pkg.githubRepo.contributors,
+      }),
+    };
+  }
+
+  // Transform dependency data (Packages table) to details format
+  private transformDependencyToDetails(pkg: any, version?: string): PackageDetailsDto {
+    return {
+      name: pkg.name || '',
+      description: pkg.summary || '',
+      keywords: [],
+      downloads: 0,
+      maintainers: [],
+      last_updated: pkg.updated_at 
+        ? new Date(pkg.updated_at).toISOString().split('T')[0]
+        : '',
+      version: version || '',
+      license: pkg.license || '',
+      osv_vulnerabilities: pkg.osv_vulnerabilities || [],
+      package_id: pkg.id || '',
+      published: pkg.created_at 
+        ? new Date(pkg.created_at).toISOString().split('T')[0]
+        : '',
+      published_at: pkg.created_at,
+      risk_score: pkg.total_score || 0,
+      npm_url: '',
       // Optional GitHub fields (only included if available)
       ...(pkg.repo_url && { repo_url: pkg.repo_url }),
       ...(pkg.githubRepo?.repo_name && { repo_name: pkg.githubRepo.repo_name }),
