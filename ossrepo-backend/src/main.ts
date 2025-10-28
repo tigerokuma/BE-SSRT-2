@@ -7,9 +7,11 @@ import { createBullBoard } from '@bull-board/api';
 import { BullAdapter } from '@bull-board/api/bullAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { getQueueToken } from '@nestjs/bull';
+import { ClerkAuthGuard } from './common/guards/clerk.guard';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
 
   // Setup Bull Board for queue monitoring
   const serverAdapter = new ExpressAdapter();
@@ -45,8 +47,8 @@ async function bootstrap() {
       'http://127.0.0.1:8080',
       'http://localhost:8000',
       // Add your production domains here
-      // 'https://yourapp.com',
-      // 'https://www.yourapp.com'
+      'https://open-source-insight-tracker.vercel.app',
+      'https://www.open-source-insight-tracker.vercel.app'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -61,6 +63,8 @@ async function bootstrap() {
       forbidNonWhitelisted: false,
     }),
   );
+
+  app.useGlobalGuards(new ClerkAuthGuard());
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api', app, document);
