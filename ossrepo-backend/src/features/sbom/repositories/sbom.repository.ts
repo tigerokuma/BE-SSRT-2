@@ -7,20 +7,67 @@ import { CreateSbomDto, UpdateSbomDto } from '../dto/sbom.dto';
 export class SbomRepository {
   constructor(private prisma: PrismaService) {}
 
-  async upsertWatchSbom(data: CreateSbomDto) {
-    const mappedData = {
-      watchlist_id: data.id,
-      sbom: data.sbom,
-    };
+  async upsertPackageSbom(data: CreateSbomDto) {
+    // Get package info from Packages table
+    const packageId = data.id;
+    const pkg = await this.prisma.packages.findUnique({
+      where: { id: packageId },
+      select: { name: true, repo_url: true, license: true },
+    });
 
+    if (!pkg) {
+      throw new Error(`Package ${packageId} not found`);
+    }
+
+    // Find or create Package entry (old table) using name
+    let packageEntry = await this.prisma.package.findUnique({
+      where: { package_name: pkg.name },
+    });
+
+    if (!packageEntry) {
+      // Create Package entry if it doesn't exist
+      packageEntry = await this.prisma.package.create({
+        data: {
+          package_name: pkg.name,
+          repo_url: pkg.repo_url || '',
+          repo_name: pkg.name,
+          license: pkg.license,
+          keywords: [],
+          maintainers: [],
+        },
+      });
+    }
+
+    // Check if watchlist exists for this package
+    const existingWatchlist = await this.prisma.watchlist.findFirst({
+      where: { package_id: packageEntry.package_id },
+    });
+
+    let watchlistId: string;
+    if (existingWatchlist) {
+      watchlistId = existingWatchlist.watchlist_id;
+    } else {
+      // Create watchlist entry
+      const newWatchlist = await this.prisma.watchlist.create({
+        data: {
+          package_id: packageEntry.package_id,
+          alert_cve_ids: [],
+          status: 'processing',
+        },
+      });
+      watchlistId = newWatchlist.watchlist_id;
+    }
+
+    // Now upsert the SBOM data
     return await this.prisma.watchlistSbom.upsert({
-      where: { watchlist_id: mappedData.watchlist_id },
-      update: { sbom: mappedData.sbom, updated_at: new Date() },
-      create: mappedData,
+      where: { watchlist_id: watchlistId },
+      update: { sbom: data.sbom, updated_at: new Date() },
+      create: { watchlist_id: watchlistId, sbom: data.sbom },
     });
   }
 
-  async upsertUserSbom(data: CreateSbomDto) {
+  async upsertProjectSbom(data: CreateSbomDto) {
+    // Map project_id to user_id for storage
     const mappedData = {
       user_id: data.id,
       sbom: data.sbom,
@@ -33,59 +80,126 @@ export class SbomRepository {
     });
   }
 
-  async getUrl(id: string) {
-    const packageId = await this.prisma.watchlist.findUnique({
-      where: { watchlist_id: id },
-      select: { package_id: true },
+  async getUrl(packageId: string) {
+    // Get package directly from Packages table
+    const pkg = await this.prisma.packages.findUnique({
+      where: { id: packageId },
+      select: { repo_url: true }
     });
-    return await this.prisma.package.findUnique({
-      where: { package_id: packageId?.package_id },
-      select: { repo_url: true },
-    });
+
+    if (pkg?.repo_url) {
+      return { repo_url: pkg.repo_url };
+    }
+
+    return null;
   }
 
-  async getWatchSbom(id: string) {
+  async getPackageSbom(id: string) {
+    // Get package from Packages table
+    const pkg = await this.prisma.packages.findUnique({
+      where: { id },
+      select: { name: true },
+    });
+
+    if (!pkg) {
+      return null;
+    }
+
+    // Find the corresponding Package entry
+    const packageEntry = await this.prisma.package.findUnique({
+      where: { package_name: pkg.name },
+      select: { package_id: true },
+    });
+
+    if (!packageEntry) {
+      return null;
+    }
+
+    // Find the watchlist for this package
+    const watchlist = await this.prisma.watchlist.findFirst({
+      where: { package_id: packageEntry.package_id },
+      select: { watchlist_id: true },
+    });
+
+    if (!watchlist) {
+      return null;
+    }
+
+    // Return the SBOM data
     return await this.prisma.watchlistSbom.findUnique({
-      where: { watchlist_id: id },
+      where: { watchlist_id: watchlist.watchlist_id },
       select: { sbom: true, updated_at: true },
     });
   }
 
-  async getUserSbom(id: string) {
+  async getProjectSbom(id: string) {
     return await this.prisma.userWatchlistSbom.findUnique({
       where: { user_id: id },
       select: { sbom: true, updated_at: true },
     });
   }
 
-  async getFollowSboms(user_id: string) {
-    const watchlists = await this.prisma.userWatchlist.findMany({
-      where: { user_id },
+  async getProjectDependencySboms(projectId: string) {
+    // Get all project dependencies for a project through project_dependencies table
+    const projectDeps = await this.prisma.project_dependencies.findMany({
+      where: { project_id: projectId },
+      include: { 
+        Package: {
+          select: { package_name: true }
+        }
+      },
+    });
+
+    // Get corresponding watchlist IDs for these packages
+    const packageNames = projectDeps
+      .map((dep) => dep.Package?.package_name)
+      .filter((name): name is string => name !== null && name !== undefined);
+
+    if (packageNames.length === 0) {
+      return [];
+    }
+
+    // Find all Package entries for these package names
+    const packageEntries = await this.prisma.package.findMany({
+      where: { package_name: { in: packageNames } },
+      select: { package_id: true },
+    });
+
+    const packageIds = packageEntries.map(p => p.package_id);
+
+    // Find watchlists for these packages
+    const watchlists = await this.prisma.watchlist.findMany({
+      where: { package_id: { in: packageIds } },
       select: { watchlist_id: true },
     });
 
-    const watchlist_ids = (await watchlists).map((w) => w.watchlist_id);
+    const watchlistIds = watchlists.map(w => w.watchlist_id);
+
+    if (watchlistIds.length === 0) {
+      return [];
+    }
 
     return await this.prisma.watchlistSbom.findMany({
-      where: { watchlist_id: { in: watchlist_ids } },
+      where: { watchlist_id: { in: watchlistIds } },
       select: { sbom: true },
     });
   }
 
-  async getWatchFollows(user_id: string) {
-    const watchlists = await this.prisma.userWatchlist.findMany({
-      where: { user_id },
+  async getProjectDependencies(projectId: string) {
+    // Get all project dependencies for a project
+    const projectDeps = await this.prisma.project_dependencies.findMany({
+      where: { project_id: projectId },
       select: {
-        watchlist_id: true,
-        watchlist: {
-          select: { package: { select: { package_name: true } } },
-        },
+        package_id: true,
+        name: true,
       },
     });
 
-    return watchlists.map((w) => ({
-      watchlist_id: w.watchlist_id,
-      package_name: w.watchlist.package.package_name,
-    }));
+    return projectDeps
+      .filter((dep) => dep.package_id !== null)
+      .map((dep) => ({
+        package_id: dep.package_id!,
+        package_name: dep.name,
+      }));
   }
 }

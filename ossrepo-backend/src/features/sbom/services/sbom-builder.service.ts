@@ -227,17 +227,17 @@ export class SbomBuilderService {
   }
 
 
-  async addSbom(watchlistId: string) {
-    const gitUrl = (await this.sbomRepo.getUrl(watchlistId))?.repo_url;
+  async addSbom(packageId: string) {
+    const gitUrl = (await this.sbomRepo.getUrl(packageId))?.repo_url;
     const repoPath = await this.cloneRepo(gitUrl!);
     await this.cleanupRepo(repoPath);
     const data = await this.genSbom(repoPath);
     const jsonData = await JSON.parse(data);
     const createSbomDto: CreateSbomDto = {
-      id: watchlistId,
+      id: packageId,
       sbom: jsonData,
     };
-    await this.sbomRepo.upsertWatchSbom(createSbomDto);
+    await this.sbomRepo.upsertPackageSbom(createSbomDto);
     await this.cleanupTempFolder(repoPath);
 
     return jsonData;
@@ -260,8 +260,8 @@ export class SbomBuilderService {
     return { tempDir, filePaths };
   }
 
-  async mergeSbom(user_id: string) {
-    const sboms = await this.sbomRepo.getFollowSboms(user_id);
+  async mergeSbom(projectId: string) {
+    const sboms = await this.sbomRepo.getProjectDependencySboms(projectId);
     const { tempDir, filePaths } = await this.writeSbomsToTempFiles(sboms);
 
     const absPath = tempDir;
@@ -298,8 +298,8 @@ export class SbomBuilderService {
 
     const newTop = {
       type: 'application',
-      'bom-ref': `pkg:user/${user_id}@latest`,
-      name: `user-watchlist-sbom-${user_id}`,
+      'bom-ref': `pkg:project/${projectId}@latest`,
+      name: `project-sbom-${projectId}`,
       version: '1.0.0',
     };
 
@@ -320,10 +320,10 @@ export class SbomBuilderService {
 
     // Insert to database
     const createSbomDto = {
-      id: user_id,
+      id: projectId,
       sbom: mergedData,
     };
-    this.sbomRepo.upsertUserSbom(createSbomDto);
+    this.sbomRepo.upsertProjectSbom(createSbomDto);
     return await mergedData;
   }
 }

@@ -11,19 +11,19 @@ export class SbomController {
     private readonly sbomMemgraph: SbomMemgraph,
   ) {}
 
-  @Get('dep-list/:user_id')
-  async getDepList(@Param('user_id') user_id: string) {
-    return await this.sbomQueryService.getDepList(user_id);
+  @Get('dep-list/:project_id')
+  async getDepList(@Param('project_id') project_id: string) {
+    return await this.sbomQueryService.getDepList(project_id);
   }
 
-  @Get('watchlist-metadata/:watchlist_id')
-  async getWatchlistMetadataSbom(@Param('watchlist_id') watchlist_id: string) {
-    return await this.sbomMemgraph.getWatchSbom(watchlist_id);
+  @Get('package-metadata/:package_id')
+  async getPackageMetadataSbom(@Param('package_id') package_id: string) {
+    return await this.sbomMemgraph.getWatchSbom(package_id);
   }
 
-  @Get('user-watchlist-metadata/:user_id')
-  async getUserWatchlistMetadataSbom(@Param('user_id') user_id: string) {
-    return await this.sbomQueryService.getUserSbom(user_id);
+  @Get('project-metadata/:project_id')
+  async getProjectMetadataSbom(@Param('project_id') project_id: string) {
+    return await this.sbomQueryService.getProjectSbom(project_id);
   }
 
   // @Get('graph-dependencies/:id/:node_id')
@@ -81,20 +81,20 @@ export class SbomController {
   //   return (await this.sbomQueryService.getUserSbom(user_id))?.sbom;
   // }
 
-  @Post('generate-SBOM/:watchlist_id')
-  async genSbom(@Param('watchlist_id') watchlist_id: string) {
+  @Post('generate-SBOM/:package_id')
+  async genSbom(@Param('package_id') package_id: string) {
     // Generate SBOM synchronously
-    const sbomJson = await this.sbomBuilderService.addSbom(watchlist_id);
+    const sbomJson = await this.sbomBuilderService.addSbom(package_id);
     
     // Store in Memgraph
-    await this.sbomMemgraph.createSbom(watchlist_id, 'watchlist', 'cdxgen', sbomJson.metadata);
-    await this.sbomMemgraph.importCycloneDxSbom(sbomJson, watchlist_id);
+    await this.sbomMemgraph.createSbom(package_id, 'package', 'cdxgen', sbomJson.metadata);
+    await this.sbomMemgraph.importCycloneDxSbom(sbomJson, package_id);
     
     return sbomJson;
   }
 
-  @Post('merge-SBOM/:user_id')
-  async mergeSbom(@Param('user_id') user_id: string) {
-    return await this.sbomBuilderService.mergeSbom(user_id);
-  }
+  // @Post('merge-SBOM/:project_id')
+  // async mergeSbom(@Param('project_id') project_id: string) {
+  //   return await this.sbomBuilderService.mergeSbom(project_id);
+  // }
 }
