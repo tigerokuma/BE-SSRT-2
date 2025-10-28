@@ -238,6 +238,7 @@ export class FullSetupProcessor {
           lines_deleted: [],
           files_changed: [],
           timestamps: [],
+          message_lengths: [], // Track commit message lengths
           files_worked_on: new Map<string, number>(), // Track files worked on
         });
       }
@@ -248,6 +249,7 @@ export class FullSetupProcessor {
       profile.lines_deleted.push(commit.linesDeleted);
       profile.files_changed.push(commit.filesChanged);
       profile.timestamps.push(commit.timestamp);
+      profile.message_lengths.push(commit.message.length);
 
       // Track files worked on from diff data
       if (commit.diffData && commit.diffData.filesChanged) {
@@ -264,16 +266,24 @@ export class FullSetupProcessor {
       const linesDeleted = profile.lines_deleted;
       const filesChanged = profile.files_changed;
       const timestamps = profile.timestamps;
+      const messageLengths = profile.message_lengths;
 
       // Calculate averages
       const avgLinesAdded = linesAdded.reduce((a, b) => a + b, 0) / linesAdded.length;
       const avgLinesDeleted = linesDeleted.reduce((a, b) => a + b, 0) / linesDeleted.length;
       const avgFilesChanged = filesChanged.reduce((a, b) => a + b, 0) / filesChanged.length;
+      const avgCommitMessageLength = messageLengths.reduce((a, b) => a + b, 0) / messageLengths.length;
 
       // Calculate standard deviations
       const stddevLinesAdded = this.calculateStandardDeviation(linesAdded);
       const stddevLinesDeleted = this.calculateStandardDeviation(linesDeleted);
       const stddevFilesChanged = this.calculateStandardDeviation(filesChanged);
+      const stddevCommitMessageLength = this.calculateStandardDeviation(messageLengths);
+
+      // Calculate insert-to-delete ratio
+      const totalLinesAdded = linesAdded.reduce((a, b) => a + b, 0);
+      const totalLinesDeleted = linesDeleted.reduce((a, b) => a + b, 0);
+      const insertToDeleteRatio = totalLinesDeleted === 0 ? 999 : totalLinesAdded / totalLinesDeleted;
 
       // Build time histogram
       const commitTimeHistogram = this.buildCommitTimeHistogram(timestamps);
@@ -308,6 +318,9 @@ export class FullSetupProcessor {
         stddev_lines_added: stddevLinesAdded,
         stddev_lines_deleted: stddevLinesDeleted,
         stddev_files_changed: stddevFilesChanged,
+        avg_commit_message_length: avgCommitMessageLength,
+        stddev_commit_message_length: stddevCommitMessageLength,
+        insert_to_delete_ratio: insertToDeleteRatio,
         commit_time_histogram: commitTimeHistogram,
         typical_days_active: typicalDaysActive,
         files_worked_on: filesWorkedOnHistogram,
@@ -343,6 +356,9 @@ export class FullSetupProcessor {
         stddev_lines_added: profile.stddev_lines_added,
         stddev_lines_deleted: profile.stddev_lines_deleted,
         stddev_files_changed: profile.stddev_files_changed,
+        avg_commit_message_length: profile.avg_commit_message_length,
+        stddev_commit_message_length: profile.stddev_commit_message_length,
+        insert_to_delete_ratio: profile.insert_to_delete_ratio,
         commit_time_histogram: profile.commit_time_histogram,
         typical_days_active: profile.typical_days_active,
         files_worked_on: profile.files_worked_on,
