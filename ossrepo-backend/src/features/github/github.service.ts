@@ -24,8 +24,17 @@ export class GitHubService {
     return user?.access_token ?? null;
   }
 
+  private async getUserTokenByAny(idOrClerkId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ clerk_id: idOrClerkId }, { user_id: idOrClerkId }], // backend PK or Clerk id
+      }, select: { access_token: true },
+    });
+    return user?.access_token ?? null;
+  }
+
   private async getUserOctokit(user_id: string): Promise<Octokit> {
-    const token = await this.getUserToken(user_id);
+    const token = await this.getUserTokenByAny(user_id);
     if (!token) {
       throw new Error('No GitHub token available for this user');
     }
@@ -51,7 +60,7 @@ export class GitHubService {
    */
   async getUserRepositoriesByUserId(user_id: string) {
     try {
-      const token = await this.getUserToken(user_id);
+      const token = await this.getUserTokenByAny(user_id);
       if (!token) {
         console.log(`[GitHub] No token for user_id=${user_id}; returning mock`);
         return this.getMockRepositories();
