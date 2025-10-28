@@ -22,6 +22,7 @@ import {
   LoginResponseDto,
 } from './dto/auth.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ClerkAuthGuard } from 'src/common/guards/clerk.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -84,5 +85,12 @@ export class AuthController {
 
     // Redirect to frontend with token
     res.redirect(`${frontendUrl}/auth/callback?token=${user.access_token}`);
+  }
+
+  @Get('debug')
+  @UseGuards(ClerkAuthGuard)
+  debug(@Req() req: any) {
+    // You should see sub, azp, aud, exp, etc.
+    return { ok: true, claims: req.user };
   }
 }
