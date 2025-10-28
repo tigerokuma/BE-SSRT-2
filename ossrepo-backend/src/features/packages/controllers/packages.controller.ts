@@ -8,10 +8,16 @@ import {
   Delete,
 } from '@nestjs/common';
 import { PackagesService } from '../services/packages.service';
+import { PackageVulnerabilityService } from '../../dependencies/services/package-vulnerability.service';
+import { MonthlyCommitsService } from '../../dependencies/services/monthly-commits.service';
 
 @Controller('packages')
 export class PackagesController {
-  constructor(private readonly packagesService: PackagesService) {}
+  constructor(
+    private readonly packagesService: PackagesService,
+    private readonly packageVulnerability: PackageVulnerabilityService,
+    private readonly monthlyCommits: MonthlyCommitsService,
+  ) {}
 
   @Get('search')
   async searchPackages(@Query('name') name: string) {
@@ -160,6 +166,94 @@ export class PackagesController {
     }
 
     return result;
+  }
+
+  @Get('project/:projectId/dependency/:packageId/:version')
+  async getDependencyByProjectAndPackage(
+    @Param('projectId') projectId: string,
+    @Param('packageId') packageId: string,
+    @Param('version') version: string,
+  ) {
+    if (!projectId || projectId.trim().length === 0) {
+      throw new BadRequestException('Project ID is required');
+    }
+
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    if (!version || version.trim().length === 0) {
+      throw new BadRequestException('Version is required');
+    }
+
+    // Query the Packages table directly and return raw data
+    const result = await this.packagesService.getRawPackageFromDatabase(
+      packageId.trim(),
+    );
+
+    if (!result) {
+      throw new NotFoundException(`Package with ID '${packageId}' not found`);
+    }
+
+    return result;
+  }
+
+  @Get(':packageId/versions')
+  async getPackageVersions(
+    @Param('packageId') packageId: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 3;
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+      throw new BadRequestException('Limit must be a number between 1 and 50');
+    }
+
+    const versions = await this.packageVulnerability.getPackageVersions(
+      packageId.trim(),
+      limitNum,
+    );
+
+    return {
+      package_id: packageId.trim(),
+      versions,
+      count: versions.length,
+    };
+  }
+
+  @Get(':packageId/monthly-commits')
+  async getMonthlyCommits(
+    @Param('packageId') packageId: string,
+    @Query('months') months?: string,
+  ) {
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    const monthsNum = months ? parseInt(months, 10) : 12;
+    if (isNaN(monthsNum) || monthsNum < 1 || monthsNum > 24) {
+      throw new BadRequestException('Months must be a number between 1 and 24');
+    }
+
+    const monthlyData = await this.monthlyCommits.getMonthlyCommits(
+      packageId.trim(),
+      monthsNum,
+    );
+
+    const trendData = await this.monthlyCommits.getCommitTrendData(
+      packageId.trim(),
+      monthsNum,
+    );
+
+    return {
+      package_id: packageId.trim(),
+      monthly_commits: monthlyData,
+      trend_data: trendData,
+      count: monthlyData.length,
+    };
   }
 
   @Delete('cache/refresh')

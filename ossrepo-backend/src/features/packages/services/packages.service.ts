@@ -64,6 +64,23 @@ export class PackagesService {
     return this.transformDependencyToDetails(packageData, version);
   }
 
+  async getPackageFromDatabase(
+    packageId: string,
+  ): Promise<PackageDetailsDto | null> {
+    const packageData = await this.packageSearchService.getPackageFromDatabase(packageId);
+
+    if (!packageData) return null;
+
+    return this.transformDependencyToDetails(packageData);
+  }
+
+  async getRawPackageFromDatabase(
+    packageId: string,
+  ): Promise<any | null> {
+    // Return raw data from Packages table without any transformation
+    return await this.packageSearchService.getPackageFromDatabase(packageId);
+  }
+
   // Transform to card format (NPM data only - no GitHub fields)
   private transformToCard(pkg: any): PackageCardDto {
     return {

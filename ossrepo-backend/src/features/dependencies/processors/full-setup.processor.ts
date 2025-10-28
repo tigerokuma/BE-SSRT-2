@@ -6,6 +6,8 @@ import { GitManagerService } from '../../activity/services/git-manager.service';
 import { GitCommitExtractorService, CommitDetails } from '../services/git-commit-extractor.service';
 import { PackageScorecardService } from '../services/package-scorecard.service';
 import { AISummaryService } from '../../activity/services/ai-summary.service';
+import { PackageVulnerabilityService } from '../services/package-vulnerability.service';
+import { MonthlyCommitsService } from '../services/monthly-commits.service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -27,6 +29,8 @@ export class FullSetupProcessor {
     private readonly gitCommitExtractor: GitCommitExtractorService,
     private readonly packageScorecard: PackageScorecardService,
     private readonly aiSummaryService: AISummaryService,
+    private readonly packageVulnerability: PackageVulnerabilityService,
+    private readonly monthlyCommits: MonthlyCommitsService,
   ) {
     this.logger.log(`🔧 FullSetupProcessor initialized and ready to process jobs`);
   }
@@ -82,12 +86,16 @@ export class FullSetupProcessor {
       await this.storeRecentCommits(packageId, recentCommits);
       this.logger.log(`💾 Stored ${recentCommits.length} recent commits`);
 
-      // 6. Build contributor profiles from all commits
+      // 6. Aggregate monthly commits for activity tracking
+      await this.monthlyCommits.aggregateMonthlyCommits(packageId, allCommits);
+      this.logger.log(`📊 Aggregated monthly commits`);
+
+      // 7. Build contributor profiles from all commits
       const contributorProfiles = this.buildContributorProfiles(allCommits);
       await this.storeContributorProfiles(packageId, contributorProfiles);
       this.logger.log(`👥 Built ${contributorProfiles.length} contributor profiles`);
 
-      // 7. Process scorecard data (API first, then local)
+      // 8. Process scorecard data (API first, then local)
       await this.packageScorecard.processHistoricalScores(
         packageId,
         recentCommits.map(c => ({ sha: c.sha, timestamp: c.timestamp })),
@@ -97,11 +105,15 @@ export class FullSetupProcessor {
       );
       this.logger.log(`🛡️ Processed scorecard data`);
 
-      // 8. Generate AI overview
+      // 9. Process vulnerabilities (NPM versions + OSV API)
+      await this.packageVulnerability.processPackageVulnerabilities(packageId, packageName);
+      this.logger.log(`🔍 Processed package vulnerabilities`);
+
+      // 10. Generate AI overview
       await this.generateAIOverview(packageId, packageName, allCommits, contributorProfiles);
       this.logger.log(`🤖 Generated AI overview`);
 
-      // 9. Update package status to 'done'
+      // 11. Update package status to 'done'
       await this.updatePackageStatus(packageId, 'done');
       this.logger.log(`✅ Full setup completed for ${packageName}`);
 
