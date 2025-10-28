@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import neo4j from "neo4j-driver";
+import { SbomRepository } from "../repositories/sbom.repository";
 
 const MEMGRAPH_URI = "bolt://localhost:7687";
 const USER = "memgraph";
@@ -10,7 +11,7 @@ export class SbomMemgraph {
   private driver;
   private session;
 
-  constructor() {
+  constructor(private readonly sbomRepo: SbomRepository) {
     this.driver = neo4j.driver(MEMGRAPH_URI, neo4j.auth.basic(USER, PASSWORD), {
       maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
       maxConnectionPoolSize: 50,
@@ -23,6 +24,14 @@ export class SbomMemgraph {
     await this.session.close();
     await this.driver.close();
   }
+
+  // --- Helper function to extract package name from PURL ---
+  private extractNameFromPurl(purl: string): string {
+    // PURL format: pkg:type/namespace/name@version
+    const match = purl.match(/^pkg:\w+\/[^@\/]+\/([^@\/]+)/) || purl.match(/^pkg:\w+\/([^@\/]+)/);
+    return match ? match[1] : purl;
+  }
+
 
   // --- Create SBOM Node ---
   async createSbom(id: string, source: string, tool: string, metadata?: any) {
@@ -109,16 +118,38 @@ export class SbomMemgraph {
     // Batch create all components at once
     const components = sbomJson.components || [];
     if (components.length > 0) {
-      const componentData = components.map(c => ({
-        purl: c.purl || c['bom-ref'] || `${c.name}@${c.version || ''}`,
-        name: c.name,
-        version: c.version || '',
-        license: c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null,
-        scope: c.scope || '',
-        type: c.type || '',
-        bom_ref: c['bom-ref'] || '',
-        hashes: Object.values(c.hashes || {})
-      }));
+      // Process all components in parallel for better performance
+      const componentPromises = components.map(async (c) => {
+        const purl = c.purl || c['bom-ref'] || `${c.name}@${c.version || ''}`;
+        const packageName = c.name;
+        
+        // Extract package data using helper functions
+        const purlName = this.extractNameFromPurl(purl);
+        const finalPackageName = purlName || packageName;
+        const license = c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null;
+        
+        // Upsert package to PostgreSQL via repository
+        const dbPackageId = await this.sbomRepo.upsertPackageFromSbomComponent(
+          finalPackageName,
+          null, // repoUrl - will be populated from SBOM metadata if available
+          license
+        );
+        
+        return {
+          purl: purl,
+          name: packageName,
+          version: c.version || '',
+          license: c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null,
+          scope: c.scope || '',
+          type: c.type || '',
+          bom_ref: c['bom-ref'] || '',
+          hashes: Object.values(c.hashes || {}),
+          db_package_id: dbPackageId,
+        };
+      });
+
+      // Wait for all components to be processed in parallel
+      const componentData = await Promise.all(componentPromises);
 
       try {
         await this.session.run(
@@ -131,14 +162,15 @@ export class SbomMemgraph {
               p.scope = comp.scope,
               p.type = comp.type,
               p.bom_ref = comp.bom_ref,
-              p.hashes = comp.hashes
+              p.hashes = comp.hashes,
+              p.db_package_id = comp.db_package_id
           WITH p
           MATCH (s:SBOM {id: $sbomId})
           MERGE (p)-[:BELONGS_TO]->(s)
           `,
           { components: componentData, sbomId }
         );
-        console.log(`Batch created ${components.length} package nodes`);
+        console.log(`Batch created ${components.length} package nodes with PostgreSQL links`);
       } catch (error) {
         console.error(`Error batch creating package nodes:`, error);
       }

@@ -7,6 +7,7 @@ import { CreateSbomDto, UpdateSbomDto } from '../dto/sbom.dto';
 export class SbomRepository {
   constructor(private prisma: PrismaService) {}
 
+
   async upsertPackageSbom(data: CreateSbomDto) {
     // Get package info from Packages table
     const packageId = data.id;
@@ -201,5 +202,33 @@ export class SbomRepository {
         package_id: dep.package_id!,
         package_name: dep.name,
       }));
+  }
+
+  // --- Upsert package from SBOM component ---
+  // This method receives already-extracted package data and just handles the database upsert
+  async upsertPackageFromSbomComponent(
+    packageName: string,
+    repoUrl: string | null,
+    license: string | null
+  ): Promise<string | null> {
+    try {
+      const dbPackage = await this.prisma.packages.upsert({
+        where: { name: packageName },
+        update: {
+          ...(repoUrl && { repo_url: repoUrl }),
+          ...(license && { license }),
+        },
+        create: {
+          name: packageName,
+          repo_url: repoUrl,
+          license,
+          status: 'queued',
+        },
+      });
+      return dbPackage.id;
+    } catch (error) {
+      console.error(`Error upserting package ${packageName}:`, error);
+      return null;
+    }
   }
 }
