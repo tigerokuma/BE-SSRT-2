@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Param } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body } from '@nestjs/common';
 import { SbomBuilderService } from '../services/sbom-builder.service';
 import { SbomQueryService } from '../services/sbom-query.service';
 import { SbomMemgraph } from '../services/sbom-graph-builder.service';
+import { CreateSbomOptionsDto } from '../dto/sbom.dto';
 
 @Controller('sbom')
 export class SbomController {
@@ -18,7 +19,7 @@ export class SbomController {
 
   @Get('package-metadata/:package_id')
   async getPackageMetadataSbom(@Param('package_id') package_id: string) {
-    return await this.sbomMemgraph.getWatchSbom(package_id);
+    return await this.sbomMemgraph.createDependencySbom(package_id);
   }
 
   @Get('project-metadata/:project_id')
@@ -91,6 +92,20 @@ export class SbomController {
     await this.sbomMemgraph.importCycloneDxSbom(sbomJson, package_id);
     
     return sbomJson;
+  }
+
+  @Post('sbom/create-custom')
+  async createCustomSbom(@Body() options: CreateSbomOptionsDto) {
+    const result = await this.sbomMemgraph.createCustomSbom(options);
+    
+    // Compress if requested
+    if (options.compressed) {
+      const zlib = await import('zlib');
+      const compressed = zlib.brotliCompressSync(JSON.stringify(result));
+      return compressed.toString('base64');
+    }
+    
+    return result;
   }
 
   // @Post('merge-SBOM/:project_id')

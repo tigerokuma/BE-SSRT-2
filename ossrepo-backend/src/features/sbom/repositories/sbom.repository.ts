@@ -204,6 +204,53 @@ export class SbomRepository {
       }));
   }
 
+  async getProjectWatchlist(projectId: string) {
+    // Get all watchlist packages for a project
+    const watchlistDeps = await this.prisma.projectWatchlistPackage.findMany({
+      where: { project_id: projectId },
+      select: {
+        package_id: true,
+        package: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+
+    return watchlistDeps
+      .filter((item) => item.package_id !== null && item.package !== null)
+      .map((item) => ({
+        package_id: item.package_id!,
+        package_name: item.package!.name,
+      }));
+  }
+  
+  async getProjectInfo(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        license: true,
+      },
+    });
+    return project;
+  }
+
+  async getPackageInfo(packageId: string) {
+    const watchlist = await this.prisma.packages.findUnique({
+      where: { id: packageId },
+      select: {
+        id: true,
+        name: true,
+        license: true,
+      },
+    });
+    return watchlist;
+  }
+
   // --- Upsert package from SBOM component ---
   // This method receives already-extracted package data and just handles the database upsert
   async upsertPackageFromSbomComponent(

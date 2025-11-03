@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import neo4j from "neo4j-driver";
+import { v4 as uuidv4 } from 'uuid';
 import { SbomRepository } from "../repositories/sbom.repository";
 
 const MEMGRAPH_URI = "bolt://localhost:7687";
@@ -95,6 +96,78 @@ export class SbomMemgraph {
       name: r.get("name"),
       version: r.get("version"),
     }));
+  }
+
+  // --- Get Full Dependency Tree Recursively from Memgraph ---
+  async getFullDependencyTree(sbomId: string) {
+    try {
+      // Get all packages and their dependencies recursively from Memgraph
+      const result = await this.session.run(
+        `
+        MATCH (s:SBOM {id: $sbomId})
+        MATCH (s)<-[:BELONGS_TO]-(p:Package)
+        OPTIONAL MATCH path = (p)-[:DEPENDS_ON*0..]->(dep:Package)
+        RETURN p, dep, relationships(path) as rels
+        `,
+        { sbomId }
+      );
+
+      const components = [];
+      const componentMap = new Map();
+      const dependencyMap = new Map();
+
+      // Process all packages and dependencies
+      for (const record of result.records) {
+        const pkg = record.get('p');
+        const dep = record.get('dep');
+        
+        if (pkg) {
+          const purl = pkg.properties.purl;
+          if (!componentMap.has(purl)) {
+            const component = {
+              type: pkg.properties.type || 'library',
+              name: pkg.properties.name,
+              version: pkg.properties.version,
+              purl: purl,
+              scope: pkg.properties.scope || 'required',
+              'bom-ref': pkg.properties.bom_ref || purl,
+              license: pkg.properties.license ? [{ license: { id: pkg.properties.license } }] : [],
+              hashes: pkg.properties.hashes || [],
+            };
+            components.push(component);
+            componentMap.set(purl, component);
+          }
+        }
+
+        // Build dependency relationships
+        if (pkg && dep && pkg.properties.purl !== dep.properties.purl) {
+          const fromPurl = pkg.properties.purl;
+          const toPurl = dep.properties.purl;
+          
+          if (!dependencyMap.has(fromPurl)) {
+            dependencyMap.set(fromPurl, new Set());
+          }
+          dependencyMap.get(fromPurl).add(toPurl);
+        }
+      }
+
+      // Convert dependency map to CycloneDX format
+      const dependencies = [];
+      for (const [fromRef, toRefs] of dependencyMap) {
+        dependencies.push({
+          ref: fromRef,
+          dependsOn: Array.from(toRefs),
+        });
+      }
+
+      return {
+        components,
+        dependencies,
+      };
+    } catch (error) {
+      console.error(`Error getting full dependency tree from Memgraph for ${sbomId}:`, error);
+      return null;
+    }
   }
 
   // --- Query Version Conflicts ---
@@ -204,100 +277,482 @@ export class SbomMemgraph {
     console.log(`Importing SBOM components and dependencies completed`);
   }
   // --- Get SBOM data from Memgraph and convert to CycloneDX format ---
-  async getWatchSbom(watchlistId: string) {
+  async getCompDeps(watchlistIds) {
     try {
-      // Get all packages and dependencies for this watchlist
+      // Normalize to array
+      const ids = Array.isArray(watchlistIds) ? watchlistIds : [watchlistIds];
+  
+      // Query all SBOMs at once
       const result = await this.session.run(
         `
-        MATCH (s:SBOM {id: $watchlistId})
+        MATCH (s:SBOM)
+        WHERE s.id IN $watchlistIds
         MATCH (s)<-[:BELONGS_TO]-(p:Package)
         OPTIONAL MATCH (p)-[:DEPENDS_ON]->(dep:Package)
-        RETURN p, dep
+        RETURN s.id AS sbomId, p, dep
         `,
-        { watchlistId }
+        { watchlistIds: ids }
       );
-
+  
       const components = [];
       const dependencies = [];
-      const componentMap = new Map();
-
-      // Process all packages (components)
+      const componentMap = new Map();   // purl -> component
+      const dependencyMap = new Map();  // purl -> Set(depPurls)
+  
+      // Single pass over all returned records
       for (const record of result.records) {
         const pkg = record.get('p');
         const dep = record.get('dep');
-        
-        if (pkg && !componentMap.has(pkg.properties.purl)) {
+        if (!pkg) continue;
+  
+        const pkgProps = pkg.properties;
+        const purl = pkgProps.purl;
+  
+        // Add component once
+        if (!componentMap.has(purl)) {
           const component = {
-            name: pkg.properties.name,
-            version: pkg.properties.version,
-            purl: pkg.properties.purl,
-            type: pkg.properties.type || 'library',
-            scope: pkg.properties.scope || '',
-            'bom-ref': pkg.properties.bom_ref || pkg.properties.purl,
-            licenses: pkg.properties.license ? [{ license: { id: pkg.properties.license } }] : [],
-            hashes: pkg.properties.hashes ? this.parseHashes(pkg.properties.hashes) : []
+            name: pkgProps.name,
+            version: pkgProps.version,
+            purl,
+            type: pkgProps.type || 'library',
+            scope: pkgProps.scope || '',
+            'bom-ref': pkgProps.bom_ref || purl,
+            licenses: pkgProps.license
+              ? pkgProps.license
+                  .replace(/[()]/g, '') // remove parentheses
+                  .split(/\s*(?:AND|OR)\s*/) // split multiple license expressions
+                  .map(id => {
+                    const trimmed = id.trim();
+                    if (/public\s*domain/i.test(trimmed)) {
+                      return { license: { name: 'Public Domain' } };
+                    }
+                    return {
+                      license: /^[A-Za-z0-9.\-+]+$/.test(trimmed)
+                        ? { id: trimmed }
+                        : { name: trimmed },
+                    };
+                  })
+              : [],
+
+            hashes: pkgProps.hashes ? this.parseHashes(pkgProps.hashes) : [],
           };
-          
           components.push(component);
-          componentMap.set(pkg.properties.purl, component);
+          componentMap.set(purl, component);
         }
-      }
-
-      // Build dependencies structure
-      const dependencyMap = new Map();
-      for (const record of result.records) {
-        const pkg = record.get('p');
-        const dep = record.get('dep');
-        
-        if (pkg && dep) {
-          const fromPurl = pkg.properties.purl;
+  
+        // Add dependency relationship if present
+        if (dep) {
+          const fromPurl = pkgProps.purl;
           const toPurl = dep.properties.purl;
-          
+  
           if (!dependencyMap.has(fromPurl)) {
-            dependencyMap.set(fromPurl, []);
+            dependencyMap.set(fromPurl, new Set());
           }
-          dependencyMap.get(fromPurl).push(toPurl);
+          dependencyMap.get(fromPurl).add(toPurl);
         }
       }
-
-      // Convert dependency map to CycloneDX format
+  
+      // Convert to CycloneDX dependency array
       for (const [fromRef, toRefs] of dependencyMap) {
         dependencies.push({
           ref: fromRef,
-          dependsOn: toRefs
+          dependsOn: [...toRefs],
         });
       }
+  
+      return { components, dependencies };
+  
+    } catch (error) {
+      console.error(`Error getting SBOMs from Memgraph:`, error);
+      return { components: [], dependencies: [] };
+    }
+  }
+  
+  async createDependencySbom(packageId: any) {
+    try {
+      const { components, dependencies } = await this.getCompDeps(packageId);
+      const packageInfo = await this.sbomRepo.getPackageInfo(packageId);
+      
 
-      // Create CycloneDX format
+      const metadata = {
+        timestamp: new Date().toISOString(),
+        tools: [
+          {
+            vendor: 'Deply',
+            name: 'Deply SBOM Generator',
+            version: '1.0.0',
+          },
+          {
+            vendor: 'CycloneDX',
+            name: 'CycloneDX',
+            version: '1.5',
+          },
+        ],
+        authors: [
+          {
+            name: 'Deply Platform',
+            email: 'support@deply.com',
+          },
+        ],
+        component: {
+          type: 'application',
+          name: packageInfo?.name || 'Unknown Project',
+          ...(packageInfo?.license && { 
+            licenses: packageInfo.license
+              .replace(/[()]/g, '') // remove parentheses
+              .split(/\s*(?:AND|OR)\s*/) // split on AND/OR
+              .map(id => {
+                const trimmed = id.trim();
+                if (/public\s*domain/i.test(trimmed)) {
+                  // special case: "Public Domain" → name form, not SPDX id
+                  return { license: { name: 'Public Domain' } };
+                }
+                // choose {id} if it looks like a valid SPDX identifier, otherwise fallback to name
+                return {
+                  license: /^[A-Za-z0-9\.\-\+]+$/.test(trimmed)
+                    ? { id: trimmed }
+                    : { name: trimmed }
+                };
+              })
+          }),
+        },
+        properties: [
+          {
+            name: 'deply:sbom:type',
+            value: 'package',
+          },
+          {
+            name: 'deply:sbom:components',
+            value: components.length.toString(),
+          },
+          ...(packageInfo?.id ? [{
+            name: 'deply:project:id',
+            value: packageInfo.id,
+          }] : []),
+          ...(packageInfo?.license ? [{
+            name: 'deply:project:license',
+            value: packageInfo.license,
+          }] : []),
+        ],
+      };
+      
       const sbomData = {
+        $schema: 'http://cyclonedx.org/schema/bom-1.5.schema.json',
         bomFormat: 'CycloneDX',
         specVersion: '1.5',
+        serialNumber: `urn:uuid:${uuidv4()}`,
         version: 1,
-        metadata: {
-          component: {
-            type: 'application',
-            name: `watchlist-${watchlistId}`,
-            version: '1.0.0',
-            'bom-ref': `pkg:watchlist/${watchlistId}@1.0.0`
-          }
-        },
+        metadata,
         components,
         dependencies
       };
 
-      return { sbom: sbomData };
+      return sbomData;
     } catch (error) {
-      console.error(`Error getting watchlist SBOM from Memgraph:`, error);
-      return { sbom: null };
+      console.error(`Error creating dependency SBOM:`, error);
+      return null;
+    }
+  }
+  async createCustomSbom(options: {
+    project_id: string;
+    format?: 'cyclonedx' | 'spdx';
+    version?: '1.4' | '1.5';
+    include_dependencies?: boolean;
+    include_watchlist_dependencies?: boolean;
+  }) {
+    try {
+      const projectInfo = await this.sbomRepo.getProjectInfo(options.project_id);
+      // 1️⃣ Gather dependencies (and optional watchlist)
+      const deps = await this.sbomRepo.getProjectDependencies(options.project_id);
+
+      if (options.include_watchlist_dependencies) {
+        deps.push(...await this.sbomRepo.getProjectWatchlist(options.project_id));
+      }
+
+      // 2️⃣ Fetch everything in parallel
+      const packageIds = deps.map(dep => dep.package_id);
+
+      const results = await this.getCompDeps(packageIds);
+
+
+      // 3️⃣ Flatten all results
+      const allComponents = results.components;
+      const allDependencies = results.dependencies;
+
+      // 4️⃣ Deduplicate once at the end (fast!)
+      const mergedComponents = Object.values(
+        Object.fromEntries(allComponents.map(c => [c.purl, c]))
+      );
+      const mergedDependencies = Object.values(
+        Object.fromEntries(allDependencies.map(d => [d.ref, d]))
+      );
+
+      // 5️⃣ Build the final SBOM
+      let mergedSbom = this.buildMergedSbomFromComponents(
+        mergedComponents,
+        mergedDependencies,
+        projectInfo
+      );  
+      
+      // Convert to SPDX if requested
+      if (options.format === 'spdx') {
+        mergedSbom = this.convertToSpdx(mergedSbom, options.version || '1.5');
+      }
+      
+      return mergedSbom;
+
+    } catch (error) {
+      console.error(`Error creating custom SBOM:`, error);
+      return null;
     }
   }
 
+  private buildMergedSbomFromComponents(components: any[], dependencies: any[], project?: any): any {
+    const timestamp = new Date().toISOString();
+    const uuid = `urn:uuid:${uuidv4()}`;
+    
+    // Build comprehensive metadata
+    const metadata = {
+      timestamp,
+      tools: [
+        {
+          vendor: 'Deply',
+          name: 'Deply SBOM Generator',
+          version: '1.0.0',
+        },
+        {
+          vendor: 'CycloneDX',
+          name: 'CycloneDX',
+          version: '1.5',
+        },
+      ],
+      authors: [
+        {
+          name: 'Deply Platform',
+          email: 'support@deply.com',
+        },
+      ],
+      component: {
+        type: 'application',
+        name: project?.name || 'Unknown Project',
+        ...(project?.description && { description: project.description }),
+        ...(project?.license && { 
+          licenses: project.license
+            .replace(/[()]/g, '') // remove parentheses
+            .split(/\s*(?:AND|OR)\s*/) // split on AND/OR
+            .map(id => {
+              const trimmed = id.trim();
+              if (/public\s*domain/i.test(trimmed)) {
+                // special case: "Public Domain" → name form, not SPDX id
+                return { license: { name: 'Public Domain' } };
+              }
+              // choose {id} if it looks like a valid SPDX identifier, otherwise fallback to name
+              return {
+                license: /^[A-Za-z0-9\.\-\+]+$/.test(trimmed)
+                  ? { id: trimmed }
+                  : { name: trimmed }
+              };
+            })
+        }),
+      },
+      properties: [
+        {
+          name: 'deply:sbom:type',
+          value: 'merged',
+        },
+        {
+          name: 'deply:sbom:components',
+          value: components.length.toString(),
+        },
+        ...(project?.id ? [{
+          name: 'deply:project:id',
+          value: project.id,
+        }] : []),
+        ...(project?.license ? [{
+          name: 'deply:project:license',
+          value: project.license,
+        }] : []),
+      ],
+    };
+
+    // Enrich components
+    const enrichedComponents = components.map(comp => this.enrichComponent(comp));
+
+    return {
+      $schema: 'http://cyclonedx.org/schema/bom-1.5.schema.json',
+      bomFormat: 'CycloneDX',
+      specVersion: '1.5',
+      serialNumber: uuid,
+      version: 1,
+      metadata,
+      components: enrichedComponents,
+      dependencies: dependencies,
+    };
+  }
+
+  private enrichComponent(component: any): any {
+    // Enhance component with CycloneDX standard fields if missing
+    return {
+      ...component,
+      
+      // Ensure these core fields exist
+      type: component.type || 'library',
+      scope: component.scope || 'required',
+      
+      // Add description if missing
+      ...(component.description ? {} : { description: component.name }),
+      
+      // Ensure bom-ref exists
+      'bom-ref': component['bom-ref'] || component.purl || `pkg:generic/${component.name}@${component.version || 'unknown'}`,
+      
+      // Enhance externalReferences
+      externalReferences: this.enrichExternalReferences(component),
+      
+      // Add properties if they don't exist
+      ...(component.properties ? {} : {
+        properties: [
+          {
+            name: 'deply:component:type',
+            value: component.type || 'library',
+          },
+        ],
+      }),
+      
+      // Add hashes if they don't exist (empty array is valid)
+      hashes: component.hashes || [],
+      
+      // Add evidence if not present
+      ...(component.evidence ? {} : {
+        evidence: {
+          licenses: component.licenses || [],
+          copyright: [],
+        },
+      }),
+    };
+  }
+
+  private enrichExternalReferences(component: any): any[] {
+    const refs = component.externalReferences || [];
+    
+    // Add standard references if missing
+    const refMap = new Map();
+    
+    refs.forEach((ref: any) => {
+      refMap.set(ref.type, ref);
+    });
+    
+    // Add vcs reference if we have repo_url in data but not in references
+    if (component.repo_url && !refMap.has('vcs') && !refMap.has('repository')) {
+      refMap.set('vcs', {
+        type: 'vcs',
+        url: component.repo_url,
+      });
+    }
+    
+    // Add website reference if we have homepage but no website reference
+    if (component.homepage && !refMap.has('website')) {
+      refMap.set('website', {
+        type: 'website',
+        url: component.homepage,
+      });
+    }
+    
+    // Add distribution reference if we have npm_url or registry info
+    if (component.npm_url && !refMap.has('distribution')) {
+      refMap.set('distribution', {
+        type: 'distribution',
+        url: component.npm_url,
+      });
+    }
+    
+    return Array.from(refMap.values());
+  }
+
+  private excludePackages(sbom: any, packages: string[]): any {
+    const packageSet = new Set(packages.map(p => p.toLowerCase()));
+    
+    return {
+      ...sbom,
+      components: sbom.components.filter((comp: any) => {
+        const name = (comp.name || '').toLowerCase();
+        return !packageSet.has(name);
+      }),
+      dependencies: sbom.dependencies.filter((dep: any) => {
+        // Filter out dependencies that reference excluded packages
+        return !dep.dependsOn?.some((pkg: string) => 
+          packages.some(p => pkg.toLowerCase().includes(p.toLowerCase()))
+        );
+      }),
+    };
+  }
+
+  private convertToSpdx(sbom: any, version: string): any {
+    const refToSpdxId = new Map(
+      sbom.components.map((comp, i) => [comp.bomRef || comp.purl,  `SPDXRef-${i}`])
+    );
+    const describesRelationship = {
+      spdxElementId: 'SPDXRef-DOCUMENT',
+      relationshipType: 'DESCRIBES',
+      relatedSpdxElement: `SPDXRef-${sbom.metadata?.component?.name}`,
+    };
+    const rootPackage = {
+      name: sbom.metadata?.component?.name || 'deply-cli',
+      SPDXID: `SPDXRef-${sbom.metadata?.component?.name}`,
+      versionInfo: sbom.metadata?.component?.version || '1.0.0',
+      downloadLocation: 'NOASSERTION',
+      licenseDeclared: 'NOASSERTION',
+      filesAnalyzed: false
+    };
+  
+    
+    
+    return {
+      spdxVersion: 'SPDX-2.3',
+      dataLicense: 'CC0-1.0',
+      SPDXID: 'SPDXRef-DOCUMENT',
+      name: `SBOM-${Date.now()}`,
+      documentNamespace: `https://spdx.org/spdxdocs/${Date.now()}`,
+      creationInfo: {
+        created: new Date().toISOString(),
+        creators: 
+        [
+          'Tool: Deply SBOM Generator',
+          'Organization: Deply'
+        ],
+        licenseListVersion: '3.25'
+      },
+      packages: [rootPackage, ...sbom.components.map((comp: any, index: number) => ({
+        name: comp.name,
+        SPDXID: `SPDXRef-${index}`,
+        versionInfo: comp.version,
+        downloadLocation: 'NOASSERTION',
+        licenseDeclared: comp.licenses?.map(l =>
+          l.license?.id === 'Public Domain' || l.license?.name === 'Public Domain' 
+            ? 'CC0-1.0'
+            : l.license?.id || l.license?.name
+        ).join(' AND ') || 'NOASSERTION',
+        packageVerificationCode: {
+          packageVerificationCodeValue: 'NOASSERTION',
+        },
+      }))],
+      relationships:[
+        describesRelationship,
+        ...sbom.dependencies.flatMap((dep: any) =>
+        (dep.dependsOn || []).map((toRef: string) => ({
+          spdxElementId: refToSpdxId.get(dep.ref),
+          relationshipType: 'DEPENDS_ON',
+          relatedSpdxElement: refToSpdxId.get(toRef) || 'NONE',
+        }))
+      )],
+    };
+    
+  }
   // --- Helper method to parse hashes ---
   private parseHashes(hashes: any[]): any[] {
     if (!Array.isArray(hashes)) return [];
     return hashes.map(hash => ({
-      alg: 'SHA-256', // Default algorithm
-      content: hash
+      alg: hash.alg || 'SHA-256', // Default algorithm
+      content: typeof hash.content === 'string' ? hash.content : String(hash.content),
     }));
   }
 }
