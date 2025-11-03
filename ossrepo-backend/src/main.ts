@@ -26,6 +26,7 @@ async function bootstrap() {
       new BullAdapter(app.get(getQueueToken('dependency-full-setup'))),
       new BullAdapter(app.get(getQueueToken('scorecard-priority'))),
       new BullAdapter(app.get(getQueueToken('scorecard-background'))),
+      new BullAdapter(app.get(getQueueToken('package-polling'))),
     ],
     serverAdapter,
   });

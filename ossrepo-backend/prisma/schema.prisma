@@ -149,6 +149,11 @@ model Packages {
   downloads    Int? // NPM download count
   summary      String? // AI-generated summary
 
+  // Polling fields
+  latest_commit_sha String?   // Latest commit SHA for polling
+  default_branch    String?   // Default branch (e.g., "main", "master")
+  last_polled_at    DateTime? // When the package was last checked for updates
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
