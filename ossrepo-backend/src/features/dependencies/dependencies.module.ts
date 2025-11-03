@@ -11,6 +11,7 @@ import { PackageScorecardService } from './services/package-scorecard.service';
 import { PackageVulnerabilityService } from './services/package-vulnerability.service';
 import { MonthlyCommitsService } from './services/monthly-commits.service';
 import { ContributorProfileUpdaterService } from './services/contributor-profile-updater.service';
+import { AnomalyDetectionService } from './services/anomaly-detection.service';
 import { PackagePollingProcessor } from './processors/package-polling.processor';
 import { GitHubApiService } from '../activity/services/github-api.service';
 import { ActivityAnalysisService } from '../activity/services/activity-analysis.service';
@@ -34,6 +35,7 @@ import { AISummaryService } from '../activity/services/ai-summary.service';
     PackageVulnerabilityService,
     MonthlyCommitsService,
     ContributorProfileUpdaterService,
+    AnomalyDetectionService,
     GitHubApiService,
     ActivityAnalysisService,
     GitManagerService,
