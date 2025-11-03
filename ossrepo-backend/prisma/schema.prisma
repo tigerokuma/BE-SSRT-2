@@ -129,6 +129,7 @@ model Packages {
   id       String  @id @default(uuid())
   name     String  @unique
   repo_url String?
+  npm_url  String? // NPM package URL
   license  String? // Package license (e.g., "MIT", "Apache-2.0", "GPL-3.0")
 
   // Processing status
@@ -145,7 +146,13 @@ model Packages {
   // Metadata
   stars        Int?
   contributors Int?
+  downloads    Int? // NPM download count
   summary      String? // AI-generated summary
+
+  // Polling fields
+  latest_commit_sha String?   // Latest commit SHA for polling
+  default_branch    String?   // Default branch (e.g., "main", "master")
+  last_polled_at    DateTime? // When the package was last checked for updates
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -156,6 +163,8 @@ model Packages {
   commits             PackageCommit[]
   packageContributors PackageContributor[]
   scorecardHistory    PackageScorecardHistory[]
+  versions            PackageVersion[]
+  monthlyCommits      PackageMonthlyCommits[]
 }
 
 model PackageCommit {
@@ -181,24 +190,27 @@ model PackageCommit {
 }
 
 model PackageContributor {
-  id                    String   @id @default(uuid())
-  package_id            String
-  author_email          String
-  author_name           String?
-  total_commits         Int
-  avg_lines_added       Float
-  avg_lines_deleted     Float
-  avg_files_changed     Float
-  stddev_lines_added    Float
-  stddev_lines_deleted  Float
-  stddev_files_changed  Float
-  commit_time_histogram Json
-  typical_days_active   Json
-  files_worked_on       Json // Histogram of files the contributor has worked on
-  first_commit_date     DateTime
-  last_commit_date      DateTime
-  created_at            DateTime @default(now())
-  updated_at            DateTime @updatedAt
+  id                        String   @id @default(uuid())
+  package_id                String
+  author_email              String
+  author_name               String?
+  total_commits             Int
+  avg_lines_added           Float
+  avg_lines_deleted         Float
+  avg_files_changed         Float
+  stddev_lines_added        Float
+  stddev_lines_deleted      Float
+  stddev_files_changed      Float
+  avg_commit_message_length Float @default(0)
+  stddev_commit_message_length Float @default(0)
+  insert_to_delete_ratio    Float @default(0)
+  commit_time_histogram     Json
+  typical_days_active       Json
+  files_worked_on           Json // Histogram of files the contributor has worked on
+  first_commit_date         DateTime
+  last_commit_date          DateTime
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
 
   package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
 
@@ -211,6 +223,7 @@ model PackageScorecardHistory {
   id             String   @id @default(uuid())
   package_id     String
   commit_sha     String
+  commit_date    DateTime @default(now()) // Date of the actual commit
   score          Float
   scorecard_data Json
   source         String // 'api' or 'local'
@@ -220,7 +233,48 @@ model PackageScorecardHistory {
 
   @@index([package_id])
   @@index([commit_sha])
+  @@index([commit_date])
   @@map("package_scorecard_history")
+}
+
+model PackageVersion {
+  id                    String   @id @default(uuid())
+  package_id            String
+  version               String
+  release_date          DateTime
+  vulnerability_count   Int      @default(0)
+  critical_count        Int      @default(0)
+  high_count            Int      @default(0)
+  medium_count          Int      @default(0)
+  low_count             Int      @default(0)
+  last_checked          DateTime @default(now())
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@unique([package_id, version])
+  @@index([package_id])
+  @@index([version])
+  @@index([release_date])
+  @@map("package_versions")
+}
+
+model PackageMonthlyCommits {
+  id           String   @id @default(uuid())
+  package_id   String
+  year         Int
+  month        Int      // 1-12
+  commit_count Int      @default(0)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@unique([package_id, year, month])
+  @@index([package_id])
+  @@index([year, month])
+  @@map("package_monthly_commits")
 }
 
 model Watchlist {

@@ -70,6 +70,9 @@ import { ManualProcessorService } from './manual-processor.service';
       {
         name: 'scorecard-background',
       },
+      {
+        name: 'package-polling',
+      },
     ),
   ],
   providers: [ManualProcessorService],

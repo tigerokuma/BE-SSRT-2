@@ -141,7 +141,8 @@ export class PackageScorecardService {
           latestCommit.sha,
           apiResult.score,
           apiResult.data,
-          'api'
+          'api',
+          latestCommit.timestamp
         );
         this.logger.log(`✅ Stored API scorecard for commit ${latestCommit.sha}`);
       }
@@ -172,7 +173,8 @@ export class PackageScorecardService {
             commit.sha,
             localResult.score,
             localResult.data,
-            'local'
+            'local',
+            commit.timestamp
           );
           this.logger.log(`✅ Stored local scorecard for commit ${commit.sha} (${commit.timestamp.toISOString().split('T')[0]})`);
         } else {
@@ -234,20 +236,34 @@ export class PackageScorecardService {
     commitSha: string,
     score: number,
     data: any,
-    source: 'api' | 'local'
+    source: 'api' | 'local',
+    commitDate?: Date
   ): Promise<void> {
     try {
+      // Get commit date from database if not provided
+      let actualCommitDate = commitDate;
+      if (!actualCommitDate) {
+        const commit = await this.prisma.packageCommit.findFirst({
+          where: {
+            package_id: packageId,
+            sha: commitSha
+          }
+        });
+        actualCommitDate = commit?.timestamp || new Date();
+      }
+
       await this.prisma.packageScorecardHistory.create({
         data: {
           package_id: packageId,
           commit_sha: commitSha,
+          commit_date: actualCommitDate,
           score,
           scorecard_data: data,
           source,
         }
       });
 
-      this.logger.log(`💾 Stored scorecard data for package ${packageId}, commit ${commitSha.substring(0, 8)}`);
+      this.logger.log(`💾 Stored scorecard data for package ${packageId}, commit ${commitSha.substring(0, 8)} (${actualCommitDate.toISOString()})`);
     } catch (error) {
       this.logger.error(`❌ Failed to store scorecard data:`, error);
       throw error;
