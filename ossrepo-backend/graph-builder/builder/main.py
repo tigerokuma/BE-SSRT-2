@@ -11,23 +11,27 @@ import time
 import platform
 import tempfile
 
-from .build_engine import run_ast_extraction, update_task_status
+from .build_engine import (
+    run_branch_ingest,
+    update_task_status,
+)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     force=True,
-    stream=sys.stderr
+    stream=sys.stderr,
 )
 
 app = FastAPI()
 
 
 class BuildRequest(BaseModel):
-    repoId: str
-    repoPath: str
+    repoId: str                     # e.g. "owner/repo"
     taskId: str
-    commitId: Optional[str] = None
+    branch: Optional[str] = "main"  # which branch to walk
+    repoPath: Optional[str] = None  # optional local path (otherwise we clone into a temp dir)
+    startSha: Optional[str] = None  # OPTIONAL: start AFTER this sha (exclusive), otherwise continue from graph cursor
 
 
 # ---------- Robust deletion utilities (Windows-friendly) ----------
@@ -81,18 +85,16 @@ def rmtree_robust(path: str, retries: int = 6, base_delay: float = 0.25) -> None
 # ------------------------------ Build task ------------------------------
 
 def run_build_task(req: BuildRequest):
-    logging.info(f"🚀 Starting build task: {req.taskId} for repo {req.repoId}")
-    update_task_status(req.taskId, "in_progress", "Task started by builder")
+    logging.info(f"🚀 Starting branch ingest: task={req.taskId} repo={req.repoId} branch={req.branch}")
+    update_task_status(req.taskId, "in_progress", f"Branch ingest started for {req.repoId}#{req.branch}")
 
     use_temp = not req.repoPath or not req.repoPath.strip()
     workdir = None
 
     if use_temp:
-        # use an isolated temporary workspace
         workdir = tempfile.mkdtemp(prefix=f"build-{req.taskId}-")
         repo_dir = os.path.join(workdir, "repo")
     else:
-        # honor provided repoPath; pre-clean robustly
         repo_dir = req.repoPath
         if os.path.exists(repo_dir):
             try:
@@ -103,47 +105,32 @@ def run_build_task(req: BuildRequest):
                 return
 
     try:
-        # Clone the repo
+        # Clone and checkout branch
         subprocess.run(["gh", "repo", "clone", req.repoId, repo_dir], check=True)
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", os.path.abspath(repo_dir)], check=False)
+        subprocess.run(["git", "fetch", "--all", "--tags", "--prune"], cwd=repo_dir, check=True)
+        subprocess.run(["git", "checkout", req.branch], cwd=repo_dir, check=True)
+        subprocess.run(["git", "pull", "--ff-only"], cwd=repo_dir, check=False)
 
-        # Mark repo safe (fix “unsafe repository / dubious ownership”)
-        subprocess.run(
-            ["git", "config", "--global", "--add", "safe.directory", os.path.abspath(repo_dir)],
-            check=False
-        )
-
-        # If commitId is provided, checkout that commit
-        if req.commitId:
-            subprocess.run(["git", "checkout", req.commitId], cwd=repo_dir, check=True)
-            commit_id = req.commitId
-        else:
-            # Otherwise, get current HEAD commit hash
-            completed = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=repo_dir,
-                capture_output=True, text=True, check=True
-            )
-            commit_id = completed.stdout.strip()
-            logging.info(f"No commitId provided. Using current HEAD: {commit_id}")
-
-        # Ensure we have enough history for `git blame`
-        # (works for shallow clones; harmless if already full)
-        subprocess.run(["git", "fetch", "--unshallow"], cwd=repo_dir, check=False)
-        subprocess.run(["git", "fetch", "--depth=1000"], cwd=repo_dir, check=False)
-
-        # Sanity logs to confirm a real git repo
-        subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_dir, check=True)
-        head_line = subprocess.run(
-            ["git", "log", "-1", "--pretty=%h %an %ad -- %s"],
-            cwd=repo_dir, capture_output=True, text=True, check=False
+        # Head sha (for logging only)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_dir,
+            capture_output=True, text=True, check=True
         ).stdout.strip()
-        logging.info(f"[git] HEAD: {head_line or commit_id}")
+        logging.info(f"[git] {req.repoId}#{req.branch} HEAD: {head_sha}")
 
-        # Run your pipeline (now blame should work)
-        run_ast_extraction(
-            repo_dir,
-            req.repoId,
-            req.taskId,
-            commit_id,
+        # Limits for safety (tunable via env)
+        max_commits = int(os.getenv("WALK_MAX_COMMITS", "0"))  # 0 = walk all available
+        workers = int(os.getenv("WALK_WORKERS", "8"))
+
+        run_branch_ingest(
+            repo_path=repo_dir,
+            repo_id=req.repoId,
+            branch=req.branch or "main",
+            task_id=req.taskId,
+            start_exclusive_sha=req.startSha,   # if None, we continue from graph cursor
+            max_commits=max_commits,
+            workers=workers,
         )
 
     except subprocess.CalledProcessError as e:
@@ -155,7 +142,6 @@ def run_build_task(req: BuildRequest):
         update_task_status(req.taskId, "failed", f"Unhandled error: {e}")
 
     finally:
-        # CLEANUP: small delay to let any lingering processes release handles
         time.sleep(0.2)
         try:
             if use_temp and workdir and os.path.exists(workdir):
@@ -172,7 +158,9 @@ def run_build_task(req: BuildRequest):
 def trigger_build(req: BuildRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(run_build_task, req)
     return {
-        "message": "Build started in background",
+        "message": "Branch ingest started",
         "taskId": req.taskId,
-        "status": "queued"
+        "status": "queued",
+        "repo": req.repoId,
+        "branch": req.branch or "main",
     }
