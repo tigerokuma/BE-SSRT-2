@@ -111,11 +111,88 @@ export class ScorecardPriorityProcessor {
         this.logger.log(`📊 Scorecard details:`, {
           score: score,
           checks: scorecardData.checks?.length || 0,
-          date: scorecardData.date
+          date: scorecardData.date,
+          commit: scorecardData.commit,
+          commitDate: scorecardData.commitDate
         });
         
         // Convert score from 0-10 scale to 0-100 scale
         const scorecardScore = Math.round(score * 10);
+        
+        // Get the commit date from scorecard data or fallback to latest commit
+        let commitDate = new Date();
+        
+        if (scorecardData.commitDate) {
+          // Use the commit date from scorecard output if available
+          commitDate = new Date(scorecardData.commitDate);
+          this.logger.log(`📅 Using commit date from scorecard: ${commitDate.toISOString()}`);
+        } else if (scorecardData.commit) {
+          // Try to find the specific commit in our database
+          const specificCommit = await this.prisma.packageCommit.findFirst({
+            where: { 
+              package_id: packageId,
+              sha: scorecardData.commit
+            }
+          });
+          
+          if (specificCommit) {
+            commitDate = specificCommit.timestamp;
+            this.logger.log(`📅 Using commit date from database for SHA ${scorecardData.commit}: ${commitDate.toISOString()}`);
+          } else {
+            // Fallback to latest commit
+            const latestCommit = await this.prisma.packageCommit.findFirst({
+              where: { package_id: packageId },
+              orderBy: { timestamp: 'desc' }
+            });
+            commitDate = latestCommit?.timestamp || new Date();
+            this.logger.log(`📅 Using latest commit date as fallback: ${commitDate.toISOString()}`);
+          }
+        } else {
+          // Try to get commit date from GitHub API
+          try {
+            const githubToken = process.env.GITHUB_TOKEN;
+            if (githubToken && scorecardData.commit) {
+              const githubResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${scorecardData.commit}`, {
+                headers: {
+                  'Authorization': `token ${githubToken}`,
+                  'Accept': 'application/vnd.github.v3+json'
+                }
+              });
+              
+              if (githubResponse.ok) {
+                const commitData = await githubResponse.json();
+                commitDate = new Date(commitData.commit.committer.date);
+                this.logger.log(`📅 Using commit date from GitHub API: ${commitDate.toISOString()}`);
+              } else {
+                throw new Error(`GitHub API returned ${githubResponse.status}`);
+              }
+            } else {
+              throw new Error('No GitHub token or commit SHA available');
+            }
+          } catch (githubError) {
+            this.logger.warn(`⚠️ Failed to get commit date from GitHub API: ${githubError.message}`);
+            
+            // Fallback to latest commit
+            const latestCommit = await this.prisma.packageCommit.findFirst({
+              where: { package_id: packageId },
+              orderBy: { timestamp: 'desc' }
+            });
+            commitDate = latestCommit?.timestamp || new Date();
+            this.logger.log(`📅 Using latest commit date as fallback: ${commitDate.toISOString()}`);
+          }
+        }
+        
+        // Create scorecard history entry
+        await this.prisma.packageScorecardHistory.create({
+          data: {
+            package_id: packageId,
+            commit_sha: scorecardData.commit || 'unknown',
+            commit_date: commitDate,
+            score: scorecardScore,
+            scorecard_data: scorecardData,
+            source: 'local'
+          }
+        });
         
         // Update package with scorecard score
         await this.prisma.packages.update({

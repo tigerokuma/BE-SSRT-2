@@ -22,8 +22,8 @@
   "dependencies": {
     "@bull-board/api": "^6.11.1",
     "@bull-board/express": "^6.11.1",
-    "@clerk/backend": "^2.18.3",
-    "@clerk/types": "^4.95.0",
+    "@clerk/backend": "^2.19.0",
+    "@clerk/types": "^4.95.1",
     "@cyclonedx/cdxgen": "^11.4.4",
     "@nestjs/axios": "^4.0.0",
     "@nestjs/bull": "^11.0.2",
