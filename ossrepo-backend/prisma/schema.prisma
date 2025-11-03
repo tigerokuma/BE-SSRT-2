@@ -207,6 +207,7 @@ model PackageContributor {
   insert_to_delete_ratio    Float @default(0)
   commit_time_histogram     Json
   typical_days_active       Json
+  commit_time_heatmap        Json // 7x24 grid: [day][hour] = commit count (0-6 for days, 0-23 for hours)
   files_worked_on           Json // Histogram of files the contributor has worked on
   first_commit_date         DateTime
   last_commit_date          DateTime

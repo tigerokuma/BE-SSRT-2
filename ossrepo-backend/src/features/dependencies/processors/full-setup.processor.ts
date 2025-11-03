@@ -294,6 +294,7 @@ export class FullSetupProcessor {
       // Build time histogram
       const commitTimeHistogram = this.buildCommitTimeHistogram(timestamps);
       const typicalDaysActive = this.buildTypicalDaysActive(timestamps);
+      const commitTimeHeatmap = this.buildCommitTimeHeatmap(timestamps);
 
       // Convert files worked on Map to object for JSON storage
       const filesWorkedOnHistogram = Object.fromEntries(profile.files_worked_on);
@@ -329,6 +330,7 @@ export class FullSetupProcessor {
         insert_to_delete_ratio: insertToDeleteRatio,
         commit_time_histogram: commitTimeHistogram,
         typical_days_active: typicalDaysActive,
+        commit_time_heatmap: commitTimeHeatmap,
         files_worked_on: filesWorkedOnHistogram,
         first_commit_date: firstCommitDate,
         last_commit_date: lastCommitDate,
@@ -367,6 +369,7 @@ export class FullSetupProcessor {
         insert_to_delete_ratio: profile.insert_to_delete_ratio,
         commit_time_histogram: profile.commit_time_histogram,
         typical_days_active: profile.typical_days_active,
+        commit_time_heatmap: profile.commit_time_heatmap,
         files_worked_on: profile.files_worked_on,
         first_commit_date: profile.first_commit_date,
         last_commit_date: profile.last_commit_date,
@@ -554,6 +557,26 @@ export class FullSetupProcessor {
     }
     
     return daysActive;
+  }
+
+  /**
+   * Build commit time heatmap (7x24 grid) from timestamps
+   * Format: [day][hour] where day is 0-6 (Sunday-Saturday) and hour is 0-23
+   */
+  private buildCommitTimeHeatmap(timestamps: Date[]): number[][] {
+    // Initialize 7x24 grid (7 days, 24 hours)
+    const heatmap: number[][] = Array(7).fill(null).map(() => Array(24).fill(0));
+    
+    for (const timestamp of timestamps) {
+      const dayOfWeek = timestamp.getDay(); // 0 = Sunday, 6 = Saturday
+      const hour = timestamp.getHours(); // 0-23
+      
+      if (dayOfWeek >= 0 && dayOfWeek < 7 && hour >= 0 && hour < 24) {
+        heatmap[dayOfWeek][hour]++;
+      }
+    }
+    
+    return heatmap;
   }
 
   private calculateBusFactor(contributors: any[]): number {
