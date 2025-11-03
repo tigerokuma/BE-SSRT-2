@@ -3,6 +3,8 @@ import { SbomBuilderService } from '../services/sbom-builder.service';
 import { SbomQueryService } from '../services/sbom-query.service';
 import { SbomMemgraph } from '../services/sbom-graph-builder.service';
 import { CreateSbomOptionsDto } from '../dto/sbom.dto';
+import { DependencyOptimizerService } from '../services/dependency-upgrade.service';
+
 
 @Controller('sbom')
 export class SbomController {
@@ -10,6 +12,7 @@ export class SbomController {
     private readonly sbomBuilderService: SbomBuilderService,
     private readonly sbomQueryService: SbomQueryService,
     private readonly sbomMemgraph: SbomMemgraph,
+    private readonly optimizer: DependencyOptimizerService,
   ) {}
 
   @Get('dep-list/:project_id')
@@ -112,4 +115,10 @@ export class SbomController {
   // async mergeSbom(@Param('project_id') project_id: string) {
   //   return await this.sbomBuilderService.mergeSbom(project_id);
   // }
+
+  @Post('recommendations')
+  async getRecommendations(@Param('project_id') project_id: string) {
+    return this.optimizer.getUpgradeRecommendations(project_id);
+  }
+
 }

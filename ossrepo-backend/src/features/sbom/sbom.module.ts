@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { SbomProcessor } from './processors/sbom.processor';
 import { SbomMemgraph } from './services/sbom-graph-builder.service';
+import { DependencyOptimizerService } from './services/dependency-upgrade.service';
 
 @Module({
   imports: [BullModule.registerQueue({ name: 'sbom' })],
@@ -21,6 +22,7 @@ import { SbomMemgraph } from './services/sbom-graph-builder.service';
     QueueModule,
     PrismaService,
     SbomMemgraph,
+    DependencyOptimizerService,
   ],
   controllers: [SbomController],
   exports: [SbomBuilderService, SbomQueryService, SbomQueueService],
