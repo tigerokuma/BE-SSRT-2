@@ -1,13 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PackageSearchService } from './package-search.service';
 import { PackageCardDto, PackageDetailsDto } from '../dto/packages.dto';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { GeminiService } from '../../../common/ai/gemini.service';
 
 @Injectable()
 export class PackagesService {
+  private readonly logger = new Logger(PackagesService.name);
+
   constructor(
     private readonly packageSearchService: PackageSearchService,
     private readonly prisma: PrismaService,
+    private readonly geminiService: GeminiService,
   ) {}
 
   async searchPackages(name: string): Promise<PackageCardDto[]> {
@@ -278,5 +282,54 @@ export class PackagesService {
    */
   private createEmptyHeatmap(): number[][] {
     return Array(7).fill(null).map(() => Array(24).fill(0));
+  }
+
+  /**
+   * Summarize commits using Gemini API
+   */
+  async summarizeCommits(commits: any[]): Promise<string> {
+    try {
+      if (!commits || commits.length === 0) {
+        throw new Error('No commits provided for summarization');
+      }
+
+      this.logger.log(`🤖 Summarizing ${commits.length} commits using Gemini API`);
+
+      // Format commits for the prompt
+      const commitsText = commits
+        .slice(0, 50) // Limit to 50 most recent commits
+        .map((commit, index) => {
+          const date = new Date(commit.timestamp).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          });
+          return `${index + 1}. [${date}] ${commit.author}: ${commit.message}
+   - Lines: +${commit.lines_added || 0}/-${commit.lines_deleted || 0}
+   - Files: ${commit.files_changed || 0}
+   - Anomaly Score: ${commit.anomaly_score || 0}`;
+        })
+        .join('\n\n');
+
+      const prompt = `You are analyzing recent commit activity for a software package. Here are the recent commits:
+
+${commitsText}
+
+Please provide a comprehensive 3-4 sentence summary of the commit activity that highlights:
+1. Overall activity level and patterns
+2. Types of changes (features, fixes, refactoring, etc.)
+3. Notable contributors or changes
+4. Any concerning patterns or anomalies
+
+Write in a clear, professional tone suitable for developers evaluating this package.`;
+
+      const summary = await this.geminiService.generateRepositorySummary(prompt);
+      
+      this.logger.log(`✅ Generated commit summary: ${summary.length} characters`);
+      return summary.trim();
+    } catch (error) {
+      this.logger.error(`❌ Failed to summarize commits:`, error);
+      throw error;
+    }
   }
 }

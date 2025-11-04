@@ -6,6 +6,8 @@ import {
   BadRequestException,
   NotFoundException,
   Delete,
+  Post,
+  Body,
 } from '@nestjs/common';
 import { PackagesService } from '../services/packages.service';
 import { PackageVulnerabilityService } from '../../dependencies/services/package-vulnerability.service';
@@ -279,6 +281,36 @@ export class PackagesController {
       package_id: packageId.trim(),
       commits,
       count: commits.length,
+    };
+  }
+
+  @Post(':packageId/commits/summarize')
+  async summarizeCommits(
+    @Param('packageId') packageId: string,
+    @Body() body: { commits?: any[] },
+  ) {
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    // If commits are provided in body, use them; otherwise fetch from database
+    let commits = body.commits;
+    
+    if (!commits || commits.length === 0) {
+      // Fetch commits from database if not provided
+      commits = await this.packagesService.getPackageCommits(packageId.trim(), 50);
+    }
+
+    if (!commits || commits.length === 0) {
+      throw new BadRequestException('No commits available to summarize');
+    }
+
+    const summary = await this.packagesService.summarizeCommits(commits);
+
+    return {
+      package_id: packageId.trim(),
+      summary,
+      commits_analyzed: commits.length,
     };
   }
 
