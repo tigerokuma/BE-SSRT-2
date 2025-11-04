@@ -47,6 +47,7 @@
     "neo4j-driver": "^5.28.1",
     "nestjs-injectable": "^0.1.1",
     "node-fetch": "^3.3.2",
+    "node-ssh": "^13.2.1",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "passport-jwt": "^4.0.1",
