@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { ConnectionService } from '../../../common/azure/azure.service';
 
 export interface ScorecardResult {
   repo: string;
@@ -46,6 +43,7 @@ export class HealthAnalysisService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly azureService: ConnectionService,
   ) {
     this.scorecardPath = this.configService.get<string>(
       'SCORECARD_PATH',
@@ -354,13 +352,13 @@ export class HealthAnalysisService {
 
       if (repoPath) {
         // Use local repository path
-        command = `${this.scorecardPath} --local=${repoPath} --commit=${commitSha} --format=json --show-details`;
+        command = `docker run --rm gcr.io/openssf/scorecard:stable --local=${repoPath} --commit=${commitSha} --format=json --show-details`;
         this.logger.log(
           `🔍 Running Scorecard on local repository ${repoPath}@${commitSha.substring(0, 8)}`,
         );
       } else {
         // Fallback to GitHub URL
-        command = `${this.scorecardPath} --repo=github.com/${owner}/${repo} --commit=${commitSha} --format=json --show-details`;
+        command = `docker run --rm gcr.io/openssf/scorecard:stable --repo=github.com/${owner}/${repo} --commit=${commitSha} --format=json --show-details`;
         this.logger.log(
           `🔍 Running Scorecard on ${owner}/${repo}@${commitSha.substring(0, 8)}`,
         );
@@ -370,9 +368,7 @@ export class HealthAnalysisService {
       let stderr: string;
 
       try {
-        const result = await execAsync(command, {
-          timeout: 400000,
-        });
+        const result = await this.azureService.executeRemoteCommand(command);
         stdout = result.stdout;
         stderr = result.stderr;
       } catch (execError: any) {
