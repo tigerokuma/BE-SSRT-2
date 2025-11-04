@@ -256,6 +256,32 @@ export class PackagesController {
     };
   }
 
+  @Get(':packageId/commits')
+  async getPackageCommits(
+    @Param('packageId') packageId: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+      throw new BadRequestException('Limit must be a number between 1 and 100');
+    }
+
+    const commits = await this.packagesService.getPackageCommits(
+      packageId.trim(),
+      limitNum,
+    );
+
+    return {
+      package_id: packageId.trim(),
+      commits,
+      count: commits.length,
+    };
+  }
+
   @Delete('cache/refresh')
   async forceRefreshCache(@Query('repo_url') repoUrl?: string) {
     const result = await this.packagesService.forceRefreshCache(repoUrl);

@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PackageSearchService } from './package-search.service';
 import { PackageCardDto, PackageDetailsDto } from '../dto/packages.dto';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
 export class PackagesService {
-  constructor(private readonly packageSearchService: PackageSearchService) {}
+  constructor(
+    private readonly packageSearchService: PackageSearchService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async searchPackages(name: string): Promise<PackageCardDto[]> {
     const packages = await this.packageSearchService.searchPackages(name);
@@ -163,5 +167,116 @@ export class PackagesService {
         contributors: pkg.githubRepo.contributors,
       }),
     };
+  }
+
+  /**
+   * Get package commits with anomaly scores and contributor profiles
+   */
+  async getPackageCommits(packageId: string, limit: number = 50): Promise<any[]> {
+    try {
+      const commits = await this.prisma.$queryRaw<any[]>`
+        SELECT 
+          pc.id,
+          pc.sha,
+          pc.author,
+          pc.author_email,
+          pc.message,
+          pc.timestamp,
+          pc.lines_added,
+          pc.lines_deleted,
+          pc.files_changed,
+          COALESCE(pa.anomaly_score, 0)::float as anomaly_score,
+          pa.score_breakdown,
+          contrib.total_commits,
+          contrib.avg_lines_added,
+          contrib.avg_lines_deleted,
+          contrib.avg_files_changed,
+          contrib.stddev_lines_added,
+          contrib.stddev_lines_deleted,
+          contrib.stddev_files_changed,
+          contrib.commit_time_histogram,
+          contrib.typical_days_active,
+          contrib.commit_time_heatmap
+        FROM package_commits pc
+        LEFT JOIN package_anomalies pa ON pc.sha = pa.commit_sha
+        LEFT JOIN package_contributors contrib ON contrib.package_id = pc.package_id 
+          AND contrib.author_email = pc.author_email
+        WHERE pc.package_id = ${packageId}
+        ORDER BY pc.timestamp DESC
+        LIMIT ${limit}
+      `;
+
+      return commits.map((commit) => ({
+        id: commit.id,
+        sha: commit.sha,
+        author: commit.author,
+        author_email: commit.author_email,
+        message: commit.message,
+        timestamp: commit.timestamp,
+        lines_added: commit.lines_added,
+        lines_deleted: commit.lines_deleted,
+        files_changed: commit.files_changed,
+        anomaly_score: commit.anomaly_score || 0,
+        score_breakdown: commit.score_breakdown || [],
+        contributor_profile: {
+          total_commits: commit.total_commits || 0,
+          avg_lines_added: commit.avg_lines_added || 0,
+          avg_lines_deleted: commit.avg_lines_deleted || 0,
+          avg_files_changed: commit.avg_files_changed || 0,
+          stddev_lines_added: commit.stddev_lines_added || 0,
+          stddev_lines_deleted: commit.stddev_lines_deleted || 0,
+          stddev_files_changed: commit.stddev_files_changed || 0,
+          commit_time_histogram: commit.commit_time_histogram || {},
+          typical_days_active: commit.typical_days_active || {},
+          commit_time_heatmap: commit.commit_time_heatmap || this.createEmptyHeatmap(),
+        },
+      }));
+    } catch (error) {
+      console.error(`❌ Failed to get package commits for ${packageId}:`, error);
+      // Fallback query - just get commits without joins
+      try {
+        const commits = await this.prisma.packageCommit.findMany({
+          where: { package_id: packageId },
+          orderBy: { timestamp: 'desc' },
+          take: limit,
+        });
+
+        return commits.map((commit) => ({
+          id: commit.id,
+          sha: commit.sha,
+          author: commit.author,
+          author_email: commit.author_email,
+          message: commit.message,
+          timestamp: commit.timestamp,
+          lines_added: commit.lines_added,
+          lines_deleted: commit.lines_deleted,
+          files_changed: commit.files_changed,
+          anomaly_score: 0,
+          score_breakdown: [],
+          contributor_profile: {
+            total_commits: 0,
+            avg_lines_added: 0,
+            avg_lines_deleted: 0,
+            avg_files_changed: 0,
+            stddev_lines_added: 0,
+            stddev_lines_deleted: 0,
+            stddev_files_changed: 0,
+            commit_time_histogram: {},
+            typical_days_active: {},
+            commit_time_heatmap: this.createEmptyHeatmap(),
+          },
+        }));
+      } catch (fallbackError) {
+        console.error(`❌ Fallback query also failed:`, fallbackError);
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Create empty 7x24 heatmap (7 days, 24 hours)
+   */
+  private createEmptyHeatmap(): number[][] {
+    return Array(7).fill(null).map(() => Array(24).fill(0));
   }
 }
