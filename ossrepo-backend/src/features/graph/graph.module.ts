@@ -8,9 +8,11 @@ import { HttpModule } from '@nestjs/axios';
 import { LlmService } from './services/llm.service';
 import { MemgraphService } from './services/memgraph.service';
 import { AiModule } from '../../common/ai/ai.module';
+import { AzureModule } from '../../common/azure/azure.module';
+
 @Module({
   controllers: [GraphController],
-  imports: [HttpModule, AiModule],
+  imports: [HttpModule, AiModule, AzureModule],
   providers: [
     GraphService,
     GraphBuilderService,
