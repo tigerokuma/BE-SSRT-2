@@ -17,12 +17,14 @@ import { GitHubApiService } from '../activity/services/github-api.service';
 import { ActivityAnalysisService } from '../activity/services/activity-analysis.service';
 import { GitManagerService } from '../activity/services/git-manager.service';
 import { AISummaryService } from '../activity/services/ai-summary.service';
+import { PackagesModule } from '../packages/packages.module';
 
 @Module({
   imports: [
     PrismaModule,
     QueueModule,
     AiModule,
+    PackagesModule,
   ],
   providers: [
     FastSetupProcessor,

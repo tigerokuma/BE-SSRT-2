@@ -12,6 +12,8 @@ import { OsvVulnerabilityService } from './services/osv-vulnerability.service';
 import { OsvVulnerabilityRepository } from './repositories/osv-vulnerability.repository';
 import { PackageVulnerabilityService } from '../dependencies/services/package-vulnerability.service';
 import { MonthlyCommitsService } from '../dependencies/services/monthly-commits.service';
+import { PackageAlertSettingsService } from './services/package-alert-settings.service';
+import { PackageAlertService } from './services/package-alert.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { AiModule } from '../../common/ai/ai.module';
 
@@ -33,10 +35,13 @@ import { AiModule } from '../../common/ai/ai.module';
     OsvVulnerabilityRepository,
     PackageVulnerabilityService,
     MonthlyCommitsService,
+    PackageAlertSettingsService,
+    PackageAlertService,
   ],
   exports: [
     PackagesService,
     PackageSearchService,
+    OsvVulnerabilityService,
     // Export any services that watchlist might need
   ],
 })

@@ -10,6 +10,7 @@ import { AnomalyDetectionService } from '../services/anomaly-detection.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as fs from 'fs';
+import { OsvVulnerabilityService } from '../../packages/services/osv-vulnerability.service';
 
 interface PackagePollingJobData {
   type: 'daily-poll' | 'poll-package';
@@ -38,6 +39,7 @@ export class PackagePollingProcessor implements OnModuleInit {
     private readonly monthlyCommits: MonthlyCommitsService,
     private readonly contributorUpdater: ContributorProfileUpdaterService,
     private readonly anomalyDetection: AnomalyDetectionService,
+    private readonly osvVulnerabilityService: OsvVulnerabilityService,
     @InjectQueue('package-polling') private readonly pollingQueue: Queue,
     @InjectQueue('dependency-full-setup') private readonly setupQueue: Queue,
   ) {}
@@ -292,14 +294,87 @@ export class PackagePollingProcessor implements OnModuleInit {
       repoPath = cloneResult;
 
       // Extract new commits
-      const newCommits = await this.extractNewCommits(
-        repoPath,
-        storedLatestSha,
-        latestRemoteSha,
+      this.logger.log(
+        `🔍 Extracting commits from ${storedLatestSha.substring(0, 8)} to ${latestRemoteSha.substring(0, 8)}`,
       );
+      
+      let newCommits: CommitDetails[] = [];
+      try {
+        newCommits = await this.extractNewCommits(
+          repoPath,
+          storedLatestSha,
+          latestRemoteSha,
+        );
+      } catch (extractError) {
+        // If SHA is not reachable, try deepening the clone
+        if (extractError.message && extractError.message.includes('not reachable')) {
+          this.logger.warn(
+            `⚠️ Stored SHA ${storedLatestSha.substring(0, 8)} is not reachable, deepening clone...`,
+          );
+          
+          // Deepen the existing clone incrementally
+          let deepened = false;
+          const deepenAmounts = [100, 200, 500, 1000, 2000];
+          
+          for (const amount of deepenAmounts) {
+            try {
+              const { exec } = require('child_process');
+              const { promisify } = require('util');
+              const execAsync = promisify(exec);
+              
+              this.logger.log(`🔍 Deepening clone by ${amount} commits...`);
+              await execAsync(`cd "${repoPath}" && git fetch --deepen=${amount}`);
+              
+              // Check if SHA is now reachable
+              try {
+                await execAsync(`cd "${repoPath}" && git merge-base --is-ancestor ${storedLatestSha} HEAD`);
+                this.logger.log(`✅ SHA ${storedLatestSha.substring(0, 8)} is now reachable after deepening by ${amount}`);
+                deepened = true;
+                break;
+              } catch (ancestorCheck) {
+                // Not reachable yet, continue deepening
+                continue;
+              }
+            } catch (deepenError) {
+              this.logger.warn(`Failed to deepen by ${amount}: ${deepenError.message}`);
+              continue;
+            }
+          }
+          
+          if (!deepened) {
+            this.logger.error(
+              `❌ Could not make stored SHA ${storedLatestSha.substring(0, 8)} reachable even after deepening. Updating to latest SHA.`,
+            );
+            await this.updateLatestCommitSha(packageId, latestRemoteSha);
+            return;
+          }
+          
+          // Try extracting again
+          try {
+            newCommits = await this.extractNewCommits(
+              repoPath,
+              storedLatestSha,
+              latestRemoteSha,
+            );
+          } catch (retryError) {
+            this.logger.error(
+              `❌ Still cannot extract commits after deepening: ${retryError.message}`,
+            );
+            await this.updateLatestCommitSha(packageId, latestRemoteSha);
+            return;
+          }
+        } else {
+          // Other error, just log and update SHA
+          this.logger.error(`Error extracting commits: ${extractError.message}`);
+          await this.updateLatestCommitSha(packageId, latestRemoteSha);
+          return;
+        }
+      }
 
       if (newCommits.length === 0) {
-        this.logger.log(`No new commits found in ${owner}/${repo}`);
+        this.logger.warn(
+          `⚠️ No new commits found in ${owner}/${repo} between ${storedLatestSha.substring(0, 8)} and ${latestRemoteSha.substring(0, 8)}`,
+        );
         await this.updateLatestCommitSha(packageId, latestRemoteSha);
         return;
       }
@@ -314,6 +389,9 @@ export class PackagePollingProcessor implements OnModuleInit {
       // Update latest commit SHA immediately after storing commits
       // This ensures we don't reprocess the same commits if later steps fail
       await this.updateLatestCommitSha(packageId, latestRemoteSha);
+
+      // Check for vulnerabilities and create alerts
+      await this.checkVulnerabilitiesAndCreateAlerts(packageId);
 
       // Detect anomalies in new commits
       await this.detectAnomalies(packageId, newCommits);
@@ -521,9 +599,19 @@ export class PackagePollingProcessor implements OnModuleInit {
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
+      // First verify that fromSha is actually reachable from HEAD
+      try {
+        await execAsync(`cd "${repoPath}" && git merge-base --is-ancestor ${fromSha} HEAD`);
+      } catch (ancestorError) {
+        // If fromSha is not an ancestor of HEAD, it's not in the history
+        throw new Error(`SHA ${fromSha.substring(0, 8)} is not reachable from HEAD - need to deepen clone`);
+      }
+
       // Get commits after fromSha (up to toSha if provided)
       const range = toSha ? `${fromSha}..${toSha}` : `${fromSha}..HEAD`;
       const gitLogCmd = `git log --pretty=format:"%H|%an|%ae|%ad|%s" --numstat ${range}`;
+      
+      this.logger.log(`📝 Running: cd "${repoPath}" && ${gitLogCmd}`);
       
       const { stdout, stderr } = await execAsync(
         `cd "${repoPath}" && ${gitLogCmd}`,
@@ -531,6 +619,8 @@ export class PackagePollingProcessor implements OnModuleInit {
           maxBuffer: 50 * 1024 * 1024, // 50MB buffer
         },
       );
+      
+      this.logger.log(`📝 Git log stdout length: ${stdout.length}, stderr: ${stderr || 'none'}`);
 
       if (stderr && !stderr.includes('warning')) {
         this.logger.warn(`Git log stderr: ${stderr}`);
@@ -555,6 +645,10 @@ export class PackagePollingProcessor implements OnModuleInit {
 
       return commits;
     } catch (error) {
+      // If the error indicates the SHA is not reachable, throw a special error
+      if (error.message && error.message.includes('not reachable')) {
+        throw error; // Re-throw to be caught by caller
+      }
       this.logger.error(`Error extracting new commits: ${error.message}`);
       return [];
     }
@@ -767,25 +861,353 @@ export class PackagePollingProcessor implements OnModuleInit {
 
         // Only store if score > 0
         if (result.totalScore > 0) {
-          await this.prisma.packageAnomaly.create({
-            data: {
-              package_id: packageId,
-              commit_sha: commit.sha,
-              contributor_id: contributor.id,
-              anomaly_score: result.totalScore,
-              score_breakdown: result.breakdown,
+          // Check if anomaly already exists
+          const existingAnomaly = await this.prisma.packageAnomaly.findUnique({
+            where: {
+              package_id_commit_sha: {
+                package_id: packageId,
+                commit_sha: commit.sha,
+              },
             },
           });
 
-          this.logger.log(
-            `🚨 Anomaly detected in commit ${commit.sha.substring(0, 8)}: score ${result.totalScore} (${result.breakdown.length} factors)`,
-          );
+          if (!existingAnomaly) {
+            await this.prisma.packageAnomaly.create({
+              data: {
+                package_id: packageId,
+                commit_sha: commit.sha,
+                contributor_id: contributor.id,
+                anomaly_score: result.totalScore,
+                score_breakdown: result.breakdown,
+              },
+            });
+
+            this.logger.log(
+              `🚨 Anomaly detected in commit ${commit.sha.substring(0, 8)}: score ${result.totalScore} (${result.breakdown.length} factors)`,
+            );
+
+            // Create alerts for projects using this package
+            await this.createAnomalyAlerts(packageId, commit.sha, result.totalScore, result.breakdown);
+          } else {
+            this.logger.log(
+              `⏭️ Anomaly already exists for commit ${commit.sha.substring(0, 8)}, skipping`,
+            );
+          }
         }
       } catch (error) {
         this.logger.error(`Error detecting anomalies for commit ${commit.sha}:`, error);
         // Continue with other commits
       }
     }
+  }
+
+  /**
+   * Check for vulnerabilities and create alerts
+   */
+  private async checkVulnerabilitiesAndCreateAlerts(packageId: string): Promise<void> {
+    try {
+      this.logger.log(`🔍 Checking OSV vulnerabilities for package ${packageId}`);
+      
+      // Get package name
+      const packageData = await this.prisma.packages.findUnique({
+        where: { id: packageId },
+        select: { name: true },
+      });
+
+      if (!packageData) {
+        this.logger.warn(`Package ${packageId} not found, skipping vulnerability check`);
+        return;
+      }
+
+      this.logger.log(`📦 Fetching vulnerabilities from OSV for package: ${packageData.name}`);
+      
+      // Get all vulnerabilities for this package
+      const vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(
+        packageData.name,
+        false, // Don't filter old vulnerabilities
+      );
+
+      if (vulnerabilities.length === 0) {
+        this.logger.log(`✅ No vulnerabilities found for ${packageData.name}`);
+        return;
+      }
+
+      this.logger.log(
+        `🔍 Found ${vulnerabilities.length} vulnerabilities for ${packageData.name}`,
+      );
+
+      // Find all BranchDependency records with this package_id
+      const branchDependencies = await this.prisma.branchDependency.findMany({
+        where: { package_id: packageId },
+        include: {
+          monitoredBranch: {
+            include: {
+              projects: true,
+            },
+          },
+        },
+      });
+
+      this.logger.log(
+        `📋 Found ${branchDependencies.length} branch dependencies using this package`,
+      );
+
+      let totalAlertsCreated = 0;
+      let totalAlertsSkipped = 0;
+
+      for (const dep of branchDependencies) {
+        const project = dep.monitoredBranch?.projects?.[0];
+        if (!project) {
+          this.logger.warn(`No project found for branch dependency ${dep.id}`);
+          continue;
+        }
+
+        this.logger.log(
+          `🔍 Checking vulnerabilities for project ${project.id}, package ${packageData.name}@${dep.version}`,
+        );
+
+        // Get alert settings for this project+package
+        const alertSettings = await this.prisma.projectPackageAlertSettings.findUnique({
+          where: {
+            project_id_package_id: {
+              project_id: project.id,
+              package_id: packageId,
+            },
+          },
+        });
+
+        const threshold = alertSettings?.vulnerability_threshold || 'medium';
+        this.logger.log(
+          `⚙️ Alert threshold for project ${project.id}: ${threshold}`,
+        );
+
+        let projectAlertsCreated = 0;
+        let projectAlertsSkipped = 0;
+
+        // Check each vulnerability
+        for (const vuln of vulnerabilities) {
+          // Check if version is affected
+          const isVersionAffected = this.isVersionAffectedByVulnerability(
+            dep.version,
+            vuln,
+          );
+
+          if (!isVersionAffected) {
+            continue;
+          }
+
+          // Extract severity from vulnerability
+          const severity = this.extractSeverityFromOsv(vuln.severity);
+
+          // Check if severity meets threshold
+          if (!this.meetsVulnerabilityThreshold(severity, threshold)) {
+            this.logger.log(
+              `⏭️ Skipping vulnerability ${vuln.id.substring(0, 8)}: severity ${severity} below threshold ${threshold}`,
+            );
+            continue;
+          }
+
+          // Check if alert already exists (this is how we know if it's new)
+          const existingAlert = await this.prisma.projectPackageAlert.findFirst({
+            where: {
+              project_id: project.id,
+              package_id: packageId,
+              vulnerability_id: vuln.id,
+              commit_sha: null,
+            },
+          });
+
+          if (existingAlert) {
+            this.logger.log(
+              `⏭️ Alert already exists for vulnerability ${vuln.id.substring(0, 8)} in project ${project.id} (not new)`,
+            );
+            projectAlertsSkipped++;
+            totalAlertsSkipped++;
+            continue; // Alert already exists - this vulnerability is not new
+          }
+
+          // Create alert (this is a new vulnerability)
+          await this.prisma.projectPackageAlert.create({
+            data: {
+              project_id: project.id,
+              package_id: packageId,
+              version: dep.version,
+              alert_type: 'vulnerability',
+              vulnerability_id: vuln.id,
+              severity: severity,
+              vulnerability_details: vuln as any,
+              status: 'unread',
+            },
+          });
+
+          this.logger.log(
+            `🚨 Created NEW vulnerability alert for project ${project.id}, package ${packageData.name}@${dep.version}, severity ${severity}, OSV ID: ${vuln.id.substring(0, 8)}`,
+          );
+          projectAlertsCreated++;
+          totalAlertsCreated++;
+        }
+
+        this.logger.log(
+          `📊 Project ${project.id}: Created ${projectAlertsCreated} new alerts, skipped ${projectAlertsSkipped} existing alerts`,
+        );
+      }
+
+      this.logger.log(
+        `✅ Vulnerability check complete for ${packageData.name}: ${totalAlertsCreated} new alerts created, ${totalAlertsSkipped} existing alerts skipped`,
+      );
+    } catch (error) {
+      this.logger.error(`Error checking vulnerabilities for package ${packageId}:`, error);
+      // Don't throw - vulnerability check failure shouldn't fail the job
+    }
+  }
+
+  /**
+   * Create anomaly alerts for projects using this package
+   */
+  private async createAnomalyAlerts(
+    packageId: string,
+    commitSha: string,
+    anomalyScore: number,
+    scoreBreakdown: any[],
+  ): Promise<void> {
+    try {
+      // Find all BranchDependency records with this package_id
+      const branchDependencies = await this.prisma.branchDependency.findMany({
+        where: { package_id: packageId },
+        include: {
+          monitoredBranch: {
+            include: {
+              projects: true,
+            },
+          },
+        },
+      });
+
+      for (const dep of branchDependencies) {
+        const project = dep.monitoredBranch?.projects?.[0];
+        if (!project) continue;
+
+        // Get alert settings for this project+package
+        const alertSettings = await this.prisma.projectPackageAlertSettings.findUnique({
+          where: {
+            project_id_package_id: {
+              project_id: project.id,
+              package_id: packageId,
+            },
+          },
+        });
+
+        const threshold = alertSettings?.anomaly_threshold || 50.0;
+
+        // Check if anomaly score meets threshold
+        if (anomalyScore < threshold) {
+          continue;
+        }
+
+        // Check if alert already exists
+        const existingAlert = await this.prisma.projectPackageAlert.findFirst({
+          where: {
+            project_id: project.id,
+            package_id: packageId,
+            vulnerability_id: null,
+            commit_sha: commitSha,
+          },
+        });
+
+        if (existingAlert) {
+          continue; // Alert already exists
+        }
+
+        // Create alert
+        await this.prisma.projectPackageAlert.create({
+          data: {
+            project_id: project.id,
+            package_id: packageId,
+            version: dep.version,
+            alert_type: 'anomaly',
+            commit_sha: commitSha,
+            anomaly_score: anomalyScore,
+            score_breakdown: scoreBreakdown,
+            status: 'unread',
+          },
+        });
+
+        this.logger.log(
+          `🚨 Created anomaly alert for project ${project.id}, package ${packageId}, commit ${commitSha.substring(0, 8)}, score ${anomalyScore}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error creating anomaly alerts for package ${packageId}, commit ${commitSha}:`,
+        error,
+      );
+      // Don't throw - alert creation failure shouldn't fail the job
+    }
+  }
+
+  /**
+   * Check if a version is affected by a vulnerability
+   */
+  private isVersionAffectedByVulnerability(
+    version: string,
+    vuln: any,
+  ): boolean {
+    // Check if version is in affected_versions
+    if (vuln.affected_versions && vuln.affected_versions.includes(version)) {
+      return true;
+    }
+
+    // Check if version is in introduced_versions but not in fixed_versions
+    if (vuln.introduced_versions && vuln.introduced_versions.includes(version)) {
+      // If there are fixed versions, check if this version is fixed
+      if (vuln.fixed_versions && vuln.fixed_versions.includes(version)) {
+        return false;
+      }
+      return true;
+    }
+
+    // Check if version is in last_affected_versions
+    if (vuln.last_affected_versions && vuln.last_affected_versions.includes(version)) {
+      return true;
+    }
+
+    // If no specific version info, assume affected (conservative approach)
+    return true;
+  }
+
+  /**
+   * Extract severity level from OSV severity string
+   */
+  private extractSeverityFromOsv(severity?: string): 'critical' | 'high' | 'medium' | 'low' {
+    if (!severity) return 'low';
+
+    const upper = severity.toUpperCase();
+    if (upper.includes('CRITICAL') || (upper.includes('CVSS') && parseFloat(severity) >= 9.0)) {
+      return 'critical';
+    }
+    if (upper.includes('HIGH') || (upper.includes('CVSS') && parseFloat(severity) >= 7.0)) {
+      return 'high';
+    }
+    if (upper.includes('MEDIUM') || (upper.includes('CVSS') && parseFloat(severity) >= 4.0)) {
+      return 'medium';
+    }
+    return 'low';
+  }
+
+  /**
+   * Check if vulnerability severity meets the threshold
+   */
+  private meetsVulnerabilityThreshold(
+    severity: 'critical' | 'high' | 'medium' | 'low',
+    threshold: string,
+  ): boolean {
+    const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+    const thresholdOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+
+    const severityLevel = severityOrder[severity];
+    const thresholdLevel = thresholdOrder[threshold.toLowerCase() as keyof typeof thresholdOrder] || 2;
+
+    return severityLevel >= thresholdLevel;
   }
 
   /**
