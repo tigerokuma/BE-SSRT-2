@@ -165,6 +165,7 @@ model Packages {
   scorecardHistory    PackageScorecardHistory[]
   versions            PackageVersion[]
   monthlyCommits      PackageMonthlyCommits[]
+  anomalies           PackageAnomaly[]
 }
 
 model PackageCommit {
@@ -206,6 +207,7 @@ model PackageContributor {
   insert_to_delete_ratio    Float @default(0)
   commit_time_histogram     Json
   typical_days_active       Json
+  commit_time_heatmap        Json // 7x24 grid: [day][hour] = commit count (0-6 for days, 0-23 for hours)
   files_worked_on           Json // Histogram of files the contributor has worked on
   first_commit_date         DateTime
   last_commit_date          DateTime
@@ -213,6 +215,7 @@ model PackageContributor {
   updated_at                DateTime @updatedAt
 
   package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  anomalies PackageAnomaly[]
 
   @@unique([package_id, author_email])
   @@index([package_id])
@@ -275,6 +278,25 @@ model PackageMonthlyCommits {
   @@index([package_id])
   @@index([year, month])
   @@map("package_monthly_commits")
+}
+
+model PackageAnomaly {
+  id              String   @id @default(uuid())
+  package_id      String
+  commit_sha      String
+  contributor_id  String   // PackageContributor id
+  anomaly_score   Float    // Total anomaly score (0+)
+  score_breakdown Json     // Array of {factor: string, points: number, reason: string}
+  detected_at     DateTime @default(now())
+
+  package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  contributor PackageContributor @relation(fields: [contributor_id], references: [id], onDelete: Cascade)
+
+  @@unique([package_id, commit_sha])
+  @@index([package_id])
+  @@index([contributor_id])
+  @@index([anomaly_score])
+  @@map("package_anomalies")
 }
 
 model Watchlist {

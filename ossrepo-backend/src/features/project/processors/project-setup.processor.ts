@@ -85,12 +85,13 @@ export class ProjectSetupProcessor {
         this.logger.log(`📋 Queued fast-setup job for dependency: ${branchDependency.name}`);
       }
 
-      // Setup webhook for the repository
-      await this.webhookService.setupWebhookForRepository(repositoryUrl, projectWithBranch.monitoredBranch.id);
+      // Setup webhook for the repository (use project creator's GitHub token)
+      await this.webhookService.setupWebhookForRepository(repositoryUrl, projectWithBranch.monitoredBranch.id, userId);
       this.logger.log(`🔗 Set up webhook`);
 
-      // Keep project status as 'creating' - dependency jobs will mark it as 'ready' when complete
-      this.logger.log(`⏳ Project setup initiated, waiting for ${dependencies.length} dependencies to be analyzed`);
+      // Mark project as ready
+      await this.projectRepository.updateProjectStatus(projectId, 'ready');
+      this.logger.log(`✅ Project setup complete - project marked as ready`);
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(`✅ Finished project setup in ${duration}s`);
@@ -98,7 +99,7 @@ export class ProjectSetupProcessor {
       return {
         success: true,
         projectId,
-        dependenciesCount: dependencies.length,
+        dependenciesCount: createdDependencies.length,
         duration: `${duration}s`,
       };
 

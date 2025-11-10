@@ -10,7 +10,7 @@ export class WebhookService {
     private readonly githubService: GitHubService,
   ) {}
 
-  async setupWebhookForRepository(repositoryUrl: string, monitoredBranchId: string): Promise<string | null> {
+  async setupWebhookForRepository(repositoryUrl: string, monitoredBranchId: string, userId?: string): Promise<string | null> {
     try {
       // Extract owner and repo from GitHub URL
       const match = repositoryUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
@@ -21,7 +21,7 @@ export class WebhookService {
       const [, owner, repo] = match;
 
       // Check if webhook already exists for this repository
-      const existingWebhook = await this.findExistingWebhook(owner, repo);
+      const existingWebhook = await this.findExistingWebhook(owner, repo, userId);
       if (existingWebhook) {
         // Update the monitored branch with the existing webhook ID
         await this.prisma.monitoredBranch.update({
@@ -31,8 +31,8 @@ export class WebhookService {
         return existingWebhook.id.toString();
       }
 
-      // Get the authenticated Octokit instance
-      const octokit = await this.githubService.getAuthenticatedOctokit();
+      // Get the authenticated Octokit instance (use user's token if provided)
+      const octokit = await this.githubService.getAuthenticatedOctokit(userId);
       
       // Create webhook
       const webhookUrl = `${process.env.BACKEND_URL || 'https://3bc645a139d6.ngrok-free.app'}/webhooks/github`;
@@ -144,9 +144,9 @@ export class WebhookService {
     }
   }
 
-  private async findExistingWebhook(owner: string, repo: string): Promise<any> {
+  private async findExistingWebhook(owner: string, repo: string, userId?: string): Promise<any> {
     try {
-      const octokit = await this.githubService.getAuthenticatedOctokit();
+      const octokit = await this.githubService.getAuthenticatedOctokit(userId);
       
       // Get all webhooks for the repository
       const webhooks = await octokit.repos.listWebhooks({

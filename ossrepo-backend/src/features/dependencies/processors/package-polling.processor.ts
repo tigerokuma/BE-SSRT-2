@@ -6,6 +6,7 @@ import { GitManagerService } from '../../activity/services/git-manager.service';
 import { GitCommitExtractorService, CommitDetails } from '../services/git-commit-extractor.service';
 import { MonthlyCommitsService } from '../services/monthly-commits.service';
 import { ContributorProfileUpdaterService } from '../services/contributor-profile-updater.service';
+import { AnomalyDetectionService } from '../services/anomaly-detection.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as fs from 'fs';
@@ -36,6 +37,7 @@ export class PackagePollingProcessor implements OnModuleInit {
     private readonly gitCommitExtractor: GitCommitExtractorService,
     private readonly monthlyCommits: MonthlyCommitsService,
     private readonly contributorUpdater: ContributorProfileUpdaterService,
+    private readonly anomalyDetection: AnomalyDetectionService,
     @InjectQueue('package-polling') private readonly pollingQueue: Queue,
     @InjectQueue('dependency-full-setup') private readonly setupQueue: Queue,
   ) {}
@@ -282,7 +284,7 @@ export class PackagePollingProcessor implements OnModuleInit {
 
       if (!cloneResult) {
         this.logger.error(
-          `Failed to clone repository ${owner}/${repo} with SHA ${storedLatestSha}`,
+          `Failed to clone repository ${owner}/${repo} with required depth for SHA ${storedLatestSha}`,
         );
         return;
       }
@@ -309,14 +311,18 @@ export class PackagePollingProcessor implements OnModuleInit {
       // Store new commits
       await this.storeNewCommits(packageId, newCommits);
 
+      // Update latest commit SHA immediately after storing commits
+      // This ensures we don't reprocess the same commits if later steps fail
+      await this.updateLatestCommitSha(packageId, latestRemoteSha);
+
+      // Detect anomalies in new commits
+      await this.detectAnomalies(packageId, newCommits);
+
       // Update contributor profiles
       await this.contributorUpdater.updateContributorProfiles(packageId, newCommits);
 
       // Update monthly commits
       await this.monthlyCommits.aggregateMonthlyCommits(packageId, newCommits);
-
-      // Update latest commit SHA
-      await this.updateLatestCommitSha(packageId, latestRemoteSha);
 
       this.logger.log(
         `✅ Successfully processed ${newCommits.length} new commits for ${owner}/${repo}`,
@@ -333,7 +339,7 @@ export class PackagePollingProcessor implements OnModuleInit {
   }
 
   /**
-   * Get latest commit SHA from GitHub API
+   * Get latest commit SHA from remote without cloning
    */
   private async getLatestRemoteCommitSha(
     owner: string,
@@ -341,28 +347,26 @@ export class PackagePollingProcessor implements OnModuleInit {
     branch: string,
   ): Promise<string | null> {
     try {
-      const response = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/commits/${branch}`,
-        {
-          headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'OSSRepo-Backend',
-          },
-        },
-      );
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
 
-      if (!response.ok) {
+      const repoUrl = `https://github.com/${owner}/${repo}.git`;
+      const command = `git ls-remote ${repoUrl} refs/heads/${branch}`;
+      const { stdout } = await execAsync(command);
+
+      if (!stdout.trim()) {
         this.logger.warn(
-          `GitHub API error for ${owner}/${repo}: ${response.status}`,
+          `No commits found for branch ${branch} in ${owner}/${repo}`,
         );
         return null;
       }
 
-      const data = await response.json();
-      return data.sha;
+      const sha = stdout.trim().split('\t')[0];
+      return sha;
     } catch (error) {
       this.logger.error(
-        `Error fetching latest commit SHA for ${owner}/${repo}:`,
+        `Error getting latest remote commit SHA for ${owner}/${repo}:`,
         error,
       );
       return null;
@@ -370,7 +374,7 @@ export class PackagePollingProcessor implements OnModuleInit {
   }
 
   /**
-   * Ensure repository is cloned with the specified SHA
+   * Ensure repository is cloned with the target SHA available
    */
   private async ensureRepositoryWithSha(
     owner: string,
@@ -378,72 +382,159 @@ export class PackagePollingProcessor implements OnModuleInit {
     branch: string,
     targetSha: string,
   ): Promise<string | null> {
+    const cloneResult = await this.cloneWithSmartDepth(
+      owner,
+      repo,
+      branch,
+      targetSha,
+    );
+
+    if (cloneResult) {
+      return cloneResult;
+    }
+
+    this.logger.log(`🔄 Trying shallow clone + deepen for ${owner}/${repo}`);
     try {
-      // Try to clone with increasing depth until we find the target SHA
-      const depths = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
-      
-      for (const depth of depths) {
-        try {
-          const repoPath = await this.gitManager.cloneRepository(
-            owner,
-            repo,
-            branch,
-            depth,
-          );
-
-          // Check if the target SHA exists in this clone
-          const { exec } = require('child_process');
-          const { promisify } = require('util');
-          const execAsync = promisify(exec);
-
-          const { stdout } = await execAsync(
-            `git rev-parse --verify ${targetSha}`,
-            { cwd: repoPath },
-          );
-
-          if (stdout.trim() === targetSha) {
-            this.logger.log(
-              `✅ Found target SHA ${targetSha} with depth ${depth}`,
-            );
-            return repoPath;
-          }
-        } catch (error) {
-          // Continue to next depth
-          continue;
-        }
-      }
-
-      this.logger.error(
-        `Could not find target SHA ${targetSha} even with max depth`,
+      const shallowRepoPath = await this.gitManager.cloneRepository(
+        owner,
+        repo,
+        branch,
+        1,
       );
-      return null;
+      await this.gitManager.deepenRepository(owner, repo, branch, 2000);
+
+      const shaExists = await this.checkShaExists(shallowRepoPath, targetSha);
+      if (shaExists) {
+        this.logger.log(`✅ Found target SHA ${targetSha} after deepening`);
+        return shallowRepoPath;
+      } else {
+        this.logger.error(
+          `❌ Target SHA ${targetSha} still not found after deepening`,
+        );
+        await this.cleanupClonedRepo(owner, repo);
+        return null;
+      }
     } catch (error) {
       this.logger.error(
-        `Error ensuring repository clone for ${owner}/${repo}:`,
-        error,
+        `❌ Failed to clone and deepen repository: ${error.message}`,
       );
+      await this.cleanupClonedRepo(owner, repo);
       return null;
     }
   }
 
   /**
-   * Extract new commits between two SHAs
+   * Clone repository with increasing depth until target SHA is found
+   */
+  private async cloneWithSmartDepth(
+    owner: string,
+    repo: string,
+    branch: string,
+    targetSha: string,
+  ): Promise<string | null> {
+    const depths = [5, 10, 20, 50, 100, 200, 500, 1000];
+    const maxDepth = 2000;
+
+    for (const depth of depths) {
+      if (depth > maxDepth) {
+        this.logger.error(
+          `Failed to find target SHA ${targetSha} even with maximum depth ${maxDepth}`,
+        );
+        return null;
+      }
+
+      try {
+        this.logger.log(`🔍 Trying clone depth ${depth} for ${owner}/${repo}`);
+
+        const repoPath = await this.gitManager.cloneRepository(
+          owner,
+          repo,
+          branch,
+          depth,
+        );
+        const shaExists = await this.checkShaExists(repoPath, targetSha);
+
+        if (shaExists) {
+          this.logger.log(
+            `✅ Found target SHA ${targetSha} with depth ${depth}`,
+          );
+          return repoPath;
+        } else {
+          this.logger.log(
+            `❌ Target SHA ${targetSha} not found with depth ${depth}, trying deeper...`,
+          );
+          await this.cleanupClonedRepo(owner, repo);
+        }
+      } catch (cloneError) {
+        this.logger.log(
+          `❌ Clone failed with depth ${depth}, trying deeper...`,
+        );
+        await this.cleanupClonedRepo(owner, repo);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if SHA exists in repository
+   */
+  private async checkShaExists(
+    repoPath: string,
+    targetSha: string,
+  ): Promise<boolean> {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    try {
+      const revParseCommand = `cd "${repoPath}" && git rev-parse --verify ${targetSha}`;
+      await execAsync(revParseCommand);
+      return true;
+    } catch (revParseError) {
+      try {
+        const logCommand = `cd "${repoPath}" && git log --oneline ${targetSha} -1`;
+        await execAsync(logCommand);
+        return true;
+      } catch (logError) {
+        try {
+          const showCommand = `cd "${repoPath}" && git show ${targetSha} --format="%H" -s`;
+          await execAsync(showCommand);
+          return true;
+        } catch (showError) {
+          return false;
+        }
+      }
+    }
+  }
+
+  /**
+   * Extract new commits since a given SHA
    */
   private async extractNewCommits(
     repoPath: string,
     fromSha: string,
-    toSha: string,
+    toSha?: string,
   ): Promise<CommitDetails[]> {
     try {
       const { exec } = require('child_process');
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
-      // Get commits between the two SHAs
-      const { stdout } = await execAsync(
-        `git log --pretty=format:"%H|%an|%ae|%ad|%s" --numstat ${fromSha}..${toSha}`,
-        { cwd: repoPath },
+      // Get commits after fromSha (up to toSha if provided)
+      const range = toSha ? `${fromSha}..${toSha}` : `${fromSha}..HEAD`;
+      const gitLogCmd = `git log --pretty=format:"%H|%an|%ae|%ad|%s" --numstat ${range}`;
+      
+      const { stdout, stderr } = await execAsync(
+        `cd "${repoPath}" && ${gitLogCmd}`,
+        {
+          maxBuffer: 50 * 1024 * 1024, // 50MB buffer
+        },
       );
+
+      if (stderr && !stderr.includes('warning')) {
+        this.logger.warn(`Git log stderr: ${stderr}`);
+      }
 
       if (!stdout.trim()) {
         return [];
@@ -464,7 +555,7 @@ export class PackagePollingProcessor implements OnModuleInit {
 
       return commits;
     } catch (error) {
-      this.logger.error('Error extracting new commits:', error);
+      this.logger.error(`Error extracting new commits: ${error.message}`);
       return [];
     }
   }
@@ -553,10 +644,13 @@ export class PackagePollingProcessor implements OnModuleInit {
       const { promisify } = require('util');
       const execAsync = promisify(exec);
 
-      const { stdout } = await execAsync(`git show --stat ${commitSha}`, {
-        cwd: repoPath,
-        timeout: 30000,
-      });
+      const { stdout } = await execAsync(
+        `cd "${repoPath}" && git show --stat ${commitSha}`,
+        {
+          timeout: 30000,
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer per commit
+        },
+      );
 
       const lines = stdout.split('\n');
       const filesChanged: string[] = [];
@@ -637,9 +731,60 @@ export class PackagePollingProcessor implements OnModuleInit {
         where: { id: packageId },
         data: { latest_commit_sha: sha },
       });
+      this.logger.log(`✅ Updated latest_commit_sha to ${sha.substring(0, 8)} for package ${packageId}`);
     } catch (error) {
-      this.logger.error(`❌ Failed to update latest commit SHA:`, error);
+      this.logger.error(`❌ Failed to update latest commit SHA for package ${packageId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Detect anomalies in new commits
+   */
+  private async detectAnomalies(packageId: string, commits: CommitDetails[]): Promise<void> {
+    for (const commit of commits) {
+      try {
+        // Get contributor profile
+        const contributor = await this.prisma.packageContributor.findUnique({
+          where: {
+            package_id_author_email: {
+              package_id: packageId,
+              author_email: commit.authorEmail,
+            },
+          },
+        });
+
+        if (!contributor) {
+          // First commit from this contributor - skip anomaly detection
+          continue;
+        }
+
+        // Calculate anomaly score
+        const result = this.anomalyDetection.calculateAnomalyScore(
+          commit,
+          contributor as any,
+        );
+
+        // Only store if score > 0
+        if (result.totalScore > 0) {
+          await this.prisma.packageAnomaly.create({
+            data: {
+              package_id: packageId,
+              commit_sha: commit.sha,
+              contributor_id: contributor.id,
+              anomaly_score: result.totalScore,
+              score_breakdown: result.breakdown,
+            },
+          });
+
+          this.logger.log(
+            `🚨 Anomaly detected in commit ${commit.sha.substring(0, 8)}: score ${result.totalScore} (${result.breakdown.length} factors)`,
+          );
+        }
+      } catch (error) {
+        this.logger.error(`Error detecting anomalies for commit ${commit.sha}:`, error);
+        // Continue with other commits
+      }
     }
   }
 

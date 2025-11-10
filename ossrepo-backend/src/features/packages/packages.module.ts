@@ -13,10 +13,12 @@ import { OsvVulnerabilityRepository } from './repositories/osv-vulnerability.rep
 import { PackageVulnerabilityService } from '../dependencies/services/package-vulnerability.service';
 import { MonthlyCommitsService } from '../dependencies/services/monthly-commits.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
+import { AiModule } from '../../common/ai/ai.module';
 
 @Module({
   imports: [
     PrismaModule, // Import PrismaModule for database access
+    AiModule, // Import AiModule for GeminiService
   ],
   controllers: [PackagesController],
   providers: [
