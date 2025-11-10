@@ -22,13 +22,13 @@ export class ProjectService {
   ) {}
 
   /**
-   * Resolve a Clerk user id to the internal DB user id.
-   * Throws 404 if no user is found for that Clerk id.
+   * Resolve a user id to the internal DB user id.
+   * The frontend now sends the database user_id directly, so we just validate it exists.
    */
-  private async resolveDbUserIdOrThrow(clerkUserId: string): Promise<string> {
-    const user = await this.userService.getUserByClerkId(clerkUserId);
+  private async resolveDbUserIdOrThrow(userId: string): Promise<string> {
+    const user = await this.userService.getUserById(userId);
     if (!user) {
-      throw new NotFoundException('User not found for provided Clerk user id');
+      throw new NotFoundException('User not found for provided user id');
     }
     return user.user_id; // internal DB id
   }

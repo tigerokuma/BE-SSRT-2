@@ -16,19 +16,49 @@ export class UserRepository {
         last_login?: Date
     }) {
         const {clerk_id, email, name, last_login} = data
-        return this.prisma.user.upsert({
-            where: {clerk_id},
-            create: {
+
+        // First, try to find existing user by clerk_id
+        const existingByClerkId = await this.prisma.user.findUnique({
+            where: {clerk_id}
+        })
+
+        if (existingByClerkId) {
+            // Update existing user
+            return this.prisma.user.update({
+                where: {clerk_id},
+                data: {
+                    email,
+                    name,
+                    last_login,
+                }
+            })
+        }
+
+        // Check if user exists with same email but different clerk_id
+        const existingByEmail = await this.prisma.user.findUnique({
+            where: {email}
+        })
+
+        if (existingByEmail) {
+            // Update the existing user to use the new clerk_id
+            return this.prisma.user.update({
+                where: {email},
+                data: {
+                    clerk_id,
+                    name,
+                    last_login,
+                }
+            })
+        }
+
+        // Create new user
+        return this.prisma.user.create({
+            data: {
                 clerk_id,
                 email,
                 name: name || undefined,
                 last_login,
-            },
-            update: {
-                email,
-                name,
-                last_login,
-            },
+            }
         })
     }
 
@@ -87,7 +117,14 @@ export class UserRepository {
     }
 
     async getUserById(user_id: string) {
-        return this.prisma.user.findUnique({where: {user_id}})
+        return this.prisma.user.findFirst({
+            where: {
+                OR: [
+                    {user_id: user_id},
+                    {clerk_id: user_id},
+                ],
+            },
+        });
     }
 
     async getUserByClerkId(clerk_id: string) {

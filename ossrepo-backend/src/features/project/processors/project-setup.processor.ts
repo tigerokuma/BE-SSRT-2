@@ -44,8 +44,16 @@ export class ProjectSetupProcessor {
         throw new Error('Project has no monitored branch');
       }
 
+      // Get the project creator's user_id to use their GitHub token
+      const projectUsers = await this.prisma.projectUser.findMany({
+        where: { project_id: projectId, role: 'admin' },
+        select: { user_id: true }
+      });
+      
+      const userId = projectUsers.length > 0 ? projectUsers[0].user_id : undefined;
+      
       // Extract dependencies from the repository
-      const dependencies = await this.githubService.extractDependencies(repositoryUrl);
+      const dependencies = await this.githubService.extractDependencies(repositoryUrl, userId);
       
       // Clear any existing dependencies (including old devDependencies) and store new ones
       await this.projectRepository.clearBranchDependencies(projectWithBranch.monitoredBranch.id);

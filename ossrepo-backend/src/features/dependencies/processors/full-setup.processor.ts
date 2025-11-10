@@ -6,6 +6,8 @@ import { GitManagerService } from '../../activity/services/git-manager.service';
 import { GitCommitExtractorService, CommitDetails } from '../services/git-commit-extractor.service';
 import { PackageScorecardService } from '../services/package-scorecard.service';
 import { AISummaryService } from '../../activity/services/ai-summary.service';
+import { PackageVulnerabilityService } from '../services/package-vulnerability.service';
+import { MonthlyCommitsService } from '../services/monthly-commits.service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -27,6 +29,8 @@ export class FullSetupProcessor {
     private readonly gitCommitExtractor: GitCommitExtractorService,
     private readonly packageScorecard: PackageScorecardService,
     private readonly aiSummaryService: AISummaryService,
+    private readonly packageVulnerability: PackageVulnerabilityService,
+    private readonly monthlyCommits: MonthlyCommitsService,
   ) {
     this.logger.log(`🔧 FullSetupProcessor initialized and ready to process jobs`);
   }
@@ -82,12 +86,16 @@ export class FullSetupProcessor {
       await this.storeRecentCommits(packageId, recentCommits);
       this.logger.log(`💾 Stored ${recentCommits.length} recent commits`);
 
-      // 6. Build contributor profiles from all commits
+      // 6. Aggregate monthly commits for activity tracking
+      await this.monthlyCommits.aggregateMonthlyCommits(packageId, allCommits);
+      this.logger.log(`📊 Aggregated monthly commits`);
+
+      // 7. Build contributor profiles from all commits
       const contributorProfiles = this.buildContributorProfiles(allCommits);
       await this.storeContributorProfiles(packageId, contributorProfiles);
       this.logger.log(`👥 Built ${contributorProfiles.length} contributor profiles`);
 
-      // 7. Process scorecard data (API first, then local)
+      // 8. Process scorecard data (API first, then local)
       await this.packageScorecard.processHistoricalScores(
         packageId,
         recentCommits.map(c => ({ sha: c.sha, timestamp: c.timestamp })),
@@ -97,11 +105,15 @@ export class FullSetupProcessor {
       );
       this.logger.log(`🛡️ Processed scorecard data`);
 
-      // 8. Generate AI overview
+      // 9. Process vulnerabilities (NPM versions + OSV API)
+      await this.packageVulnerability.processPackageVulnerabilities(packageId, packageName);
+      this.logger.log(`🔍 Processed package vulnerabilities`);
+
+      // 10. Generate AI overview
       await this.generateAIOverview(packageId, packageName, allCommits, contributorProfiles);
       this.logger.log(`🤖 Generated AI overview`);
 
-      // 9. Update package status to 'done'
+      // 11. Update package status to 'done'
       await this.updatePackageStatus(packageId, 'done');
       this.logger.log(`✅ Full setup completed for ${packageName}`);
 
@@ -226,6 +238,7 @@ export class FullSetupProcessor {
           lines_deleted: [],
           files_changed: [],
           timestamps: [],
+          message_lengths: [], // Track commit message lengths
           files_worked_on: new Map<string, number>(), // Track files worked on
         });
       }
@@ -236,6 +249,7 @@ export class FullSetupProcessor {
       profile.lines_deleted.push(commit.linesDeleted);
       profile.files_changed.push(commit.filesChanged);
       profile.timestamps.push(commit.timestamp);
+      profile.message_lengths.push(commit.message.length);
 
       // Track files worked on from diff data
       if (commit.diffData && commit.diffData.filesChanged) {
@@ -252,16 +266,24 @@ export class FullSetupProcessor {
       const linesDeleted = profile.lines_deleted;
       const filesChanged = profile.files_changed;
       const timestamps = profile.timestamps;
+      const messageLengths = profile.message_lengths;
 
       // Calculate averages
       const avgLinesAdded = linesAdded.reduce((a, b) => a + b, 0) / linesAdded.length;
       const avgLinesDeleted = linesDeleted.reduce((a, b) => a + b, 0) / linesDeleted.length;
       const avgFilesChanged = filesChanged.reduce((a, b) => a + b, 0) / filesChanged.length;
+      const avgCommitMessageLength = messageLengths.reduce((a, b) => a + b, 0) / messageLengths.length;
 
       // Calculate standard deviations
       const stddevLinesAdded = this.calculateStandardDeviation(linesAdded);
       const stddevLinesDeleted = this.calculateStandardDeviation(linesDeleted);
       const stddevFilesChanged = this.calculateStandardDeviation(filesChanged);
+      const stddevCommitMessageLength = this.calculateStandardDeviation(messageLengths);
+
+      // Calculate insert-to-delete ratio
+      const totalLinesAdded = linesAdded.reduce((a, b) => a + b, 0);
+      const totalLinesDeleted = linesDeleted.reduce((a, b) => a + b, 0);
+      const insertToDeleteRatio = totalLinesDeleted === 0 ? 999 : totalLinesAdded / totalLinesDeleted;
 
       // Build time histogram
       const commitTimeHistogram = this.buildCommitTimeHistogram(timestamps);
@@ -296,6 +318,9 @@ export class FullSetupProcessor {
         stddev_lines_added: stddevLinesAdded,
         stddev_lines_deleted: stddevLinesDeleted,
         stddev_files_changed: stddevFilesChanged,
+        avg_commit_message_length: avgCommitMessageLength,
+        stddev_commit_message_length: stddevCommitMessageLength,
+        insert_to_delete_ratio: insertToDeleteRatio,
         commit_time_histogram: commitTimeHistogram,
         typical_days_active: typicalDaysActive,
         files_worked_on: filesWorkedOnHistogram,
@@ -331,6 +356,9 @@ export class FullSetupProcessor {
         stddev_lines_added: profile.stddev_lines_added,
         stddev_lines_deleted: profile.stddev_lines_deleted,
         stddev_files_changed: profile.stddev_files_changed,
+        avg_commit_message_length: profile.avg_commit_message_length,
+        stddev_commit_message_length: profile.stddev_commit_message_length,
+        insert_to_delete_ratio: profile.insert_to_delete_ratio,
         commit_time_histogram: profile.commit_time_histogram,
         typical_days_active: profile.typical_days_active,
         files_worked_on: profile.files_worked_on,

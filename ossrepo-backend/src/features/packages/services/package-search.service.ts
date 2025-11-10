@@ -479,4 +479,39 @@ export class PackageSearchService {
 
     return vulnerabilities;
   }
+
+  async getPackageFromDatabase(packageId: string) {
+    console.log(`🔍 Querying Packages table for package ID: ${packageId}`);
+
+    const packageData = await this.prisma.packages.findUnique({
+      where: {
+        id: packageId,
+      },
+      include: {
+        scorecardHistory: {
+          orderBy: {
+            commit_date: 'desc'
+          },
+          take: 20 // Get last 20 scorecard entries
+        }
+      }
+    });
+
+    if (!packageData) {
+      console.log(`❌ Package not found in database: ${packageId}`);
+      return null;
+    }
+
+    console.log(`✅ Found package in database:`, {
+      id: packageData.id,
+      name: packageData.name,
+      repo_url: packageData.repo_url,
+      license: packageData.license,
+      activity_score: packageData.activity_score,
+      total_score: packageData.total_score,
+      scorecardHistory: packageData.scorecardHistory.length
+    });
+
+    return packageData;
+  }
 }
