@@ -11,6 +11,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import * as fs from 'fs';
 import { OsvVulnerabilityService } from '../../packages/services/osv-vulnerability.service';
+import { PackageScorecardService } from '../services/package-scorecard.service';
 
 interface PackagePollingJobData {
   type: 'daily-poll' | 'poll-package';
@@ -40,6 +41,7 @@ export class PackagePollingProcessor implements OnModuleInit {
     private readonly contributorUpdater: ContributorProfileUpdaterService,
     private readonly anomalyDetection: AnomalyDetectionService,
     private readonly osvVulnerabilityService: OsvVulnerabilityService,
+    private readonly packageScorecard: PackageScorecardService,
     @InjectQueue('package-polling') private readonly pollingQueue: Queue,
     @InjectQueue('dependency-full-setup') private readonly setupQueue: Queue,
   ) {}
@@ -401,6 +403,9 @@ export class PackagePollingProcessor implements OnModuleInit {
 
       // Update monthly commits
       await this.monthlyCommits.aggregateMonthlyCommits(packageId, newCommits);
+
+      // Update package scores based on new commits
+      await this.updatePackageScores(packageId, newCommits);
 
       this.logger.log(
         `✅ Successfully processed ${newCommits.length} new commits for ${owner}/${repo}`,
@@ -1208,6 +1213,430 @@ export class PackagePollingProcessor implements OnModuleInit {
     const thresholdLevel = thresholdOrder[threshold.toLowerCase() as keyof typeof thresholdOrder] || 2;
 
     return severityLevel >= thresholdLevel;
+  }
+
+  /**
+   * Update package scores based on new commits
+   */
+  private async updatePackageScores(packageId: string, newCommits: CommitDetails[]): Promise<void> {
+    try {
+      this.logger.log(`📊 Updating package scores for ${packageId}`);
+      
+      const packageData = await this.prisma.packages.findUnique({
+        where: { id: packageId },
+        select: {
+          name: true,
+          activity_score: true,
+          bus_factor_score: true,
+          scorecard_score: true,
+          vulnerability_score: true,
+          license_score: true,
+          total_score: true,
+          latest_commit_sha: true,
+        },
+      });
+
+      if (!packageData) {
+        this.logger.warn(`Package ${packageId} not found, skipping score update`);
+        return;
+      }
+
+      let hasChanges = false;
+      const updateData: any = {};
+
+      // Update activity score if we have new commits
+      if (newCommits.length > 0) {
+        const newActivityScore = await this.monthlyCommits.calculateActivityScore(packageId);
+        if (newActivityScore !== packageData.activity_score) {
+          updateData.activity_score = newActivityScore;
+          hasChanges = true;
+          this.logger.log(`📈 Activity score updated: ${packageData.activity_score} -> ${newActivityScore}`);
+        }
+      }
+
+      // Update bus factor if we have new commits
+      if (newCommits.length > 0) {
+        const busFactorScore = this.calculateBusFactorScore(newCommits);
+        if (busFactorScore.score !== packageData.bus_factor_score) {
+          updateData.bus_factor_score = busFactorScore.score;
+          hasChanges = true;
+          this.logger.log(`🚌 Bus factor score updated: ${packageData.bus_factor_score} -> ${busFactorScore.score}`);
+        }
+      }
+
+      // Check for new scorecard score (different commit SHA)
+      if (newCommits.length > 0 && newCommits[0].sha) {
+        const latestScorecard = await this.packageScorecard.getLatestScore(packageId);
+        if (latestScorecard !== null) {
+          // Check if this is for a different commit than the current one
+          const scorecardHistory = await this.prisma.packageScorecardHistory.findFirst({
+            where: { package_id: packageId },
+            orderBy: { analyzed_at: 'desc' },
+            select: { commit_sha: true, score: true },
+          });
+
+          if (scorecardHistory && scorecardHistory.commit_sha !== newCommits[0].sha) {
+            // New commit, update scorecard score
+            const scorecardScore100 = Math.round(latestScorecard * 10); // Convert 0-10 to 0-100
+            if (scorecardScore100 !== packageData.scorecard_score) {
+              updateData.scorecard_score = scorecardScore100;
+              hasChanges = true;
+              this.logger.log(`🛡️ Scorecard score updated: ${packageData.scorecard_score} -> ${scorecardScore100}`);
+            }
+          }
+        }
+      }
+
+      // Update vulnerability score based on new vulnerabilities
+      const vulnerabilityScore = await this.calculateVulnerabilityScore(packageData.name);
+      if (vulnerabilityScore !== packageData.vulnerability_score) {
+        updateData.vulnerability_score = vulnerabilityScore;
+        hasChanges = true;
+        this.logger.log(`🔍 Vulnerability score updated: ${packageData.vulnerability_score} -> ${vulnerabilityScore}`);
+      }
+
+      // Recalculate total score if any sub-score changed
+      if (hasChanges) {
+        const finalActivityScore = updateData.activity_score ?? packageData.activity_score ?? 0;
+        const finalBusFactorScore = updateData.bus_factor_score ?? packageData.bus_factor_score ?? 0;
+        const finalScorecardScore = updateData.scorecard_score ?? packageData.scorecard_score ?? 0;
+        const finalVulnerabilityScore = updateData.vulnerability_score ?? packageData.vulnerability_score ?? 0;
+        const licenseScore = packageData.license_score ?? 0;
+
+        const totalScore = this.calculateTotalScore({
+          activity: finalActivityScore,
+          busFactor: finalBusFactorScore,
+          scorecard: finalScorecardScore,
+          vulnerability: finalVulnerabilityScore,
+          license: licenseScore,
+        });
+
+        updateData.total_score = totalScore.score;
+        this.logger.log(`🎯 Total score updated: ${packageData.total_score} -> ${totalScore.score}`);
+
+        // Update package
+        await this.prisma.packages.update({
+          where: { id: packageId },
+          data: updateData,
+        });
+
+        // Update project health if package score changed
+        await this.updateProjectHealthFromPackage(packageId, packageData.total_score, totalScore.score);
+      } else {
+        this.logger.log(`✅ No score changes detected for package ${packageId}`);
+      }
+    } catch (error) {
+      this.logger.error(`❌ Error updating package scores for ${packageId}:`, error);
+      // Don't throw - score update failure shouldn't fail the job
+    }
+  }
+
+  /**
+   * Calculate bus factor score from commits
+   */
+  private calculateBusFactorScore(commits: CommitDetails[]): {
+    score: number;
+    busFactor: number;
+    totalContributors: number;
+    topContributorPercentage: number;
+  } {
+    // Group commits by author
+    const contributorStats = new Map<string, number>();
+    commits.forEach(commit => {
+      const count = contributorStats.get(commit.author) || 0;
+      contributorStats.set(commit.author, count + 1);
+    });
+
+    // Convert to array and sort by commit count
+    const contributors = Array.from(contributorStats.entries())
+      .map(([author, totalCommits]) => ({ author, totalCommits }))
+      .sort((a, b) => b.totalCommits - a.totalCommits);
+
+    const totalCommits = contributors.reduce((sum, c) => sum + c.totalCommits, 0);
+    const totalContributors = contributors.length;
+
+    if (totalContributors === 0) {
+      return { score: 0, busFactor: 0, totalContributors: 0, topContributorPercentage: 0 };
+    }
+
+    if (totalContributors === 1) {
+      return { score: 0, busFactor: 1, totalContributors: 1, topContributorPercentage: 1 };
+    }
+
+    const topContributor = contributors[0];
+    const topContributorPercentage = topContributor.totalCommits / totalCommits;
+
+    let busFactor: number;
+    if (topContributorPercentage > 0.5) {
+      busFactor = 1;
+    } else {
+      // Calculate how many contributors needed to reach 50% of commits
+      let cumulativeCommits = 0;
+      let contributorsNeeded = 0;
+      const targetCommits = totalCommits * 0.5;
+
+      for (const contributor of contributors) {
+        cumulativeCommits += contributor.totalCommits;
+        contributorsNeeded++;
+        if (cumulativeCommits >= targetCommits) {
+          break;
+        }
+      }
+      busFactor = contributorsNeeded;
+    }
+
+    // Convert bus factor to 0-100 score
+    let score: number;
+    if (busFactor === 1) score = 0;
+    else if (busFactor <= 2) score = 25;
+    else if (busFactor <= 3) score = 50;
+    else if (busFactor <= 5) score = 75;
+    else score = 100;
+
+    return { score, busFactor, totalContributors, topContributorPercentage };
+  }
+
+  /**
+   * Calculate vulnerability score from OSV
+   */
+  private async calculateVulnerabilityScore(packageName: string): Promise<number> {
+    try {
+      const vulnerabilities = await this.osvVulnerabilityService.getNpmVulnerabilities(
+        packageName,
+        false,
+      );
+
+      if (vulnerabilities.length === 0) {
+        return 100;
+      }
+
+      // Count by severity
+      let criticalCount = 0;
+      let highCount = 0;
+      let mediumCount = 0;
+      let lowCount = 0;
+
+      for (const vuln of vulnerabilities) {
+        // Extract severity from vulnerability object
+        let severityStr = '';
+        if (vuln.severity && Array.isArray(vuln.severity) && vuln.severity.length > 0) {
+          severityStr = vuln.severity[0].type || '';
+        } else if ((vuln as any).database_specific?.severity) {
+          severityStr = (vuln as any).database_specific.severity;
+        }
+        
+        const severity = this.extractSeverityFromOsv(severityStr);
+        switch (severity) {
+          case 'critical':
+            criticalCount++;
+            break;
+          case 'high':
+            highCount++;
+            break;
+          case 'medium':
+            mediumCount++;
+            break;
+          case 'low':
+            lowCount++;
+            break;
+        }
+      }
+
+      // Calculate score based on severity counts
+      let score: number;
+      if (criticalCount > 0) {
+        score = 0;
+      } else if (highCount >= 3) {
+        score = 25;
+      } else if (highCount > 0 || mediumCount >= 5) {
+        score = 50;
+      } else if (mediumCount > 0 || lowCount >= 3) {
+        score = 75;
+      } else if (lowCount > 0) {
+        score = 75;
+      } else {
+        score = 100;
+      }
+
+      return score;
+    } catch (error) {
+      this.logger.error(`❌ Error calculating vulnerability score:`, error);
+      return 100; // Assume no vulnerabilities if API fails
+    }
+  }
+
+  /**
+   * Calculate total score from sub-scores
+   */
+  private calculateTotalScore(scores: {
+    activity: number;
+    busFactor: number;
+    scorecard: number;
+    vulnerability: number;
+    license: number;
+  }): { score: number; level: string } {
+    // Weighted average
+    const weights = {
+      activity: 0.2,
+      busFactor: 0.15,
+      scorecard: 0.25,
+      vulnerability: 0.3,
+      license: 0.1,
+    };
+
+    const totalScore =
+      scores.activity * weights.activity +
+      scores.busFactor * weights.busFactor +
+      (scores.scorecard || 0) * weights.scorecard +
+      scores.vulnerability * weights.vulnerability +
+      scores.license * weights.license;
+
+    const roundedScore = Math.round(totalScore);
+
+    let level: string;
+    if (roundedScore >= 80) level = 'EXCELLENT';
+    else if (roundedScore >= 60) level = 'GOOD';
+    else if (roundedScore >= 40) level = 'FAIR';
+    else if (roundedScore >= 20) level = 'POOR';
+    else level = 'CRITICAL';
+
+    return { score: roundedScore, level };
+  }
+
+  /**
+   * Update project health score when package score changes
+   */
+  private async updateProjectHealthFromPackage(
+    packageId: string,
+    oldPackageScore: number | null,
+    newPackageScore: number,
+  ): Promise<void> {
+    try {
+      // Find all projects that use this package
+      const branchDependencies = await this.prisma.branchDependency.findMany({
+        where: { package_id: packageId },
+        include: {
+          monitoredBranch: {
+            include: {
+              projects: true,
+            },
+          },
+        },
+      });
+
+      for (const dep of branchDependencies) {
+        const project = dep.monitoredBranch?.projects?.[0];
+        if (!project) continue;
+
+        // Get all packages for this project
+        const allDeps = await this.prisma.branchDependency.findMany({
+          where: {
+            monitoredBranch: {
+              projects: {
+                some: { id: project.id },
+              },
+            },
+          },
+          include: {
+            package: {
+              select: { total_score: true },
+            },
+          },
+        });
+
+        // Calculate average health score
+        const packageScores = allDeps
+          .map(d => d.package?.total_score)
+          .filter((score): score is number => score !== null && score !== undefined);
+
+        if (packageScores.length === 0) continue;
+
+        const averageHealthScore = packageScores.reduce((sum, score) => sum + score, 0) / packageScores.length;
+        const previousHealthScore = project.health_score;
+
+        // Update project health score
+        await this.prisma.project.update({
+          where: { id: project.id },
+          data: { health_score: averageHealthScore },
+        });
+
+        this.logger.log(
+          `📊 Project ${project.id} health score updated: ${previousHealthScore} -> ${averageHealthScore.toFixed(2)}`,
+        );
+
+        // Check if health dropped significantly (3+ points)
+        if (previousHealthScore !== null && previousHealthScore - averageHealthScore >= 3) {
+          // Get package name for the alert message
+          const packageData = await this.prisma.packages.findUnique({
+            where: { id: packageId },
+            select: { name: true },
+          });
+          
+          await this.createHealthChangeAlert(
+            project.id,
+            previousHealthScore,
+            averageHealthScore,
+            packageId,
+            packageData?.name,
+            oldPackageScore,
+            newPackageScore,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(`❌ Error updating project health from package ${packageId}:`, error);
+    }
+  }
+
+  /**
+   * Create health change alert
+   */
+  private async createHealthChangeAlert(
+    projectId: string,
+    previousScore: number,
+    newScore: number,
+    packageId?: string,
+    packageName?: string,
+    oldPackageScore?: number | null,
+    newPackageScore?: number,
+  ): Promise<void> {
+    try {
+      const scoreDrop = previousScore - newScore;
+      const severity = scoreDrop >= 10 ? 'high' : scoreDrop >= 5 ? 'medium' : 'low';
+
+      // Build message with package health change if available
+      let message: string;
+      if (packageName && oldPackageScore !== null && oldPackageScore !== undefined && newPackageScore !== undefined) {
+        message = `${packageName} health changed ${oldPackageScore.toFixed(1)}->${newPackageScore.toFixed(1)} dropping project health score from ${previousScore.toFixed(1)} to ${newScore.toFixed(1)}`;
+      } else {
+        message = `Project health score dropped from ${previousScore.toFixed(1)} to ${newScore.toFixed(1)} (${scoreDrop.toFixed(1)} point decrease)`;
+      }
+
+      await this.prisma.projectAlert.create({
+        data: {
+          project_id: projectId,
+          package_id: packageId || null,
+          alert_type: 'health',
+          severity: severity,
+          message: message,
+          details: {
+            previous_score: previousScore,
+            new_score: newScore,
+            score_drop: scoreDrop,
+            package_id: packageId,
+            old_package_score: oldPackageScore,
+            new_package_score: newPackageScore,
+          },
+          status: 'unread',
+        },
+      });
+
+      this.logger.log(
+        `🚨 Created health change alert for project ${projectId}: ${previousScore.toFixed(1)} -> ${newScore.toFixed(1)}`,
+      );
+    } catch (error) {
+      this.logger.error(`❌ Error creating health change alert:`, error);
+    }
   }
 
   /**

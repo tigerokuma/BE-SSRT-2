@@ -401,6 +401,7 @@ export class ProjectRepository {
         vulnerability_notifications: updateProjectDto.vulnerability_notifications,
         license_notifications: updateProjectDto.license_notifications,
         health_notifications: updateProjectDto.health_notifications,
+        anomalies_notifications: updateProjectDto.anomalies_notifications,
       },
     });
   }
