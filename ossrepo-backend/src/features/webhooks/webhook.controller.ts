@@ -164,12 +164,32 @@ export class WebhookController {
       const latestCommit = commits[0]; // Use the latest commit
       
       for (const project of projects) {
+        // Get previous dependencies to detect new packages
+        const previousDeps = await this.prisma.branchDependency.findMany({
+          where: { monitored_branch_id: project.monitoredBranch.id },
+          include: { package: { select: { id: true, name: true } } },
+        });
+        const previousPackageIds = new Set(previousDeps.map(d => d.package_id).filter(Boolean));
+
         await this.dependencyTracker.analyzeAndUpdateDependencies(
           owner,
           repo,
           latestCommit.id,
           project.monitoredBranch.id
         );
+
+        // Check for new packages and license conflicts
+        const newDeps = await this.prisma.branchDependency.findMany({
+          where: { monitored_branch_id: project.monitoredBranch.id },
+          include: { package: { select: { id: true, name: true, license: true } } },
+        });
+
+        const newPackages = newDeps.filter(d => d.package_id && !previousPackageIds.has(d.package_id));
+        
+        if (newPackages.length > 0) {
+          await this.checkLicenseConflictsForNewPackages(project.id, newPackages);
+          await this.recalculateProjectHealth(project.id);
+        }
       }
     } catch (error) {
       this.logger.error(`❌ Error analyzing dependencies for commits:`, error.message);
@@ -281,7 +301,6 @@ export class WebhookController {
       this.logger.log(`🗑️ Repository deleted!`);
     }
   }
-
 
   private async handleGitHubAppPullRequest(payload: any) {
     const { action, pull_request, installation, repository } = payload;
@@ -792,5 +811,158 @@ export class WebhookController {
     }
 
     return comment;
+  }
+
+  /**
+   * Check license conflicts for newly added packages
+   */
+  private async checkLicenseConflictsForNewPackages(
+    projectId: string,
+    newPackages: Array<{ package: { id: string; name: string; license: string | null } | null }>,
+  ): Promise<void> {
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true, license: true },
+      });
+
+      if (!project || !project.license) {
+        // No project license, skip license conflict checks
+        return;
+      }
+
+      const projectLicense = project.license;
+
+      for (const dep of newPackages) {
+        if (!dep.package || !dep.package.license) continue;
+
+        const packageLicense = dep.package.license;
+        const hasConflict = this.hasLicenseConflict(projectLicense, packageLicense);
+
+        if (hasConflict) {
+          await this.prisma.projectAlert.create({
+            data: {
+              project_id: projectId,
+              package_id: dep.package.id,
+              alert_type: 'license',
+              severity: 'high',
+              message: `License conflict detected: ${dep.package.name} uses ${packageLicense} which conflicts with project license ${projectLicense}`,
+              details: {
+                package_name: dep.package.name,
+                package_license: packageLicense,
+                project_license: projectLicense,
+              },
+              status: 'unread',
+            },
+          });
+
+          this.logger.log(
+            `🚨 Created license conflict alert for project ${projectId}, package ${dep.package.name}`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(`❌ Error checking license conflicts:`, error);
+    }
+  }
+
+  /**
+   * Check if two licenses conflict
+   */
+  private hasLicenseConflict(projectLicense: string, dependencyLicense: string): boolean {
+    const projectLower = projectLicense.toLowerCase();
+    const depLower = dependencyLicense.toLowerCase();
+
+    // GPL dependencies in non-GPL projects
+    if (depLower.includes('gpl') && !projectLower.includes('gpl')) {
+      return true;
+    }
+
+    // AGPL dependencies in non-AGPL projects
+    if (depLower.includes('agpl') && !projectLower.includes('agpl')) {
+      return true;
+    }
+
+    // Copyleft dependencies in permissive projects
+    if (
+      (depLower.includes('copyleft') || depLower.includes('gpl')) &&
+      (projectLower.includes('mit') || projectLower.includes('apache') || projectLower.includes('bsd'))
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Recalculate project health after new packages added
+   */
+  private async recalculateProjectHealth(projectId: string): Promise<void> {
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: {
+          monitoredBranch: {
+            include: {
+              dependencies: {
+                include: {
+                  package: {
+                    select: { total_score: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!project || !project.monitoredBranch) return;
+
+      const dependencies = project.monitoredBranch.dependencies;
+      const packageScores = dependencies
+        .map(d => d.package?.total_score)
+        .filter((score): score is number => score !== null && score !== undefined);
+
+      if (packageScores.length === 0) return;
+
+      const averageHealthScore = packageScores.reduce((sum, score) => sum + score, 0) / packageScores.length;
+      const previousHealthScore = project.health_score;
+
+      // Update project health score
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { health_score: averageHealthScore },
+      });
+
+      this.logger.log(
+        `📊 Project ${projectId} health score updated: ${previousHealthScore} -> ${averageHealthScore.toFixed(2)}`,
+      );
+
+      // Check if health dropped significantly (3+ points)
+      if (previousHealthScore !== null && previousHealthScore - averageHealthScore >= 3) {
+        await this.prisma.projectAlert.create({
+          data: {
+            project_id: projectId,
+            package_id: null,
+            alert_type: 'health',
+            severity: (previousHealthScore - averageHealthScore) >= 10 ? 'high' : (previousHealthScore - averageHealthScore) >= 5 ? 'medium' : 'low',
+            message: `Project health score dropped from ${previousHealthScore.toFixed(1)} to ${averageHealthScore.toFixed(1)} (${(previousHealthScore - averageHealthScore).toFixed(1)} point decrease)`,
+            details: {
+              previous_score: previousHealthScore,
+              new_score: averageHealthScore,
+              score_drop: previousHealthScore - averageHealthScore,
+              reason: 'New package added',
+            },
+            status: 'unread',
+          },
+        });
+
+        this.logger.log(
+          `🚨 Created health change alert for project ${projectId}: ${previousHealthScore.toFixed(1)} -> ${averageHealthScore.toFixed(1)}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`❌ Error recalculating project health:`, error);
+    }
   }
 }

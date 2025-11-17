@@ -164,7 +164,11 @@ model Packages {
   packageContributors PackageContributor[]
   scorecardHistory    PackageScorecardHistory[]
   versions            PackageVersion[]
+  packageAlertSettings ProjectPackageAlertSettings[]
+  packageAlerts       ProjectPackageAlert[]
+  projectAlerts       ProjectAlert[]
   monthlyCommits      PackageMonthlyCommits[]
+  anomalies           PackageAnomaly[]
 }
 
 model PackageCommit {
@@ -206,6 +210,7 @@ model PackageContributor {
   insert_to_delete_ratio    Float @default(0)
   commit_time_histogram     Json
   typical_days_active       Json
+  commit_time_heatmap        Json // 7x24 grid: [day][hour] = commit count (0-6 for days, 0-23 for hours)
   files_worked_on           Json // Histogram of files the contributor has worked on
   first_commit_date         DateTime
   last_commit_date          DateTime
@@ -213,6 +218,7 @@ model PackageContributor {
   updated_at                DateTime @updatedAt
 
   package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  anomalies PackageAnomaly[]
 
   @@unique([package_id, author_email])
   @@index([package_id])
@@ -275,6 +281,25 @@ model PackageMonthlyCommits {
   @@index([package_id])
   @@index([year, month])
   @@map("package_monthly_commits")
+}
+
+model PackageAnomaly {
+  id              String   @id @default(uuid())
+  package_id      String
+  commit_sha      String
+  contributor_id  String   // PackageContributor id
+  anomaly_score   Float    // Total anomaly score (0+)
+  score_breakdown Json     // Array of {factor: string, points: number, reason: string}
+  detected_at     DateTime @default(now())
+
+  package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+  contributor PackageContributor @relation(fields: [contributor_id], references: [id], onDelete: Cascade)
+
+  @@unique([package_id, commit_sha])
+  @@index([package_id])
+  @@index([contributor_id])
+  @@index([anomaly_score])
+  @@map("package_anomalies")
 }
 
 model Watchlist {
@@ -723,6 +748,7 @@ model Project {
   vulnerability_notifications Json?
   license_notifications       Json?
   health_notifications        Json?
+  anomalies_notifications     Json?
   health_score                Float?
   dependencies_json           Json?
   github_app_installation_id  String?                   // GitHub installation ID for this repo
@@ -730,6 +756,9 @@ model Project {
   project_dependencies        project_dependencies[]
   projectUsers                ProjectUser[]
   projectWatchlistPackages    ProjectWatchlistPackage[]
+  packageAlertSettings        ProjectPackageAlertSettings[]
+  packageAlerts               ProjectPackageAlert[]
+  projectAlerts               ProjectAlert[]
   monitoredBranch             MonitoredBranch?          @relation(fields: [monitored_branch_id], references: [id])
 
   @@map("projects")
@@ -868,6 +897,89 @@ model project_dependencies {
   @@index([package_id])
   @@index([project_id])
   @@index([status])
+}
+
+// ProjectPackageAlertSettings - per-package alert settings in a project
+model ProjectPackageAlertSettings {
+  id                    String   @id @default(uuid())
+  project_id            String
+  package_id            String
+  anomaly_threshold     Float     @default(50.0) // 0-100, threshold for anomaly commit alerts
+  vulnerability_threshold String  @default("medium") // "low", "medium", "high", "critical" - minimum severity to alert
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  // Relations
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@unique([project_id, package_id])
+  @@index([project_id])
+  @@index([package_id])
+  @@map("project_package_alert_settings")
+}
+
+// ProjectPackageAlert - alerts for packages in projects
+model ProjectPackageAlert {
+  id                    String   @id @default(uuid())
+  project_id            String
+  package_id            String
+  version               String?  // Version from BranchDependency
+  alert_type            String   // "vulnerability" | "anomaly"
+  
+  // Vulnerability fields
+  vulnerability_id      String?  // OSV vulnerability ID
+  severity              String?  // "critical" | "high" | "medium" | "low"
+  vulnerability_details Json?    // Full vulnerability details from OSV
+  
+  // Anomaly fields
+  commit_sha            String?
+  anomaly_score         Float?
+  score_breakdown       Json?    // Anomaly score breakdown
+  
+  status                String   @default("unread") // "unread" | "read" | "resolved"
+  detected_at           DateTime @default(now())
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  // Relations
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  package Packages @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([package_id])
+  @@index([status])
+  @@index([detected_at])
+  @@index([alert_type])
+  @@index([vulnerability_id])
+  @@index([commit_sha])
+  @@map("project_package_alerts")
+}
+
+// ProjectAlert - alerts for projects (health, license, package-level anomalies/vulnerabilities)
+model ProjectAlert {
+  id                    String   @id @default(uuid())
+  project_id            String
+  package_id            String?  // Nullable - null for project-level alerts (health, license)
+  alert_type            String   // "health" | "license" | "anomaly" | "vulnerability"
+  severity              String?  // "critical" | "high" | "medium" | "low"
+  message               String
+  details               Json?    // Additional alert details (previous/new health scores, license info, etc.)
+  status                String   @default("unread") // "unread" | "read" | "resolved"
+  detected_at           DateTime @default(now())
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  // Relations
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  package Packages? @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([package_id])
+  @@index([alert_type])
+  @@index([status])
+  @@index([detected_at])
+  @@map("project_alerts")
 }
 
 enum WaitValue {

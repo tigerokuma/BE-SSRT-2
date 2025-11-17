@@ -8,6 +8,7 @@ import { PackageScorecardService } from '../services/package-scorecard.service';
 import { AISummaryService } from '../../activity/services/ai-summary.service';
 import { PackageVulnerabilityService } from '../services/package-vulnerability.service';
 import { MonthlyCommitsService } from '../services/monthly-commits.service';
+import { AnomalyDetectionService } from '../services/anomaly-detection.service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -31,6 +32,7 @@ export class FullSetupProcessor {
     private readonly aiSummaryService: AISummaryService,
     private readonly packageVulnerability: PackageVulnerabilityService,
     private readonly monthlyCommits: MonthlyCommitsService,
+    private readonly anomalyDetection: AnomalyDetectionService,
   ) {
     this.logger.log(`🔧 FullSetupProcessor initialized and ready to process jobs`);
   }
@@ -95,7 +97,11 @@ export class FullSetupProcessor {
       await this.storeContributorProfiles(packageId, contributorProfiles);
       this.logger.log(`👥 Built ${contributorProfiles.length} contributor profiles`);
 
-      // 8. Process scorecard data (API first, then local)
+      // 8. Detect anomalies in stored commits
+      await this.detectAnomaliesInStoredCommits(packageId, recentCommits);
+      this.logger.log(`🔍 Detected anomalies in stored commits`);
+
+      // 9. Process scorecard data (API first, then local)
       await this.packageScorecard.processHistoricalScores(
         packageId,
         recentCommits.map(c => ({ sha: c.sha, timestamp: c.timestamp })),
@@ -105,15 +111,15 @@ export class FullSetupProcessor {
       );
       this.logger.log(`🛡️ Processed scorecard data`);
 
-      // 9. Process vulnerabilities (NPM versions + OSV API)
+      // 10. Process vulnerabilities (NPM versions + OSV API)
       await this.packageVulnerability.processPackageVulnerabilities(packageId, packageName);
       this.logger.log(`🔍 Processed package vulnerabilities`);
 
-      // 10. Generate AI overview
+      // 11. Generate AI overview
       await this.generateAIOverview(packageId, packageName, allCommits, contributorProfiles);
       this.logger.log(`🤖 Generated AI overview`);
 
-      // 11. Update package status to 'done'
+      // 12. Update package status to 'done'
       await this.updatePackageStatus(packageId, 'done');
       this.logger.log(`✅ Full setup completed for ${packageName}`);
 
@@ -288,6 +294,7 @@ export class FullSetupProcessor {
       // Build time histogram
       const commitTimeHistogram = this.buildCommitTimeHistogram(timestamps);
       const typicalDaysActive = this.buildTypicalDaysActive(timestamps);
+      const commitTimeHeatmap = this.buildCommitTimeHeatmap(timestamps);
 
       // Convert files worked on Map to object for JSON storage
       const filesWorkedOnHistogram = Object.fromEntries(profile.files_worked_on);
@@ -323,6 +330,7 @@ export class FullSetupProcessor {
         insert_to_delete_ratio: insertToDeleteRatio,
         commit_time_histogram: commitTimeHistogram,
         typical_days_active: typicalDaysActive,
+        commit_time_heatmap: commitTimeHeatmap,
         files_worked_on: filesWorkedOnHistogram,
         first_commit_date: firstCommitDate,
         last_commit_date: lastCommitDate,
@@ -361,6 +369,7 @@ export class FullSetupProcessor {
         insert_to_delete_ratio: profile.insert_to_delete_ratio,
         commit_time_histogram: profile.commit_time_histogram,
         typical_days_active: profile.typical_days_active,
+        commit_time_heatmap: profile.commit_time_heatmap,
         files_worked_on: profile.files_worked_on,
         first_commit_date: profile.first_commit_date,
         last_commit_date: profile.last_commit_date,
@@ -375,6 +384,63 @@ export class FullSetupProcessor {
     } catch (error) {
       this.logger.error(`❌ Failed to store contributor profiles:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Detect anomalies in stored commits during full setup
+   */
+  private async detectAnomaliesInStoredCommits(packageId: string, commits: CommitDetails[]): Promise<void> {
+    try {
+      let anomalyCount = 0;
+
+      for (const commit of commits) {
+        try {
+          // Get contributor profile
+          const contributor = await this.prisma.packageContributor.findUnique({
+            where: {
+              package_id_author_email: {
+                package_id: packageId,
+                author_email: commit.authorEmail,
+              },
+            },
+          });
+
+          if (!contributor) {
+            // Skip if contributor profile doesn't exist (shouldn't happen, but safety check)
+            continue;
+          }
+
+          // Calculate anomaly score
+          const result = this.anomalyDetection.calculateAnomalyScore(
+            commit,
+            contributor as any,
+          );
+
+          // Only store if score > 0
+          if (result.totalScore > 0) {
+            await this.prisma.packageAnomaly.create({
+              data: {
+                package_id: packageId,
+                commit_sha: commit.sha,
+                contributor_id: contributor.id,
+                anomaly_score: result.totalScore,
+                score_breakdown: result.breakdown,
+              },
+            });
+
+            anomalyCount++;
+          }
+        } catch (error) {
+          this.logger.error(`Error detecting anomalies for commit ${commit.sha}:`, error);
+          // Continue with other commits
+        }
+      }
+
+      this.logger.log(`🔍 Detected ${anomalyCount} anomalous commits out of ${commits.length} total`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to detect anomalies in stored commits:`, error);
+      // Don't throw - anomaly detection failure shouldn't fail the entire setup
     }
   }
 
@@ -491,6 +557,26 @@ export class FullSetupProcessor {
     }
     
     return daysActive;
+  }
+
+  /**
+   * Build commit time heatmap (7x24 grid) from timestamps
+   * Format: [day][hour] where day is 0-6 (Sunday-Saturday) and hour is 0-23
+   */
+  private buildCommitTimeHeatmap(timestamps: Date[]): number[][] {
+    // Initialize 7x24 grid (7 days, 24 hours)
+    const heatmap: number[][] = Array(7).fill(null).map(() => Array(24).fill(0));
+    
+    for (const timestamp of timestamps) {
+      const dayOfWeek = timestamp.getDay(); // 0 = Sunday, 6 = Saturday
+      const hour = timestamp.getHours(); // 0-23
+      
+      if (dayOfWeek >= 0 && dayOfWeek < 7 && hour >= 0 && hour < 24) {
+        heatmap[dayOfWeek][hour]++;
+      }
+    }
+    
+    return heatmap;
   }
 
   private calculateBusFactor(contributors: any[]): number {

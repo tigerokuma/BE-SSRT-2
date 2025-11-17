@@ -6,10 +6,15 @@ import {
   BadRequestException,
   NotFoundException,
   Delete,
+  Post,
+  Body,
+  Put,
 } from '@nestjs/common';
 import { PackagesService } from '../services/packages.service';
 import { PackageVulnerabilityService } from '../../dependencies/services/package-vulnerability.service';
 import { MonthlyCommitsService } from '../../dependencies/services/monthly-commits.service';
+import { PackageAlertSettingsService } from '../services/package-alert-settings.service';
+import { PackageAlertService } from '../services/package-alert.service';
 
 @Controller('packages')
 export class PackagesController {
@@ -17,6 +22,8 @@ export class PackagesController {
     private readonly packagesService: PackagesService,
     private readonly packageVulnerability: PackageVulnerabilityService,
     private readonly monthlyCommits: MonthlyCommitsService,
+    private readonly alertSettingsService: PackageAlertSettingsService,
+    private readonly alertService: PackageAlertService,
   ) {}
 
   @Get('search')
@@ -256,6 +263,62 @@ export class PackagesController {
     };
   }
 
+  @Get(':packageId/commits')
+  async getPackageCommits(
+    @Param('packageId') packageId: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+      throw new BadRequestException('Limit must be a number between 1 and 100');
+    }
+
+    const commits = await this.packagesService.getPackageCommits(
+      packageId.trim(),
+      limitNum,
+    );
+
+    return {
+      package_id: packageId.trim(),
+      commits,
+      count: commits.length,
+    };
+  }
+
+  @Post(':packageId/commits/summarize')
+  async summarizeCommits(
+    @Param('packageId') packageId: string,
+    @Body() body: { commits?: any[] },
+  ) {
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    // If commits are provided in body, use them; otherwise fetch from database
+    let commits = body.commits;
+    
+    if (!commits || commits.length === 0) {
+      // Fetch commits from database if not provided
+      commits = await this.packagesService.getPackageCommits(packageId.trim(), 50);
+    }
+
+    if (!commits || commits.length === 0) {
+      throw new BadRequestException('No commits available to summarize');
+    }
+
+    const summary = await this.packagesService.summarizeCommits(commits);
+
+    return {
+      package_id: packageId.trim(),
+      summary,
+      commits_analyzed: commits.length,
+    };
+  }
+
   @Delete('cache/refresh')
   async forceRefreshCache(@Query('repo_url') repoUrl?: string) {
     const result = await this.packagesService.forceRefreshCache(repoUrl);
@@ -265,5 +328,120 @@ export class PackagesController {
         : `Cleared ${result.clearedCount} stale cache entries`,
       ...result,
     };
+  }
+
+  @Get('project/:projectId/package/:packageId/alert-settings')
+  async getAlertSettings(
+    @Param('projectId') projectId: string,
+    @Param('packageId') packageId: string,
+  ) {
+    if (!projectId || projectId.trim().length === 0) {
+      throw new BadRequestException('Project ID is required');
+    }
+
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    const settings = await this.alertSettingsService.getAlertSettings(
+      projectId.trim(),
+      packageId.trim(),
+    );
+
+    return settings;
+  }
+
+  @Put('project/:projectId/package/:packageId/alert-settings')
+  async updateAlertSettings(
+    @Param('projectId') projectId: string,
+    @Param('packageId') packageId: string,
+    @Body() body: { anomaly_threshold?: number; vulnerability_threshold?: string },
+  ) {
+    if (!projectId || projectId.trim().length === 0) {
+      throw new BadRequestException('Project ID is required');
+    }
+
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    // Get current settings to merge with updates
+    const currentSettings = await this.alertSettingsService.getAlertSettings(
+      projectId.trim(),
+      packageId.trim(),
+    );
+
+    const updatedSettings = {
+      anomaly_threshold:
+        body.anomaly_threshold !== undefined
+          ? body.anomaly_threshold
+          : currentSettings.anomaly_threshold,
+      vulnerability_threshold:
+        body.vulnerability_threshold !== undefined
+          ? body.vulnerability_threshold
+          : currentSettings.vulnerability_threshold,
+    };
+
+    const result = await this.alertSettingsService.updateAlertSettings(
+      projectId.trim(),
+      packageId.trim(),
+      updatedSettings,
+    );
+
+    return result;
+  }
+
+  @Get('project/:projectId/package/:packageId/alerts')
+  async getPackageAlerts(
+    @Param('projectId') projectId: string,
+    @Param('packageId') packageId: string,
+  ) {
+    if (!projectId || projectId.trim().length === 0) {
+      throw new BadRequestException('Project ID is required');
+    }
+
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    const alerts = await this.alertService.getPackageAlerts(
+      projectId.trim(),
+      packageId.trim(),
+    );
+
+    return alerts;
+  }
+
+  @Put('project/:projectId/package/:packageId/alerts/:alertId')
+  async updateAlertStatus(
+    @Param('projectId') projectId: string,
+    @Param('packageId') packageId: string,
+    @Param('alertId') alertId: string,
+    @Body() body: { status: 'unread' | 'read' | 'resolved' },
+  ) {
+    if (!projectId || projectId.trim().length === 0) {
+      throw new BadRequestException('Project ID is required');
+    }
+
+    if (!packageId || packageId.trim().length === 0) {
+      throw new BadRequestException('Package ID is required');
+    }
+
+    if (!alertId || alertId.trim().length === 0) {
+      throw new BadRequestException('Alert ID is required');
+    }
+
+    if (!body.status || !['unread', 'read', 'resolved'].includes(body.status)) {
+      throw new BadRequestException(
+        'Status must be one of: unread, read, resolved',
+      );
+    }
+
+    const result = await this.alertService.updateAlertStatus(
+      alertId.trim(),
+      body.status,
+    );
+
+    return result;
   }
 }

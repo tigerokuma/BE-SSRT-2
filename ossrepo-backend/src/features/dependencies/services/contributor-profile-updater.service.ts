@@ -111,6 +111,10 @@ export class ContributorProfileUpdaterService {
       profile.typical_days_active as any,
       newTimestamps
     );
+    const updatedCommitTimeHeatmap = this.updateCommitTimeHeatmap(
+      profile.commit_time_heatmap as any,
+      newTimestamps
+    );
 
     // Update files worked on
     const updatedFilesWorkedOn = this.updateFilesWorkedOn(
@@ -152,6 +156,7 @@ export class ContributorProfileUpdaterService {
         insert_to_delete_ratio: newInsertToDeleteRatio,
         commit_time_histogram: updatedCommitTimeHistogram,
         typical_days_active: updatedTypicalDaysActive,
+        commit_time_heatmap: updatedCommitTimeHeatmap,
         files_worked_on: updatedFilesWorkedOn,
         first_commit_date: newFirstCommitDate,
         last_commit_date: newLastCommitDate,
@@ -198,6 +203,7 @@ export class ContributorProfileUpdaterService {
           insert_to_delete_ratio: 0,
           commit_time_histogram: {},
           typical_days_active: {},
+          commit_time_heatmap: this.createEmptyHeatmap(),
           files_worked_on: {},
           first_commit_date: firstCommit.timestamp,
           last_commit_date: firstCommit.timestamp,
@@ -302,6 +308,40 @@ export class ContributorProfileUpdaterService {
     }
     
     return daysActive;
+  }
+
+  /**
+   * Create empty 7x24 heatmap (7 days, 24 hours)
+   */
+  private createEmptyHeatmap(): number[][] {
+    return Array(7).fill(null).map(() => Array(24).fill(0));
+  }
+
+  /**
+   * Update commit time heatmap (7x24 grid) with new timestamps
+   * Format: [day][hour] where day is 0-6 (Sunday-Saturday) and hour is 0-23
+   */
+  private updateCommitTimeHeatmap(existingHeatmap: number[][] | null, newTimestamps: Date[]): number[][] {
+    // Initialize heatmap if it doesn't exist or is invalid
+    let heatmap: number[][];
+    if (!existingHeatmap || !Array.isArray(existingHeatmap) || existingHeatmap.length !== 7) {
+      heatmap = this.createEmptyHeatmap();
+    } else {
+      // Deep copy the existing heatmap
+      heatmap = existingHeatmap.map(day => [...day]);
+    }
+
+    // Update heatmap with new timestamps
+    for (const timestamp of newTimestamps) {
+      const dayOfWeek = timestamp.getDay(); // 0 = Sunday, 6 = Saturday
+      const hour = timestamp.getHours(); // 0-23
+      
+      if (dayOfWeek >= 0 && dayOfWeek < 7 && hour >= 0 && hour < 24) {
+        heatmap[dayOfWeek][hour] = (heatmap[dayOfWeek][hour] || 0) + 1;
+      }
+    }
+    
+    return heatmap;
   }
 
   /**

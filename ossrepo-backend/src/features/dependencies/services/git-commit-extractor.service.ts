@@ -36,6 +36,7 @@ export class GitCommitExtractorService {
       const { stdout, stderr } = await execAsync(gitLogCmd, {
         cwd: repoPath,
         timeout: 300000, // 5 minutes timeout
+        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large repositories
       });
 
       if (stderr && !stderr.includes('warning')) {
@@ -70,6 +71,7 @@ export class GitCommitExtractorService {
       const { stdout } = await execAsync(`git show --stat ${commitSha}`, {
         cwd: repoPath,
         timeout: 30000, // 30 seconds timeout per commit
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer per commit (for large diffs)
       });
 
       // Parse the diff output to extract file changes

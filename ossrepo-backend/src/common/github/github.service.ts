@@ -96,7 +96,17 @@ export class GitHubService {
 
             const [, owner, repo] = match;
 
-            const packageJson = await this.getPackageJson(owner, repo, userId);
+            let packageJson: any;
+            try {
+                packageJson = await this.getPackageJson(owner, repo, userId);
+            } catch (error: any) {
+                // If package.json not found or repo not found, return empty array instead of failing
+                if (error.message?.includes('not found') || error.status === 404) {
+                    console.warn(`⚠️ package.json not found for ${owner}/${repo}, returning empty dependencies`);
+                    return [];
+                }
+                throw error; // Re-throw other errors
+            }
 
             // If package.json doesn't exist, return empty array (empty repo or non-Node.js project)
             if (!packageJson) {

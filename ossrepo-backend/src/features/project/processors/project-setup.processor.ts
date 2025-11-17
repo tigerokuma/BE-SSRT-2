@@ -125,6 +125,10 @@ export class ProjectSetupProcessor {
         this.logger.warn(`⚠️ Could not check for GitHub App installation: ${error.message}`);
         // Don't fail the project setup if this fails
       }
+
+      // Mark project as ready
+      await this.projectRepository.updateProjectStatus(projectId, 'ready');
+      this.logger.log(`✅ Project setup complete - project marked as ready`);
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(`✅ Finished project setup in ${duration}s`);
@@ -132,7 +136,7 @@ export class ProjectSetupProcessor {
       return {
         success: true,
         projectId,
-        dependenciesCount: dependencies.length,
+        dependenciesCount: createdDependencies.length,
         duration: `${duration}s`,
       };
 
