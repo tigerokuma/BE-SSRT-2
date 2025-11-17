@@ -332,6 +332,5 @@ export class ProjectController {
         );
 
         return result;
->>>>>>> 679453289177c7021c3b66a52f4057786526e886
     }
 }
