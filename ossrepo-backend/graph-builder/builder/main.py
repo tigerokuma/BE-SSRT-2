@@ -2,7 +2,7 @@ import logging
 import sys
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import subprocess
 import os
 import shutil
@@ -82,6 +82,19 @@ def rmtree_robust(path: str, retries: int = 6, base_delay: float = 0.25) -> None
     shutil.rmtree(path, onerror=_handle_remove_readonly)
 
 
+# ------------------------------ subprocess helpers ------------------------------
+
+def _run(cmd: List[str], cwd: Optional[str] = None, check: bool = True, timeout: int = 300):
+    """Run a command without capturing stdout (used for most git ops)."""
+    return subprocess.run(cmd, cwd=cwd, check=check, timeout=timeout)
+
+def _run_out(cmd: List[str], cwd: Optional[str] = None, timeout: int = 300) -> str:
+    """Run a command and return stdout as text (for commands like `git rev-parse`)."""
+    cp = subprocess.run(cmd, cwd=cwd, check=True, timeout=timeout,
+                        capture_output=True, text=True)
+    return cp.stdout.strip()
+
+
 # ------------------------------ Build task ------------------------------
 
 def run_build_task(req: BuildRequest):
@@ -91,33 +104,45 @@ def run_build_task(req: BuildRequest):
     use_temp = not req.repoPath or not req.repoPath.strip()
     workdir = None
 
-    if use_temp:
-        workdir = tempfile.mkdtemp(prefix=f"build-{req.taskId}-")
-        repo_dir = os.path.join(workdir, "repo")
-    else:
-        repo_dir = req.repoPath
-        if os.path.exists(repo_dir):
-            try:
-                rmtree_robust(repo_dir)
-            except Exception as e:
-                logging.error(f"Failed to delete directory before clone: {e}")
-                update_task_status(req.taskId, "failed", f"Failed to clean repo path: {e}")
-                return
+    # Clone depth control: default = full history; set SHALLOW_CLONE=1 to speed up
+    SHALLOW = os.getenv("SHALLOW_CLONE", "0") not in ("0", "false", "False")
 
     try:
-        # Clone and checkout branch
-        subprocess.run(["gh", "repo", "clone", req.repoId, repo_dir], check=True)
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", os.path.abspath(repo_dir)], check=False)
-        subprocess.run(["git", "fetch", "--all", "--tags", "--prune"], cwd=repo_dir, check=True)
-        subprocess.run(["git", "checkout", req.branch], cwd=repo_dir, check=True)
-        subprocess.run(["git", "pull", "--ff-only"], cwd=repo_dir, check=False)
+        if use_temp:
+            workdir = tempfile.mkdtemp(prefix=f"build-{req.taskId}-")
+            repo_dir = os.path.join(workdir, "repo")
+            clone_cmd = ["gh", "repo", "clone", req.repoId, repo_dir]
+            if SHALLOW:
+                clone_cmd += ["--", "--depth=1"]
+            _run(clone_cmd)
+        else:
+            repo_dir = req.repoPath
+            if not os.path.exists(repo_dir):
+                os.makedirs(repo_dir, exist_ok=True)
+                clone_cmd = ["gh", "repo", "clone", req.repoId, repo_dir]
+                if SHALLOW:
+                    clone_cmd += ["--", "--depth=1"]
+                _run(clone_cmd)
+            # else reuse existing workspace without deleting user path
+
+        # per-repo safe.directory only
+        try:
+            _run(["git", "config", "--add", "safe.directory", os.path.abspath(repo_dir)], check=False)
+        except Exception:
+            pass
+
+        # fetch + checkout branch
+        _run(["git", "fetch", "--all", "--tags", "--prune"], cwd=repo_dir)
+        _run(["git", "checkout", req.branch], cwd=repo_dir)
+        _run(["git", "pull", "--ff-only"], cwd=repo_dir)  # non-fatal if already up-to-date
 
         # Head sha (for logging only)
-        head_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=repo_dir,
-            capture_output=True, text=True, check=True
-        ).stdout.strip()
-        logging.info(f"[git] {req.repoId}#{req.branch} HEAD: {head_sha}")
+        try:
+            head_sha = _run_out(["git", "rev-parse", "HEAD"], cwd=repo_dir)
+        except Exception:
+            head_sha = ""
+        if head_sha:
+            logging.info(f"[git] {req.repoId}#{req.branch} HEAD: {head_sha}")
 
         # Limits for safety (tunable via env)
         max_commits = int(os.getenv("WALK_MAX_COMMITS", "0"))  # 0 = walk all available
@@ -147,9 +172,7 @@ def run_build_task(req: BuildRequest):
             if use_temp and workdir and os.path.exists(workdir):
                 rmtree_robust(workdir)
                 logging.info(f"🧹 Deleted temp workdir {workdir}")
-            elif not use_temp and os.path.exists(repo_dir):
-                rmtree_robust(repo_dir)
-                logging.info(f"🧹 Deleted cloned repo at {repo_dir}")
+            # IMPORTANT: do NOT delete user-supplied repoPath
         except Exception as e:
             logging.error(f"Cleanup failed: {e}")
 

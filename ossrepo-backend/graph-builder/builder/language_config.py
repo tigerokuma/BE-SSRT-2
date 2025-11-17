@@ -41,7 +41,7 @@ LANGUAGE_CONFIGS = {
     "python": LanguageConfig(
         name="python",
         file_extensions=[".py"],
-        function_node_types=["function_definition"],
+        function_node_types=["function_definition", "async_function_definition"],  # <-- add this
         class_node_types=["class_definition"],
         module_node_types=["module"],
         call_node_types=["call"],
@@ -60,7 +60,13 @@ LANGUAGE_CONFIGS = {
     "javascript": LanguageConfig(
         name="javascript",
         file_extensions=[".js", ".jsx"],
-        function_node_types=["function_declaration", "arrow_function", "method_definition"],
+        function_node_types=[
+            "function_declaration",
+            "function_expression",  # optional
+            "generator_function",  # optional (grammar-dependent)
+            "arrow_function",
+            "method_definition"
+        ],
         class_node_types=["class_declaration"],
         module_node_types=["program"],
         call_node_types=["call_expression", "new_expression"],
