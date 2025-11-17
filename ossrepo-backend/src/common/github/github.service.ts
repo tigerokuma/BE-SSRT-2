@@ -38,10 +38,24 @@ export class GitHubService {
         }
     }
 
-    async getPackageJson(owner: string, repo: string, userId?: string): Promise<any> {
+    async getPackageJson(owner: string, repo: string, userId?: string): Promise<any | null> {
         try {
             const octokit = await this.getAuthenticatedOctokit(userId);
 
+            // First verify the repository exists by getting repo info
+            try {
+                await octokit.repos.get({ owner, repo });
+            } catch (repoError: any) {
+                // If repo doesn't exist, throw a clear error
+                if (repoError.status === 404) {
+                    throw new Error(`Repository not found: ${owner}/${repo}. Please check if the repository exists and is accessible.`);
+                } else if (repoError.status === 403) {
+                    throw new Error(`Access denied to repository: ${owner}/${repo}. Please check if the repository is public or if your GitHub token has the necessary permissions.`);
+                }
+                // For other repo errors, still try to get package.json
+            }
+
+            // Now try to get package.json
             const response = await octokit.repos.getContent({
                 owner,
                 repo,
@@ -53,18 +67,22 @@ export class GitHubService {
                 return JSON.parse(content);
             }
 
-            throw new Error('package.json not found or not a file');
-        } catch (error) {
-            console.error('Error fetching package.json:', error);
-
-            // Provide more specific error messages
-            if (error.status === 404) {
-                throw new Error(`Repository not found: ${owner}/${repo}. Please check if the repository exists and is accessible.`);
-            } else if (error.status === 403) {
-                throw new Error(`Access denied to repository: ${owner}/${repo}. Please check if the repository is public or if your GitHub token has the necessary permissions.`);
+            return null; // package.json not found or not a file
+        } catch (error: any) {
+            // If it's a repository access error, re-throw it
+            if (error.message?.includes('Repository not found') || error.message?.includes('Access denied')) {
+                throw error;
             }
 
-            throw new Error(`Failed to fetch package.json: ${error.message}`);
+            // For 404 on package.json specifically, return null (file doesn't exist)
+            if (error.status === 404) {
+                console.log(`package.json not found in ${owner}/${repo} - repository may be empty or not a Node.js project`);
+                return null;
+            }
+
+            // For other errors, log and return null to allow project creation to continue
+            console.log(`Failed to fetch package.json for ${owner}/${repo}: ${error.message || error}. Continuing without dependencies.`);
+            return null;
         }
     }
 
@@ -79,6 +97,12 @@ export class GitHubService {
             const [, owner, repo] = match;
 
             const packageJson = await this.getPackageJson(owner, repo, userId);
+
+            // If package.json doesn't exist, return empty array (empty repo or non-Node.js project)
+            if (!packageJson) {
+                console.log(`No package.json found in ${owner}/${repo} - returning empty dependencies`);
+                return [];
+            }
 
             const dependencies = [];
 
@@ -132,7 +156,13 @@ export class GitHubService {
             return dependencies;
         } catch (error) {
             console.error('Error extracting dependencies:', error);
-            throw error;
+            // If it's a repository access error, re-throw it
+            // Otherwise, return empty array to allow project creation to continue
+            if (error.message?.includes('Repository not found') || error.message?.includes('Access denied')) {
+                throw error;
+            }
+            console.log(`Error extracting dependencies, returning empty array: ${error.message}`);
+            return [];
         }
     }
 }

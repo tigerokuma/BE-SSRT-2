@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { GitHubService } from '../../../common/github/github.service';
+import { GitHubAppService } from '../../../common/github/github-app.service';
 import { WebhookService } from '../../../common/webhook/webhook.service';
 import { ProjectRepository } from '../repositories/project.repository';
 import { DependencyQueueService } from '../../dependencies/services/dependency-queue.service';
@@ -19,6 +20,7 @@ export class ProjectSetupProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly githubService: GitHubService,
+    private readonly githubAppService: GitHubAppService,
     private readonly webhookService: WebhookService,
     private readonly projectRepository: ProjectRepository,
     private readonly dependencyQueueService: DependencyQueueService,
@@ -60,37 +62,69 @@ export class ProjectSetupProcessor {
       const createdDependencies = await this.projectRepository.createBranchDependenciesWithReturn(projectWithBranch.monitoredBranch.id, dependencies);
       this.logger.log(`📦 Extracted ${dependencies.length} production dependencies (cleared any existing devDependencies)`);
 
-      // Queue dependency-fast-setup jobs for each dependency
-      for (const branchDependency of createdDependencies) {
-        // Try to find the repository URL for this dependency
-        let repoUrl: string | undefined;
-        try {
-          repoUrl = await this.findRepositoryUrl(branchDependency.name);
-          if (repoUrl) {
-            this.logger.log(`🔍 Found repository URL for ${branchDependency.name}: ${repoUrl}`);
-          } else {
-            this.logger.log(`⚠️ No repository URL found for ${branchDependency.name}`);
-          }
-        } catch (error) {
-          this.logger.log(`⚠️ Error finding repository URL for ${branchDependency.name}: ${error.message}`);
-        }
-
-        await this.dependencyQueueService.queueFastSetup({
-          branchDependencyId: branchDependency.id,
-          branchId: projectWithBranch.monitoredBranch.id,
-          projectId: projectId,
-          packageName: branchDependency.name,
-          repoUrl: repoUrl,
+      // If there are no dependencies, mark project as ready immediately with perfect health score
+      if (createdDependencies.length === 0) {
+        this.logger.log(`📭 No dependencies found - marking project as ready immediately with health score 100`);
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: {
+            status: 'ready',
+            health_score: 100, // Perfect score for projects with no dependencies
+          },
         });
-        this.logger.log(`📋 Queued fast-setup job for dependency: ${branchDependency.name}`);
+      } else {
+        // Queue dependency-fast-setup jobs for each dependency
+        for (const branchDependency of createdDependencies) {
+          // Try to find the repository URL for this dependency
+          let repoUrl: string | undefined;
+          try {
+            repoUrl = await this.findRepositoryUrl(branchDependency.name);
+            if (repoUrl) {
+              this.logger.log(`🔍 Found repository URL for ${branchDependency.name}: ${repoUrl}`);
+            } else {
+              this.logger.log(`⚠️ No repository URL found for ${branchDependency.name}`);
+            }
+          } catch (error) {
+            this.logger.log(`⚠️ Error finding repository URL for ${branchDependency.name}: ${error.message}`);
+          }
+
+          await this.dependencyQueueService.queueFastSetup({
+            branchDependencyId: branchDependency.id,
+            branchId: projectWithBranch.monitoredBranch.id,
+            projectId: projectId,
+            packageName: branchDependency.name,
+            repoUrl: repoUrl,
+          });
+          this.logger.log(`📋 Queued fast-setup job for dependency: ${branchDependency.name}`);
+        }
+        
+        // Keep project status as 'creating' - dependency jobs will mark it as 'ready' when complete
+        this.logger.log(`⏳ Project setup initiated, waiting for ${dependencies.length} dependencies to be analyzed`);
       }
 
-      // Setup webhook for the repository
-      await this.webhookService.setupWebhookForRepository(repositoryUrl, projectWithBranch.monitoredBranch.id);
+      // Setup webhook for the repository using the project creator's token
+      await this.webhookService.setupWebhookForRepository(repositoryUrl, projectWithBranch.monitoredBranch.id, userId);
       this.logger.log(`🔗 Set up webhook`);
 
-      // Keep project status as 'creating' - dependency jobs will mark it as 'ready' when complete
-      this.logger.log(`⏳ Project setup initiated, waiting for ${dependencies.length} dependencies to be analyzed`);
+      // Check if GitHub App is already installed on this repository and link it
+      try {
+        const installationId = await this.githubAppService.findInstallationForRepository(repositoryUrl);
+        if (installationId) {
+          await this.prisma.project.update({
+            where: { id: projectId },
+            data: {
+              github_app_installation_id: installationId,
+              github_actions_enabled: true,
+            },
+          });
+          this.logger.log(`✅ Linked GitHub App installation ${installationId} to project ${projectId}`);
+        } else {
+          this.logger.log(`ℹ️ No GitHub App installation found for repository ${repositoryUrl}`);
+        }
+      } catch (error) {
+        this.logger.warn(`⚠️ Could not check for GitHub App installation: ${error.message}`);
+        // Don't fail the project setup if this fails
+      }
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(`✅ Finished project setup in ${duration}s`);

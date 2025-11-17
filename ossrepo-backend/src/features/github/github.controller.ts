@@ -14,7 +14,7 @@ export class GitHubController {
   @ApiResponse({ status: 200, description: 'List of user repositories' })
   async getUserRepositories(@Param('userId') userId: string) {
     if (!userId) throw new BadRequestException('userId is required');
-    return this.githubService.getUserRepositoriesByClerkId(userId);
+    return this.githubService.getUserRepositoriesByUserId(userId);
   }
 
   @Get('branches')

@@ -270,4 +270,17 @@ export class ProjectController {
     async debugAllProjects() {
         return this.projectService.debugAllProjects();
     }
+
+    @Get(':id/github-app/installation-url')
+    async getGitHubAppInstallationUrl(@Param('id') id: string) {
+        return this.projectService.getGitHubAppInstallationUrl(id);
+    }
+
+    @Post(':id/github-app/link-installation')
+    async linkGitHubAppInstallation(
+        @Param('id') id: string,
+        @Body() body: { installationId: string }
+    ) {
+        return this.projectService.linkGitHubAppInstallation(id, body.installationId);
+    }
 }

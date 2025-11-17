@@ -515,4 +515,65 @@ export class ProjectService {
       return { error: (error as any).message, message: 'Failed to get queue status' };
     }
   }
+
+  async getGitHubAppInstallationUrl(projectId: string) {
+    try {
+      const project = await this.projectRepository.getProjectById(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const projectWithBranch = await this.projectRepository.getProjectWithBranch(projectId);
+      if (!projectWithBranch?.monitoredBranch?.repository_url) {
+        throw new Error('Project has no repository URL');
+      }
+
+      // Extract owner and repo from repository URL
+      const match = projectWithBranch.monitoredBranch.repository_url.match(
+        /github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/,
+      );
+      if (!match) {
+        throw new Error('Invalid GitHub repository URL');
+      }
+
+      const [, owner, repo] = match;
+
+      // GitHub App installation URL format
+      // This should be your GitHub App's installation URL
+      const appName = process.env.GITHUB_APP_NAME || 'your-app-name';
+      const installationUrl = `https://github.com/apps/${appName}/installations/new`;
+
+      return {
+        installationUrl,
+        repository: `${owner}/${repo}`,
+        hasInstallation: !!project.github_app_installation_id,
+        installationId: project.github_app_installation_id,
+      };
+    } catch (error) {
+      console.error('Error getting GitHub App installation URL:', error);
+      throw error;
+    }
+  }
+
+  async linkGitHubAppInstallation(projectId: string, installationId: string) {
+    try {
+      const result = await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          github_app_installation_id: installationId,
+          github_actions_enabled: true,
+        },
+      });
+
+      return {
+        success: true,
+        message: 'Installation linked successfully',
+        projectId: result.id,
+        installationId: result.github_app_installation_id,
+      };
+    } catch (error) {
+      console.error('Error linking GitHub App installation:', error);
+      throw error;
+    }
+  }
 }
