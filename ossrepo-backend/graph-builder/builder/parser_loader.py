@@ -84,77 +84,97 @@ def load_parsers() -> tuple[dict[str, Parser], dict[str, Any]]:
 
     for lang_name, lang_config in LANGUAGE_CONFIGS.items():
         lang_lib = LANGUAGE_LIBRARIES.get(lang_name)
-        if lang_lib:
-            try:
-                language = Language(lang_lib())
-                parser = Parser(language)
-
-                parsers[lang_name] = parser
-
-                # Compile queries -------------------------------------------------
-                function_patterns = " ".join(
-                    [f"({node_type}) @function" for node_type in lang_config.function_node_types]
-                )
-                class_patterns = " ".join(
-                    [f"({node_type}) @class" for node_type in lang_config.class_node_types]
-                )
-                call_patterns = " ".join(
-                    [f"({node_type}) @call" for node_type in lang_config.call_node_types]
-                )
-
-                # --- NEW: import queries (lightweight, per-language) ------------
-                imports_patterns = ""
-                if lang_name == "python":
-                    # Matches:
-                    #   import os
-                    #   import a as b
-                    #   from pkg import x, y as z
-                    #   from pkg.sub import x
-                    #   from pkg import *
-                    imports_patterns = " ".join([
-                        # import os | import a as b
-                        "(import_statement name: (dotted_name) @module)",
-                        "(import_statement name: (dotted_name) @module (aliased_import (identifier) @alias))",
-                        # from pkg import x | y as z | dotted names
-                        "(import_from_statement module_name: (dotted_name) @module)",
-                        "(import_from_statement module_name: (dotted_name) @module (import_list (aliased_import (identifier) @member)))",
-                        "(import_from_statement module_name: (dotted_name) @module (import_list (dotted_name (identifier) @member)))",
-                        # from pkg import *
-                        "(import_from_statement module_name: (dotted_name) @module (wildcard_import))",
-                        "(import_from_statement (relative_import) @module)",
-                        "(import_from_statement (relative_import) @module (import_list (aliased_import (identifier) @member)))",
-                    ])
-
-                elif lang_name in ("javascript", "typescript"):
-                    # Matches:
-                    #   import X from 'm'
-                    #   import {a as b} from "m"
-                    #   import * as ns from 'm'
-                    #   const x = require('m')
-                    imports_patterns = " ".join([
-                        "(import_statement source: (string) @module)",
-                        "(import_statement (import_clause (named_imports (import_specifier (identifier) @member))) source: (string) @module)",
-                        "(import_statement (import_clause (namespace_import (identifier) @alias)) source: (string) @module)",
-                        # require()
-                        "(lexical_declaration (variable_declarator (call_expression function: (identifier) @req args: (arguments (string) @module))))",
-                    ])
-                # -----------------------------------------------------------------
-
-                queries[lang_name] = {
-                    "functions": language.query(function_patterns) if function_patterns.strip() else None,
-                    "classes": language.query(class_patterns) if class_patterns.strip() else None,
-                    "calls": language.query(call_patterns) if call_patterns.strip() else None,
-                    # NEW: compiled imports query (may be None if not defined)
-                    "imports": language.query(imports_patterns) if imports_patterns.strip() else None,
-                    "config": lang_config,
-                }
-
-                available_languages.append(lang_name)
-                logger.success(f"Successfully loaded {lang_name} grammar.")
-            except Exception as e:
-                logger.warning(f"Failed to load {lang_name} grammar: {e}")
-        else:
+        if not lang_lib:
             logger.debug(f"Tree-sitter library for {lang_name} not available.")
+            continue
+
+        try:
+            language = Language(lang_lib())
+            parser = Parser(language)
+
+            parsers[lang_name] = parser
+
+            # Compile queries -------------------------------------------------
+            function_patterns = " ".join(
+                f"({node_type}) @function" for node_type in lang_config.function_node_types
+            )
+            class_patterns = " ".join(
+                f"({node_type}) @class" for node_type in lang_config.class_node_types
+            )
+            call_patterns = " ".join(
+                f"({node_type}) @call" for node_type in lang_config.call_node_types
+            )
+
+            # --- Import queries (lightweight, per-language) ------------------
+            imports_patterns = ""
+            if lang_name == "python":
+                # Matches:
+                #   import os
+                #   import a as b
+                #   from pkg import x, y as z
+                #   from pkg.sub import x
+                #   from pkg import *
+                imports_patterns = " ".join([
+                    # import os | import a as b
+                    "(import_statement name: (dotted_name) @module)",
+                    "(import_statement name: (dotted_name) @module "
+                    "  (aliased_import (identifier) @alias))",
+                    # from pkg import x | y as z | dotted names
+                    "(import_from_statement module_name: (dotted_name) @module)",
+                    "(import_from_statement module_name: (dotted_name) @module "
+                    "  (import_list (aliased_import (identifier) @member)))",
+                    "(import_from_statement module_name: (dotted_name) @module "
+                    "  (import_list (dotted_name (identifier) @member)))",
+                    # from pkg import *
+                    "(import_from_statement module_name: (dotted_name) @module "
+                    "  (wildcard_import))",
+                    # relative imports: from . import x
+                    "(import_from_statement (relative_import) @module)",
+                    "(import_from_statement (relative_import) @module "
+                    "  (import_list (aliased_import (identifier) @member)))",
+                ])
+
+            elif lang_name in ("javascript", "typescript"):
+                # Matches:
+                #   import X from 'm'
+                #   import {a as b} from "m"
+                #   import * as ns from 'm'
+                #   const x = require('m')
+                imports_patterns = " ".join([
+                    # ES module imports
+                    "(import_statement source: (string) @module)",
+                    "(import_statement "
+                    "  (import_clause "
+                    "    (named_imports "
+                    "      (import_specifier (identifier) @member))) "
+                    "  source: (string) @module)",
+                    "(import_statement "
+                    "  (import_clause "
+                    "    (namespace_import (identifier) @alias)) "
+                    "  source: (string) @module)",
+                    # CommonJS: const x = require('m')
+                    # FIX: use 'arguments' field, not 'args'
+                    "(lexical_declaration "
+                    "  (variable_declarator "
+                    "    (call_expression "
+                    "      function: (identifier) @req "
+                    "      arguments: (arguments (string) @module)))"
+                    "  )",
+                ])
+            # -----------------------------------------------------------------
+
+            queries[lang_name] = {
+                "functions": language.query(function_patterns) if function_patterns.strip() else None,
+                "classes": language.query(class_patterns) if class_patterns.strip() else None,
+                "calls": language.query(call_patterns) if call_patterns.strip() else None,
+                "imports": language.query(imports_patterns) if imports_patterns.strip() else None,
+                "config": lang_config,
+            }
+
+            available_languages.append(lang_name)
+            logger.success(f"Successfully loaded {lang_name} grammar.")
+        except Exception as e:
+            logger.warning(f"Failed to load {lang_name} grammar: {e}")
 
     if not available_languages:
         raise RuntimeError("No Tree-sitter languages available.")

@@ -8,9 +8,12 @@ import { HttpModule } from '@nestjs/axios';
 import { LlmService } from './services/llm.service';
 import { MemgraphService } from './services/memgraph.service';
 import { AiModule } from '../../common/ai/ai.module';
+import { GraphBuildProcessor } from './queue/graph-build.processor';
+import { GraphDailyService } from './services/graph-daily.service';
+import {QueueModule} from "../../common/queue/queue.module";
 @Module({
   controllers: [GraphController],
-  imports: [HttpModule, AiModule],
+  imports: [HttpModule, AiModule, QueueModule],
   providers: [
     GraphService,
     GraphBuilderService,
@@ -18,6 +21,8 @@ import { AiModule } from '../../common/ai/ai.module';
     GraphStorageService,
     LlmService,
     MemgraphService,
+    GraphBuildProcessor,
+    GraphDailyService,
   ],
   exports: [GraphService],
 })

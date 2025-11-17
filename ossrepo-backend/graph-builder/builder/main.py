@@ -101,28 +101,19 @@ def run_build_task(req: BuildRequest):
     logging.info(f"🚀 Starting branch ingest: task={req.taskId} repo={req.repoId} branch={req.branch}")
     update_task_status(req.taskId, "in_progress", f"Branch ingest started for {req.repoId}#{req.branch}")
 
-    use_temp = not req.repoPath or not req.repoPath.strip()
+    use_temp = True
     workdir = None
 
     # Clone depth control: default = full history; set SHALLOW_CLONE=1 to speed up
     SHALLOW = os.getenv("SHALLOW_CLONE", "0") not in ("0", "false", "False")
 
     try:
-        if use_temp:
-            workdir = tempfile.mkdtemp(prefix=f"build-{req.taskId}-")
-            repo_dir = os.path.join(workdir, "repo")
-            clone_cmd = ["gh", "repo", "clone", req.repoId, repo_dir]
-            if SHALLOW:
-                clone_cmd += ["--", "--depth=1"]
-            _run(clone_cmd)
-        else:
-            repo_dir = req.repoPath
-            if not os.path.exists(repo_dir):
-                os.makedirs(repo_dir, exist_ok=True)
-                clone_cmd = ["gh", "repo", "clone", req.repoId, repo_dir]
-                if SHALLOW:
-                    clone_cmd += ["--", "--depth=1"]
-                _run(clone_cmd)
+        workdir = tempfile.mkdtemp(prefix=f"build-{req.taskId}-")
+        repo_dir = os.path.join(workdir, "repo")
+        clone_cmd = ["gh", "repo", "clone", req.repoId, repo_dir]
+        if SHALLOW:
+            clone_cmd += ["--", "--depth=1"]
+        _run(clone_cmd)
             # else reuse existing workspace without deleting user path
 
         # per-repo safe.directory only
@@ -166,14 +157,21 @@ def run_build_task(req: BuildRequest):
         logging.error(f"Unhandled error: {e}")
         update_task_status(req.taskId, "failed", f"Unhandled error: {e}")
 
+
+
     finally:
+
         time.sleep(0.2)
+
         try:
-            if use_temp and workdir and os.path.exists(workdir):
+
+            if workdir and os.path.exists(workdir):
                 rmtree_robust(workdir)
+
                 logging.info(f"🧹 Deleted temp workdir {workdir}")
-            # IMPORTANT: do NOT delete user-supplied repoPath
+
         except Exception as e:
+
             logging.error(f"Cleanup failed: {e}")
 
 

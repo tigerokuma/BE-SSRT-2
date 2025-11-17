@@ -73,6 +73,9 @@ import { ManualProcessorService } from './manual-processor.service';
       {
         name: 'package-polling',
       },
+      {
+        name: 'graph-build',
+      },
     ),
   ],
   providers: [ManualProcessorService],

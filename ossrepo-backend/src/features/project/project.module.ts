@@ -11,6 +11,7 @@ import { QueueModule } from 'src/common/queue/queue.module';
 import { ManualProcessorService } from 'src/common/queue/manual-processor.service';
 import {UserModule} from "../user/user.module";
 import { ProjectAlertService } from './services/project-alert.service';
+import { GraphModule } from '../graph/graph.module';
 
 @Module({
   imports: [
@@ -19,7 +20,8 @@ import { ProjectAlertService } from './services/project-alert.service';
     WebhookModule,
     DependenciesModule,
     QueueModule,
-    UserModule
+    UserModule,
+    GraphModule,
   ],
   controllers: [ProjectController],
   providers: [ProjectService, ProjectRepository, ProjectSetupProcessor, ManualProcessorService, ProjectAlertService],

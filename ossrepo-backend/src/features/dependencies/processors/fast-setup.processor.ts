@@ -5,7 +5,7 @@ import { PrismaService } from '../../../common/prisma/prisma.service';
 import { GitHubApiService } from '../../activity/services/github-api.service';
 import { ActivityAnalysisService, CommitData } from '../../activity/services/activity-analysis.service';
 import { DependencyQueueService } from '../services/dependency-queue.service';
-
+import { GraphService } from '../../graph/services/graph.service';
 interface FastSetupJobData {
   packageId?: string;
   branchDependencyId?: string;
@@ -25,6 +25,7 @@ export class FastSetupProcessor {
     private githubApiService: GitHubApiService,
     private activityAnalysisService: ActivityAnalysisService,
     private dependencyQueueService: DependencyQueueService,
+    private readonly graphService: GraphService,
   ) {
     this.logger.log(`🔧 FastSetupProcessor initialized and ready to process jobs`);
   }
@@ -33,11 +34,11 @@ export class FastSetupProcessor {
   async handleFastSetup(job: Job<FastSetupJobData>) {
     this.logger.log(`🔥 PROCESSOR TRIGGERED! Job ID: ${job.id}, Job Name: ${job.name}`);
     const { packageId, branchDependencyId, branchId, packageName, repoUrl, projectId } = job.data;
-    
+
     this.logger.log(`🚀 Starting fast setup for package: ${packageName}`);
-    
+
     let finalPackageId;
-    
+
     try {
       let currentPackage;
 
@@ -47,27 +48,29 @@ export class FastSetupProcessor {
           where: { id: packageId }
         });
         finalPackageId = packageId;
-        
+
         // If package exists but missing NPM data, fetch it
         if (currentPackage && (!currentPackage.npm_url || !currentPackage.downloads)) {
           this.logger.log(`📦 Package exists but missing NPM data, fetching for: ${packageName}`);
           const npmData = await this.getNpmPackageData(packageName);
-          
+
           await this.prisma.packages.update({
             where: { id: packageId },
             data: {
               npm_url: npmData.npmUrl || currentPackage.npm_url,
               downloads: npmData.downloads || currentPackage.downloads,
               license: npmData.license || currentPackage.license,
+              repo_url: currentPackage.repo_url ?? npmData.repoUrl ?? currentPackage.repo_url,
             }
           });
-          
+
           // Update currentPackage object for consistency
           currentPackage = {
             ...currentPackage,
             npm_url: npmData.npmUrl || currentPackage.npm_url,
             downloads: npmData.downloads || currentPackage.downloads,
             license: npmData.license || currentPackage.license,
+            repo_url: currentPackage.repo_url ?? npmData.repoUrl ?? currentPackage.repo_url,
           };
         }
       } else if (branchDependencyId) {
@@ -79,30 +82,65 @@ export class FastSetupProcessor {
         if (!currentPackage) {
           // Fetch NPM data for new package
           const npmData = await this.getNpmPackageData(packageName);
-          
+
           // Create new package with NPM data
           currentPackage = await this.prisma.packages.create({
             data: {
               name: packageName,
-              repo_url: repoUrl,
+              repo_url: repoUrl ?? npmData.repoUrl,
               npm_url: npmData.npmUrl,
               license: npmData.license,
               downloads: npmData.downloads,
               status: 'queued',
             }
           });
-          
+
           this.logger.log(`📦 Created new package with NPM data: ${packageName}`);
         }
         finalPackageId = currentPackage.id;
       } else {
         throw new Error('Either packageId or branchDependencyId must be provided');
       }
+      const effectiveRepoUrl = repoUrl ?? currentPackage?.repo_url ?? null;
 
       // Check if package is already done - if so, skip analysis and just link
       if (currentPackage?.status === 'done') {
         this.logger.log(`✅ Package ${packageName} is already analyzed, linking to branch dependency`);
-        
+
+        if (effectiveRepoUrl) {
+          const repoMatch = effectiveRepoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+          if (repoMatch) {
+            const [, owner, repo] = repoMatch;
+            const repoSlug = `${owner}/${repo}`.replace(/\.git$/, '');
+            const branch = 'main'; // fallback for already-analysed packages
+
+            this.logger.log(
+              `🧠 [FastSetup] (status=done) Queuing initial graph build for dependency ${packageName} (${repoSlug}) on branch ${branch}`,
+            );
+
+            try {
+               await this.graphService.triggerBuild(repoSlug, {
+                  branch: branch,
+                  startSha: null,
+                  commitId: undefined,
+                });
+            } catch (err: any) {
+              this.logger.error(
+                `❌ [FastSetup] Failed to queue graph build for already-analysed package ${packageName}: ${err.message}`,
+              );
+            }
+          } else {
+            this.logger.warn(
+              `⚠️ [FastSetup] Package ${packageName} is done but has an invalid repo URL (${effectiveRepoUrl}), skipping graph build.`,
+            );
+          }
+        } else {
+          this.logger.warn(
+            `⚠️ [FastSetup] Package ${packageName} is done but has no repo URL, skipping graph build.`,
+          );
+        }
+
+
         // Link the branch dependency and check completion
         if (branchDependencyId && branchId) {
           await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
@@ -111,7 +149,7 @@ export class FastSetupProcessor {
       }
 
       let updateData: any = { status: 'fast' };
-      
+
       // If license is not set, try to fetch it from npm (but we may have already fetched it above)
       if (!currentPackage?.license) {
         try {
@@ -130,11 +168,11 @@ export class FastSetupProcessor {
         data: updateData
       });
 
-      // Check if we have a repository URL for GitHub analysis
-      if (!repoUrl) {
-        this.logger.log(`⚠️ No repository URL provided for ${packageName} - skipping GitHub analysis`);
-        
-        // Update package with basic data (no GitHub analysis)
+      if (!effectiveRepoUrl) {
+        this.logger.log(
+          `⚠️ No repository URL available for ${packageName} (job + npm + DB) - skipping GitHub analysis`,
+        );
+
         await this.prisma.packages.update({
           where: { id: finalPackageId },
           data: {
@@ -145,20 +183,20 @@ export class FastSetupProcessor {
             summary: `Package ${packageName} added to watchlist. No repository URL provided for GitHub analysis.`,
           }
         });
-        
+
         this.logger.log(`✅ Package ${packageName} added without GitHub analysis`);
-        
+
         // If this was triggered by a branch dependency, link it and check completion
         if (branchDependencyId && branchId) {
           await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
         }
         return;
       }
-      
-      const repoMatch = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+
+      const repoMatch = effectiveRepoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
       if (!repoMatch) {
-        this.logger.log(`⚠️ Invalid GitHub URL for ${packageName}: ${repoUrl} - skipping GitHub analysis`);
-        
+        this.logger.log(`⚠️ Invalid GitHub URL for ${packageName}: ${effectiveRepoUrl} - skipping GitHub analysis`);
+
         // Update package with basic data (invalid URL)
         await this.prisma.packages.update({
           where: { id: finalPackageId },
@@ -167,28 +205,28 @@ export class FastSetupProcessor {
             activity_score: null,
             stars: null,
             contributors: null,
-            summary: `Package ${packageName} added to watchlist. Invalid GitHub URL: ${repoUrl}`,
+            summary: `Package ${packageName} added to watchlist. Invalid GitHub URL: ${effectiveRepoUrl}`,
           }
         });
-        
+
         this.logger.log(`✅ Package ${packageName} added with invalid URL`);
-        
+
         // If this was triggered by a branch dependency, link it and check completion
         if (branchDependencyId && branchId) {
           await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
         }
         return;
       }
-      
+
       const [, owner, repo] = repoMatch;
       this.logger.log(`🔍 Analyzing repository: ${owner}/${repo}`);
-      
+
       // Step 2: Get repository info to find the default branch
       this.logger.log(`📡 Fetching repository info to get default branch...`);
       const repoInfo = await this.githubApiService.getRepositoryInfo(owner, repo);
       const defaultBranch = repoInfo.default_branch;
       this.logger.log(`🌿 Default branch: ${defaultBranch}`);
-      
+
       // Step 3: Fetch recent commits from GitHub API using the correct branch
       this.logger.log(`📡 Fetching recent commits from GitHub API...`);
       let githubCommits;
@@ -197,7 +235,7 @@ export class FastSetupProcessor {
         this.logger.log(`✅ Fetched ${githubCommits.length} recent commits from ${defaultBranch} branch`);
       } catch (error) {
         this.logger.log(`⚠️ GitHub API error for ${owner}/${repo}: ${error.message} - skipping GitHub analysis`);
-        
+
         // Update package with basic data (API error)
         await this.prisma.packages.update({
           where: { id: finalPackageId },
@@ -209,16 +247,16 @@ export class FastSetupProcessor {
             summary: `Package ${packageName} added to watchlist. GitHub API error: ${error.message}`,
           }
         });
-        
+
         this.logger.log(`✅ Package ${packageName} added without GitHub analysis (API error)`);
-        
+
         // If this was triggered by a branch dependency, link it and check completion
         if (branchDependencyId && branchId) {
           await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
         }
         return;
       }
-      
+
       // Convert GitHub commits to CommitData format
       const commits: CommitData[] = githubCommits.map(commit => ({
         sha: commit.sha,
@@ -230,7 +268,7 @@ export class FastSetupProcessor {
         linesAdded: 0,    // Would need to fetch individual commit details
         linesDeleted: 0,  // Would need to fetch individual commit details
       }));
-      
+
       // Step 3: Calculate activity score using the four measures
       this.logger.log(`🧮 Calculating activity score...`);
       const activityScore = this.activityAnalysisService.calculateActivityScore(commits);
@@ -241,14 +279,14 @@ export class FastSetupProcessor {
         codeChurn: activityScore.factors.codeChurn,
         developmentConsistency: activityScore.factors.developmentConsistency,
       });
-      
+
       // Step 4: Use repository info we already fetched
       this.logger.log(`⭐ Repository has ${repoInfo.stargazers_count} stars`);
-      
+
       // Calculate contributors from commits
       const uniqueContributors = new Set(commits.map(c => c.author)).size;
       this.logger.log(`👥 Repository has ${uniqueContributors} unique contributors from recent commits`);
-      
+
       // Step 5: Calculate bus factor score
       this.logger.log(`🚌 Calculating bus factor score...`);
       const busFactorScore = this.calculateBusFactorScore(commits);
@@ -259,28 +297,28 @@ export class FastSetupProcessor {
         topContributorPercentage: busFactorScore.topContributorPercentage,
         riskReason: busFactorScore.riskReason
       });
-      
+
       // Step 6: Check Scorecard API for existing scores
       this.logger.log(`🛡️ Checking Scorecard API for existing scores...`);
       const scorecardScore = await this.checkScorecardAPI(owner, repo);
       this.logger.log(`🛡️ Scorecard Score: ${scorecardScore.score}/100 (${scorecardScore.source})`);
-      
+
       // Step 7: Queue scorecard job if no score exists
       if (scorecardScore.score === null) {
         this.logger.log(`📋 No Scorecard score found, queuing scorecard job...`);
-        await this.queueScorecardJob(packageId, packageName, repoUrl, projectId);
+        await this.queueScorecardJob(finalPackageId, packageName, effectiveRepoUrl, projectId);
       }
-      
+
       // Step 8: Check for vulnerabilities using OSV API
       this.logger.log(`🔍 Checking for vulnerabilities using OSV API...`);
       const vulnerabilityScore = await this.checkVulnerabilities(packageName);
       this.logger.log(`🛡️ Vulnerability Score: ${vulnerabilityScore.score}/100 (${vulnerabilityScore.vulnerabilityCount} vulnerabilities)`);
-      
+
       // Step 9: Check license compliance
       this.logger.log(`📄 Checking license compliance...`);
       const licenseScore = await this.checkLicenseCompliance(owner, repo, packageName);
       this.logger.log(`📄 License Score: ${licenseScore.score}/100 (${licenseScore.licenseType}, ${licenseScore.dependencyIssues} dependency issues)`);
-      
+
       // Step 10: Calculate total score
       this.logger.log(`🧮 Calculating total health score...`);
       const totalScore = this.calculateTotalScore({
@@ -299,7 +337,7 @@ export class FastSetupProcessor {
         license: licenseScore.score,
         total: totalScore.score
       });
-      
+
       // Update package with real data
       await this.prisma.packages.update({
         where: { id: finalPackageId },
@@ -318,32 +356,52 @@ export class FastSetupProcessor {
       });
 
       this.logger.log(`✅ Fast setup completed for package: ${packageName}`);
-      
+
+      // 🧠 NEW: Queue initial graph build for this dependency's repo
+      if (effectiveRepoUrl) {
+        try {
+          const repoSlug = `${owner}/${repo}`.replace(/\.git$/, '');
+          this.logger.log(
+            `🧠 [FastSetup] Queuing initial graph build for dependency ${packageName} (${repoSlug}) on branch ${defaultBranch}`,
+          );
+
+          await this.graphService.triggerBuild(repoSlug, {
+            branch: defaultBranch,
+            startSha: null,
+            commitId: undefined,
+          });
+        } catch (err: any) {
+          this.logger.error(
+            `❌ [FastSetup] Failed to queue graph build for ${packageName}: ${err.message}`,
+          );
+        }
+      }
+
       // Queue full setup job after fast setup completes
-      if (repoUrl && finalPackageId) {
+      if (effectiveRepoUrl && finalPackageId) {
         await this.dependencyQueueService.queueFullSetup({
           packageId: finalPackageId,
-          packageName: packageName,
-          repoUrl: repoUrl,
-          projectId: projectId,
+          packageName,
+          repoUrl: effectiveRepoUrl,
+          projectId,
         });
         this.logger.log(`📋 Queued full-setup job for package: ${packageName}`);
       }
-      
+
       // If this was triggered by a branch dependency, link it and check completion
       if (branchDependencyId && branchId) {
         await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
       }
-      
+
     } catch (error) {
       this.logger.error(`❌ Fast setup failed for package ${packageName}:`, error);
-      
+
       // Update package status to failed
       await this.prisma.packages.update({
         where: { id: finalPackageId },
         data: { status: 'failed' }
       });
-      
+
       throw error;
     }
   }
@@ -454,7 +512,7 @@ export class FastSetupProcessor {
     topContributorPercentage: number
   ): string {
     const percentage = (topContributorPercentage * 100).toFixed(1);
-    
+
     switch (riskLevel) {
       case 'CRITICAL':
         if (totalContributors <= 2) {
@@ -483,7 +541,7 @@ export class FastSetupProcessor {
       // Check Scorecard API for existing scores
       const scorecardUrl = `https://api.securityscorecards.dev/projects/github.com/${owner}/${repo}`;
       this.logger.log(`🔍 Checking Scorecard API: ${scorecardUrl}`);
-      
+
       const response = await fetch(scorecardUrl, {
         headers: {
           'Accept': 'application/json',
@@ -525,7 +583,7 @@ export class FastSetupProcessor {
       this.logger.log(`📋 Queuing scorecard job for ${packageName} (${packageId})`);
       this.logger.log(`📋 Repository: ${repoUrl}`);
       this.logger.log(`📋 Project: ${projectId}`);
-      
+
       // Queue the scorecard priority job
       await this.dependencyQueueService.queueScorecardPriority({
         packageId,
@@ -533,9 +591,9 @@ export class FastSetupProcessor {
         repoUrl,
         projectId
       });
-      
+
       this.logger.log(`✅ Scorecard job queued successfully for ${packageName}`);
-      
+
     } catch (error) {
       this.logger.error(`❌ Failed to queue scorecard job: ${error.message}`);
     }
@@ -550,7 +608,7 @@ export class FastSetupProcessor {
       // Call OSV API to check for vulnerabilities
       const osvUrl = 'https://api.osv.dev/v1/query';
       this.logger.log(`🔍 Checking OSV API for vulnerabilities: ${packageName}`);
-      
+
       const response = await fetch(osvUrl, {
         method: 'POST',
         headers: {
@@ -575,9 +633,9 @@ export class FastSetupProcessor {
 
       const data = await response.json();
       const vulnerabilities = data.vulns || [];
-      
+
       this.logger.log(`🔍 Found ${vulnerabilities.length} vulnerabilities for ${packageName}`);
-      
+
       if (vulnerabilities.length === 0) {
         return {
           score: 100,
@@ -625,7 +683,7 @@ export class FastSetupProcessor {
       }
 
       this.logger.log(`🛡️ Vulnerability analysis: ${vulnerabilities.length} total, ${criticalCount} critical, ${highCount} high, ${mediumCount} medium, ${lowCount} low`);
-      
+
       return {
         score,
         vulnerabilityCount: vulnerabilities.length,
@@ -649,7 +707,7 @@ export class FastSetupProcessor {
   }> {
     try {
       this.logger.log(`📄 Checking license compliance for ${owner}/${repo}`);
-      
+
       // Step 1: Get package.json from GitHub
       const packageJson = await this.githubApiService.getPackageJson(owner, repo);
       if (!packageJson) {
@@ -664,26 +722,26 @@ export class FastSetupProcessor {
       // Step 2: Check project's own license
       const projectLicense = packageJson.license || 'unlicensed';
       this.logger.log(`📄 Project license: ${projectLicense}`);
-      
+
       let projectLicenseScore = this.scoreProjectLicense(projectLicense);
-      
+
       // Step 3: Check dependencies licenses
       const dependencies = packageJson.dependencies || {};
       const devDependencies = packageJson.devDependencies || {};
       const allDependencies = { ...dependencies, ...devDependencies };
-      
+
       this.logger.log(`📦 Checking ${Object.keys(allDependencies).length} dependencies for license compliance`);
-      
+
       let dependencyIssues = 0;
       const dependencyLicenseChecks = [];
-      
+
       // Check each dependency's license
       for (const [depName, depVersion] of Object.entries(allDependencies)) {
         try {
           const depLicense = await this.getDependencyLicense(depName);
           if (depLicense) {
             dependencyLicenseChecks.push({ name: depName, license: depLicense });
-            
+
             // Check for license conflicts
             if (this.hasLicenseConflict(projectLicense, depLicense)) {
               dependencyIssues++;
@@ -694,13 +752,13 @@ export class FastSetupProcessor {
           this.logger.log(`⚠️ Could not check license for ${depName}: ${error.message}`);
         }
       }
-      
+
       // Step 4: Calculate final score
       const dependencyScore = Math.max(0, 100 - (dependencyIssues * 20)); // -20 points per conflict
       const finalScore = Math.round((projectLicenseScore + dependencyScore) / 2);
-      
+
       this.logger.log(`📄 License analysis: Project=${projectLicenseScore}/100, Dependencies=${dependencyScore}/100, Conflicts=${dependencyIssues}`);
-      
+
       return {
         score: finalScore,
         licenseType: projectLicense,
@@ -719,35 +777,35 @@ export class FastSetupProcessor {
 
   private scoreProjectLicense(license: string): number {
     const licenseLower = license.toLowerCase();
-    
+
     // Permissive licenses (good)
-    if (licenseLower.includes('mit') || licenseLower.includes('apache-2.0') || 
+    if (licenseLower.includes('mit') || licenseLower.includes('apache-2.0') ||
         licenseLower.includes('bsd-3-clause') || licenseLower.includes('bsd-2-clause')) {
       return 100;
     }
-    
+
     // Other permissive licenses
-    if (licenseLower.includes('bsd') || licenseLower.includes('isc') || 
+    if (licenseLower.includes('bsd') || licenseLower.includes('isc') ||
         licenseLower.includes('unlicense') || licenseLower.includes('cc0')) {
       return 90;
     }
-    
+
     // Copyleft licenses (restrictive but acceptable)
     if (licenseLower.includes('gpl-3.0') || licenseLower.includes('gpl-2.0')) {
       return 70;
     }
-    
+
     // Very restrictive licenses
     if (licenseLower.includes('agpl') || licenseLower.includes('copyleft')) {
       return 50;
     }
-    
+
     // Unlicensed or unknown
-    if (licenseLower.includes('unlicensed') || licenseLower.includes('proprietary') || 
+    if (licenseLower.includes('unlicensed') || licenseLower.includes('proprietary') ||
         license === 'unlicensed' || !license) {
       return 20;
     }
-    
+
     // Unknown license
     return 60;
   }
@@ -756,11 +814,11 @@ export class FastSetupProcessor {
     try {
       const npmUrl = `https://registry.npmjs.org/${depName}`;
       const response = await fetch(npmUrl);
-      
+
       if (!response.ok) {
         return null;
       }
-      
+
       const data = await response.json();
       return data.license || null;
     } catch (error) {
@@ -772,24 +830,37 @@ export class FastSetupProcessor {
     npmUrl: string | null;
     downloads: number | null;
     license: string | null;
+    repoUrl: string | null;
   }> {
     try {
       this.logger.log(`📦 Fetching NPM data for package: ${packageName}`);
-      
+
       const npmUrl = `https://registry.npmjs.org/${packageName}`;
       const response = await fetch(npmUrl);
-      
+
       if (!response.ok) {
         this.logger.log(`⚠️ NPM API returned ${response.status} for ${packageName}`);
         return {
           npmUrl: null,
           downloads: null,
-          license: null
+          license: null,
+          repoUrl: null
         };
       }
-      
+
       const data = await response.json();
-      
+      const repository = data.repository;
+      // npm registry can return things like:
+      // { "repository": { "type": "git", "url": "git+https://github.com/facebook/react.git" } }
+      let repoUrl: string | null = null;
+
+      if (repository && typeof repository === 'object') {
+        const rawUrl = repository.url as string | undefined;
+        if (rawUrl) {
+          // strip "git+" prefix and ".git" suffix if present
+          repoUrl = rawUrl.replace(/^git\+/, '').replace(/\.git$/, '');
+        }
+      }
       // Get download stats from npm API
       let downloads = null;
       try {
@@ -802,22 +873,24 @@ export class FastSetupProcessor {
       } catch (error) {
         this.logger.log(`⚠️ Could not fetch download stats for ${packageName}: ${error.message}`);
       }
-      
+
       const result = {
         npmUrl: `https://www.npmjs.com/package/${packageName}`,
         downloads,
-        license: data.license || null
+        license: data.license || null,
+        repoUrl,
       };
-      
+
       this.logger.log(`✅ NPM data for ${packageName}: downloads=${downloads}, license=${result.license}`);
       return result;
-      
+
     } catch (error) {
       this.logger.error(`❌ Error fetching NPM data for ${packageName}:`, error);
       return {
         npmUrl: null,
         downloads: null,
-        license: null
+        license: null,
+        repoUrl: null
       };
     }
   }
@@ -825,23 +898,23 @@ export class FastSetupProcessor {
   private hasLicenseConflict(projectLicense: string, dependencyLicense: string): boolean {
     const projectLower = projectLicense.toLowerCase();
     const depLower = dependencyLicense.toLowerCase();
-    
+
     // GPL dependencies in non-GPL projects
     if (depLower.includes('gpl') && !projectLower.includes('gpl')) {
       return true;
     }
-    
+
     // AGPL dependencies in non-AGPL projects
     if (depLower.includes('agpl') && !projectLower.includes('agpl')) {
       return true;
     }
-    
+
     // Copyleft dependencies in permissive projects
-    if ((depLower.includes('copyleft') || depLower.includes('gpl')) && 
+    if ((depLower.includes('copyleft') || depLower.includes('gpl')) &&
         (projectLower.includes('mit') || projectLower.includes('apache') || projectLower.includes('bsd'))) {
       return true;
     }
-    
+
     return false;
   }
 
@@ -859,7 +932,7 @@ export class FastSetupProcessor {
     const totalScore = Math.round(
       (scores.activity + scores.busFactor + scores.scorecard + scores.vulnerability + scores.license) / 5
     );
-    
+
     // Determine health level
     let level: string;
     if (totalScore >= 90) {
@@ -875,7 +948,7 @@ export class FastSetupProcessor {
     } else {
       level = 'CRITICAL';
     }
-    
+
     return {
       score: totalScore,
       level
@@ -894,7 +967,7 @@ export class FastSetupProcessor {
         where: { id: branchDependencyId },
         data: { package_id: packageId }
       });
-      
+
       this.logger.log(`🔗 Linked branch dependency ${branchDependencyId} to package ${packageId}`);
 
       // Check if all dependencies for this branch are complete
@@ -903,7 +976,7 @@ export class FastSetupProcessor {
         include: { package: true }
       });
 
-      const completedDependencies = allDependencies.filter(dep => 
+      const completedDependencies = allDependencies.filter(dep =>
         dep.package_id && dep.package && dep.package.status === 'done'
       );
 
@@ -912,18 +985,18 @@ export class FastSetupProcessor {
       // If all dependencies are complete, update project status
       if (completedDependencies.length === allDependencies.length) {
         this.logger.log(`🎉 All dependencies complete for branch ${branchId}, marking project ${projectId} as ready`);
-        
+
         // Calculate average health score from all completed dependencies
         const totalScores = completedDependencies
           .map(dep => dep.package?.total_score)
           .filter(score => score !== null && score !== undefined);
-        
-        const averageHealthScore = totalScores.length > 0 
+
+        const averageHealthScore = totalScores.length > 0
           ? totalScores.reduce((sum, score) => sum + score, 0) / totalScores.length
           : null;
-        
+
         this.logger.log(`📊 Calculated average health score: ${averageHealthScore?.toFixed(2) || 'N/A'}`);
-        
+
         // Find all projects using this branch and mark them as ready
         const projects = await this.prisma.project.findMany({
           where: { monitored_branch_id: branchId }
@@ -932,7 +1005,7 @@ export class FastSetupProcessor {
         for (const project of projects) {
           await this.prisma.project.update({
             where: { id: project.id },
-            data: { 
+            data: {
               status: 'ready',
               health_score: averageHealthScore
             }

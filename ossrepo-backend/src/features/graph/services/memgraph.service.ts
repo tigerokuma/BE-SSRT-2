@@ -1,12 +1,19 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import neo4j, { Driver } from 'neo4j-driver';
 
 @Injectable()
 export class MemgraphService implements OnModuleDestroy {
   private driver: Driver;
 
-  constructor() {
-    this.driver = neo4j.driver('bolt://localhost:7687'); // no auth by default
+  constructor(configService: ConfigService) {
+    const uri = configService.get<string>('MEMGRAPH_URI', 'bolt://localhost:7687');
+    const user = configService.get<string>('MEMGRAPH_USER');
+    const password = configService.get<string>('MEMGRAPH_PASSWORD');
+
+    this.driver = user
+      ? neo4j.driver(uri, neo4j.auth.basic(user, password ?? ''))
+      : neo4j.driver(uri); // unauthenticated (dev/local)
   }
 
   async onModuleDestroy() {

@@ -18,6 +18,7 @@ import { ActivityAnalysisService } from '../activity/services/activity-analysis.
 import { GitManagerService } from '../activity/services/git-manager.service';
 import { AISummaryService } from '../activity/services/ai-summary.service';
 import { PackagesModule } from '../packages/packages.module';
+import {GraphModule} from "../graph/graph.module";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PackagesModule } from '../packages/packages.module';
     QueueModule,
     AiModule,
     PackagesModule,
+    GraphModule,
   ],
   providers: [
     FastSetupProcessor,

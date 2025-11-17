@@ -6,6 +6,7 @@ import { GitHubService } from '../../../common/github/github.service';
 import { WebhookService } from '../../../common/webhook/webhook.service';
 import { ProjectRepository } from '../repositories/project.repository';
 import { DependencyQueueService } from '../../dependencies/services/dependency-queue.service';
+import { GraphService } from 'src/features/graph/services/graph.service';
 
 interface ProjectSetupJobData {
   projectId: string;
@@ -22,95 +23,179 @@ export class ProjectSetupProcessor {
     private readonly webhookService: WebhookService,
     private readonly projectRepository: ProjectRepository,
     private readonly dependencyQueueService: DependencyQueueService,
+    private readonly graphService: GraphService,
   ) {
     this.logger.log('🔧 ProjectSetupProcessor initialized and ready to process jobs');
   }
 
-  @Process('setup-project')
-  async handleProjectSetup(job: Job<ProjectSetupJobData>) {
-    const { projectId, repositoryUrl } = job.data;
-    const startTime = Date.now();
+@Process('setup-project')
+async handleProjectSetup(job: Job<ProjectSetupJobData>) {
+  const { projectId, repositoryUrl } = job.data;
+  const startTime = Date.now();
 
+  this.logger.log(`🚀 [ProjectSetupProcessor] Starting project setup for ${projectId}`);
+
+  try {
+    // 1) Mark as creating
+    await this.projectRepository.updateProjectStatus(projectId, 'creating');
+
+    // 2) Load project + branch
+    const projectWithBranch = await this.projectRepository.getProjectWithBranch(projectId);
+    this.logger.log(
+      `[ProjectSetupProcessor] Loaded projectWithBranch: ` +
+        JSON.stringify(projectWithBranch, null, 2),
+    );
+
+    if (!projectWithBranch?.monitoredBranch) {
+      throw new Error('Project has no monitored branch');
+    }
+
+    const branchId = projectWithBranch.monitoredBranch.id;
+    const branchName =
+      (projectWithBranch.monitoredBranch as any).branch_name ?? 'main';
+
+    // 3) Resolve admin user (for GitHub token)
+    const projectUsers = await this.prisma.projectUser.findMany({
+      where: { project_id: projectId, role: 'admin' },
+      select: { user_id: true },
+    });
+
+    const userId = projectUsers.length > 0 ? projectUsers[0].user_id : undefined;
+    this.logger.log(
+      `[ProjectSetupProcessor] Using admin userId=${userId ?? 'none'} for GitHub token`,
+    );
+
+    // --- A) Dependencies: wrap in its own try/catch so errors don't kill graph build ---
     try {
-      // Update project status to processing
-      await this.projectRepository.updateProjectStatus(projectId, 'creating');
+      this.logger.log(
+        `[ProjectSetupProcessor] Extracting dependencies from ${repositoryUrl}`,
+      );
+      const deps = await this.githubService.extractDependencies(repositoryUrl, userId);
 
-      this.logger.log(`🚀 Starting project setup for project ${projectId}`);
+      await this.projectRepository.clearBranchDependencies(branchId);
+      const createdDependencies =
+        await this.projectRepository.createBranchDependenciesWithReturn(
+          branchId,
+          deps,
+        );
 
-      // Get the project with its monitored branch to access the branch ID
-      const projectWithBranch = await this.projectRepository.getProjectWithBranch(projectId);
-      
-      if (!projectWithBranch?.monitoredBranch) {
-        throw new Error('Project has no monitored branch');
-      }
+      this.logger.log(
+        `📦 [ProjectSetupProcessor] Extracted ${deps.length} deps, created ${createdDependencies.length} branch deps`,
+      );
 
-      // Get the project creator's user_id to use their GitHub token
-      const projectUsers = await this.prisma.projectUser.findMany({
-        where: { project_id: projectId, role: 'admin' },
-        select: { user_id: true }
-      });
-      
-      const userId = projectUsers.length > 0 ? projectUsers[0].user_id : undefined;
-      
-      // Extract dependencies from the repository
-      const dependencies = await this.githubService.extractDependencies(repositoryUrl, userId);
-      
-      // Clear any existing dependencies (including old devDependencies) and store new ones
-      await this.projectRepository.clearBranchDependencies(projectWithBranch.monitoredBranch.id);
-      const createdDependencies = await this.projectRepository.createBranchDependenciesWithReturn(projectWithBranch.monitoredBranch.id, dependencies);
-      this.logger.log(`📦 Extracted ${dependencies.length} production dependencies (cleared any existing devDependencies)`);
-
-      // Queue dependency-fast-setup jobs for each dependency
+      // Queue fast-setup jobs
       for (const branchDependency of createdDependencies) {
-        // Try to find the repository URL for this dependency
         let repoUrl: string | undefined;
         try {
           repoUrl = await this.findRepositoryUrl(branchDependency.name);
           if (repoUrl) {
-            this.logger.log(`🔍 Found repository URL for ${branchDependency.name}: ${repoUrl}`);
+            this.logger.log(
+              `🔍 Found repository URL for ${branchDependency.name}: ${repoUrl}`,
+            );
           } else {
-            this.logger.log(`⚠️ No repository URL found for ${branchDependency.name}`);
+            this.logger.log(
+              `⚠️ No repository URL found for ${branchDependency.name}`,
+            );
           }
-        } catch (error) {
-          this.logger.log(`⚠️ Error finding repository URL for ${branchDependency.name}: ${error.message}`);
+        } catch (err: any) {
+          this.logger.warn(
+            `⚠️ Error finding repository URL for ${branchDependency.name}: ${
+              err?.message ?? err
+            }`,
+          );
         }
 
         await this.dependencyQueueService.queueFastSetup({
           branchDependencyId: branchDependency.id,
-          branchId: projectWithBranch.monitoredBranch.id,
-          projectId: projectId,
+          branchId,
+          projectId,
           packageName: branchDependency.name,
-          repoUrl: repoUrl,
+          repoUrl,
         });
-        this.logger.log(`📋 Queued fast-setup job for dependency: ${branchDependency.name}`);
+
+        this.logger.log(
+          `📋 Queued fast-setup job for dependency: ${branchDependency.name}`,
+        );
       }
-
-      // Setup webhook for the repository (use project creator's GitHub token)
-      await this.webhookService.setupWebhookForRepository(repositoryUrl, projectWithBranch.monitoredBranch.id, userId);
-      this.logger.log(`🔗 Set up webhook`);
-
-      // Mark project as ready
-      await this.projectRepository.updateProjectStatus(projectId, 'ready');
-      this.logger.log(`✅ Project setup complete - project marked as ready`);
-      
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-      this.logger.log(`✅ Finished project setup in ${duration}s`);
-
-      return {
-        success: true,
-        projectId,
-        dependenciesCount: createdDependencies.length,
-        duration: `${duration}s`,
-      };
-
-    } catch (error) {
-      this.logger.error(`❌ Project setup failed for project ${projectId}:`, error.message);
-      
-      // Update project status to failed with error message
-      await this.projectRepository.updateProjectStatus(projectId, 'failed', error.message);
-      
-      throw error;
+    } catch (depError: any) {
+      this.logger.error(
+        `[ProjectSetupProcessor] Dependency extraction failed but continuing: ${
+          depError?.message ?? depError
+        }`,
+      );
     }
+
+    // --- B) Webhook: also best-effort for now ---
+    try {
+      this.logger.log(
+        `[ProjectSetupProcessor] Setting up webhook for ${repositoryUrl}`,
+      );
+      await this.webhookService.setupWebhookForRepository(
+        repositoryUrl,
+        branchId,
+        userId,
+      );
+      this.logger.log(`🔗 [ProjectSetupProcessor] Webhook set up successfully`);
+    } catch (whError: any) {
+      this.logger.error(
+        `[ProjectSetupProcessor] Webhook setup failed but continuing: ${
+          whError?.message ?? whError
+        }`,
+      );
+    }
+
+    // --- C) GRAPH BUILD: main thing we care about right now ---
+    const repoSlug = this.extractGitHubSlug(repositoryUrl);
+    this.logger.log(
+      `🧠 [ProjectSetupProcessor] Queuing initial graph build for ${repoSlug}#${branchName}`,
+    );
+
+    try {
+      await this.graphService.triggerBuild(repoSlug, {
+        branch: branchName,
+        startSha: null,
+      });
+      this.logger.log(
+        `✅ [ProjectSetupProcessor] Graph build triggered for ${repoSlug}#${branchName}`,
+      );
+    } catch (graphError: any) {
+      this.logger.error(
+        `❌ [ProjectSetupProcessor] Failed to trigger graph build: ${
+          graphError?.message ?? graphError
+        }`,
+      );
+      // we *could* mark project failed here if you want
+    }
+
+    // 4) Mark project as ready (or maybe 'processing_graph' later)
+    await this.projectRepository.updateProjectStatus(projectId, 'ready');
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    this.logger.log(
+      `✅ [ProjectSetupProcessor] Project setup complete for ${projectId} in ${duration}s`,
+    );
+
+    return {
+      success: true,
+      projectId,
+      duration: `${duration}s`,
+    };
+  } catch (error) {
+    const msg =
+      error instanceof Error ? error.message : String(error);
+    this.logger.error(
+      `❌ Project setup failed for project ${projectId}: ${msg}`,
+      error instanceof Error ? error.stack : undefined,
+    );
+    await this.projectRepository.updateProjectStatus(projectId, 'failed', msg);
+    throw error;
+  }
+}
+
+  private extractGitHubSlug(repositoryUrl: string): string {
+    // https://github.com/owner/repo(.git) -> owner/repo
+    return repositoryUrl
+      .replace(/^https?:\/\/github\.com\//, '')
+      .replace(/\.git$/, '');
   }
 
   private async findRepositoryUrl(packageName: string): Promise<string | undefined> {

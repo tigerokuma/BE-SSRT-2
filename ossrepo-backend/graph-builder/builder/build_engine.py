@@ -426,6 +426,23 @@ def mg_link_file_touch(repo_id: str, branch: str, sha: str, path: str, status: s
               sha=sha, status=status, adds=int(additions or 0), dels=int(deletions or 0),
               old=(old_path or None))
 
+def mg_link_repo_package(repo_id: str, ecosystem: str, package_name: str):
+    """
+    Link a logical package (Dependency node) to the Repo that implements it.
+
+    Example:
+      ecosystem='npm', package_name='@hookform/resolvers',
+      repo_id='react-hook-form/resolvers'
+    """
+    driver = get_memgraph_driver()
+    with driver.session() as s:
+        s.run("""
+        MERGE (dep:Dependency {ecosystem:$eco, name:$name})
+          ON CREATE SET dep.created_at = timestamp()
+        MERGE (r:Repo {id:$rid})
+        MERGE (dep)-[:HAS_REPO]->(r)
+        """, eco=ecosystem, name=package_name, rid=repo_id)
+
 
 def mg_upsert_symbols(repo_id: str, branch: str, file_path: str, lang: str, sha: str,
                       symbols: List[Dict]):
@@ -1355,6 +1372,15 @@ def run_branch_ingest(
                     deps = parse_manifest(fname, blob)
                     if deps:
                         mg_upsert_dependencies(repo_id, branch, meta, deps)
+                    if fname == "package.json":
+                        try:
+                            pkg_meta = json.loads(blob.decode("utf-8", "ignore") or "{}")
+                            pkg_name = pkg_meta.get("name")
+                            if pkg_name:
+                                # npm ecosystem; normalize name the same way as parse_package_json
+                                mg_link_repo_package(repo_id, "npm", pkg_name.lower())
+                        except Exception:
+                            logging.exception("[ingest] failed to link repo package from package.json")
 
                 # Import graph (before symbol resolution)
                 lang = EXT_TO_LANG.get(ext)

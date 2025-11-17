@@ -15,7 +15,8 @@ import {
 import { GraphService } from '../services/graph.service';
 import { GraphStorageService } from '../services/graph-storage.service';
 import { GraphBuilderService } from '../services/graph-builder.service';
-
+import { UseGuards } from '@nestjs/common';
+import { InternalTokenGuard } from '../../../common/guards/internal-token.guard';
 import { BuildTaskDto, TriggerBuildDto } from '../dto/build-task.dto';
 import {
   BuildSubtaskDto,
@@ -273,6 +274,7 @@ RETURN n, r, c
   }
 
   @Patch('build/:taskId/status')
+  @UseGuards(InternalTokenGuard)
   async updateBuildTaskStatus(
     @Param('taskId') taskId: string,
     @Body() body: { status: string; message?: string },
