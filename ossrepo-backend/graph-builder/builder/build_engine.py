@@ -16,9 +16,11 @@ from .parser_loader import load_parsers
 # --- OFFLINE MODE SWITCH (Option A) ---
 import pathlib, uuid
 
-BACKEND_MODE = os.getenv("BACKEND_MODE", "online").lower()  # "online" | "offline"
+
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000")
+BACKEND_MODE = os.getenv("BACKEND_MODE", "offline").lower()
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
 OFFLINE_OUT_DIR = os.getenv("OFFLINE_OUT_DIR", ".offline_out")
-CLERK_JWT = os.getenv("CLERK_JWT", "")  # only used when BACKEND_MODE=online
 
 pathlib.Path(OFFLINE_OUT_DIR).mkdir(parents=True, exist_ok=True)
 
@@ -34,8 +36,13 @@ def _offline_write(kind: str, obj_id: str, payload: dict):
     (d / f"{obj_id}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _auth_headers():
-    return {"Authorization": f"Bearer {CLERK_JWT}"} if CLERK_JWT else {}
+def _auth_headers() -> dict:
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if INTERNAL_API_TOKEN:
+        headers["x-internal-token"] = INTERNAL_API_TOKEN
+    return headers
 
 
 # ---------------- env / logging ----------------
