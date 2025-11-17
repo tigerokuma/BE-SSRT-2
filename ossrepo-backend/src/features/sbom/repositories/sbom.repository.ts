@@ -251,6 +251,20 @@ export class SbomRepository {
     return watchlist;
   }
 
+  // --- Find package by name (read-only) ---
+  async findPackageByName(packageName: string): Promise<{ id: string } | null> {
+    try {
+      const dbPackage = await this.prisma.packages.findUnique({
+        where: { name: packageName },
+        select: { id: true },
+      });
+      return dbPackage;
+    } catch (error) {
+      console.error(`Error finding package ${packageName}:`, error);
+      return null;
+    }
+  }
+
   // --- Upsert package from SBOM component ---
   // This method receives already-extracted package data and just handles the database upsert
   async upsertPackageFromSbomComponent(

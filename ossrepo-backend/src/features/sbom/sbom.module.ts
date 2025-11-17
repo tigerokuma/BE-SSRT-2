@@ -9,9 +9,13 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { SbomProcessor } from './processors/sbom.processor';
 import { SbomMemgraph } from './services/sbom-graph-builder.service';
+import { DependenciesModule } from '../dependencies/dependencies.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'sbom' })],
+  imports: [
+    BullModule.registerQueue({ name: 'sbom' }),
+    DependenciesModule,
+  ],
   providers: [
     SbomRepository,
     SbomBuilderService,

@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import neo4j from "neo4j-driver";
 import { v4 as uuidv4 } from 'uuid';
 import { SbomRepository } from "../repositories/sbom.repository";
+import { DependencyQueueService } from "../../dependencies/services/dependency-queue.service";
 
 const MEMGRAPH_URI = "bolt://localhost:7687";
 const USER = "memgraph";
@@ -12,7 +13,10 @@ export class SbomMemgraph {
   private driver;
   private session;
 
-  constructor(private readonly sbomRepo: SbomRepository) {
+  constructor(
+    private readonly sbomRepo: SbomRepository,
+    private readonly dependencyQueueService: DependencyQueueService,
+  ) {
     this.driver = neo4j.driver(MEMGRAPH_URI, neo4j.auth.basic(USER, PASSWORD), {
       maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
       maxConnectionPoolSize: 50,
@@ -188,8 +192,22 @@ export class SbomMemgraph {
   async importCycloneDxSbom(sbomJson: any, sbomId: string) {
     console.log(`Importing SBOM components and dependencies`);
     
+    // Extract projectId from SBOM metadata if available
+    const projectId = sbomJson.metadata?.properties?.find(
+      (prop: any) => prop.name === 'deply:project:id'
+    )?.value || sbomId; // Fallback to sbomId if projectId not found
+    
+    // Extract repoUrl from component's externalReferences if available
+    const getRepoUrlFromComponent = (c: any): string | undefined => {
+      const vcsRef = c.externalReferences?.find(
+        (ref: any) => ref.type === 'vcs' || ref.type === 'repository'
+      );
+      return vcsRef?.url;
+    };
+    
     // Batch create all components at once
     const components = sbomJson.components || [];
+    const queuePromises: Promise<void>[] = [];
     if (components.length > 0) {
       // Process all components in parallel for better performance
       const componentPromises = components.map(async (c) => {
@@ -200,13 +218,42 @@ export class SbomMemgraph {
         const purlName = this.extractNameFromPurl(purl);
         const finalPackageName = purlName || packageName;
         const license = c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null;
+        const repoUrl = getRepoUrlFromComponent(c);
         
-        // Upsert package to PostgreSQL via repository
-        const dbPackageId = await this.sbomRepo.upsertPackageFromSbomComponent(
-          finalPackageName,
-          null, // repoUrl - will be populated from SBOM metadata if available
-          license
+        // Check if package already exists (read-only operation)
+        let existingPackage = null;
+        try {
+          existingPackage = await this.sbomRepo.findPackageByName(finalPackageName);
+        } catch (error) {
+          console.error(`Error checking for existing package ${finalPackageName}:`, error);
+        }
+        
+        // Queue package setup through dependencies module instead of direct database call
+        queuePromises.push(
+          this.dependencyQueueService
+            .queueFastSetup({
+              packageId: existingPackage?.id, // Use existing package ID if available
+              packageName: finalPackageName,
+              repoUrl: repoUrl,
+              projectId: projectId,
+            })
+            .then(() => {
+              console.log(
+                `✅ Queued fast setup for package: ${finalPackageName}${
+                  existingPackage ? ' (existing)' : ' (new)'
+                }`,
+              );
+            })
+            .catch((error) => {
+              console.error(
+                `❌ Error queueing fast setup for package ${finalPackageName}:`,
+                error,
+              );
+            }),
         );
+        
+        // Use existing package ID if available, otherwise null (will be populated by fast-setup processor)
+        const dbPackageId = existingPackage?.id || null;
         
         return {
           purl: purl,
@@ -223,6 +270,8 @@ export class SbomMemgraph {
 
       // Wait for all components to be processed in parallel
       const componentData = await Promise.all(componentPromises);
+      // Ensure all queue jobs have been dispatched asynchronously
+      await Promise.all(queuePromises);
 
       try {
         await this.session.run(
