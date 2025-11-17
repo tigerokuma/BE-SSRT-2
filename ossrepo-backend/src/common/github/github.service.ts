@@ -16,14 +16,18 @@ export class GitHubService {
         return new Octokit({auth});
     }
 
-    async getAuthenticatedOctokit(): Promise<OctokitType> {   // explicit return type
+    async getAuthenticatedOctokit(userId?: string): Promise<OctokitType> {   // explicit return type
         try {
-            const user = await this.prisma.user.findUnique({
-                where: {user_id: 'user-123'},
-                select: {access_token: true},
-            });
+            let token = process.env.GITHUB_TOKEN ?? '';
+            
+            if (userId) {
+                const user = await this.prisma.user.findUnique({
+                    where: {user_id: userId},
+                    select: {access_token: true},
+                });
+                token = user?.access_token ?? process.env.GITHUB_TOKEN ?? '';
+            }
 
-            const token = user?.access_token ?? process.env.GITHUB_TOKEN ?? '';
             return this.createOctokit(token);
         } catch (err) {
             console.error('Error getting GitHub token:', err);
@@ -34,9 +38,9 @@ export class GitHubService {
         }
     }
 
-    async getPackageJson(owner: string, repo: string): Promise<any> {
+    async getPackageJson(owner: string, repo: string, userId?: string): Promise<any> {
         try {
-            const octokit = await this.getAuthenticatedOctokit();
+            const octokit = await this.getAuthenticatedOctokit(userId);
 
             const response = await octokit.repos.getContent({
                 owner,
@@ -64,7 +68,7 @@ export class GitHubService {
         }
     }
 
-    async extractDependencies(repoUrl: string): Promise<{ name: string; version: string }[]> {
+    async extractDependencies(repoUrl: string, userId?: string): Promise<{ name: string; version: string }[]> {
         try {
             // Extract owner and repo from GitHub URL (handle various formats)
             const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/);
@@ -74,7 +78,7 @@ export class GitHubService {
 
             const [, owner, repo] = match;
 
-            const packageJson = await this.getPackageJson(owner, repo);
+            const packageJson = await this.getPackageJson(owner, repo, userId);
 
             const dependencies = [];
 

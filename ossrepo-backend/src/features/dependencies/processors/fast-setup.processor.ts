@@ -47,6 +47,29 @@ export class FastSetupProcessor {
           where: { id: packageId }
         });
         finalPackageId = packageId;
+        
+        // If package exists but missing NPM data, fetch it
+        if (currentPackage && (!currentPackage.npm_url || !currentPackage.downloads)) {
+          this.logger.log(`📦 Package exists but missing NPM data, fetching for: ${packageName}`);
+          const npmData = await this.getNpmPackageData(packageName);
+          
+          await this.prisma.packages.update({
+            where: { id: packageId },
+            data: {
+              npm_url: npmData.npmUrl || currentPackage.npm_url,
+              downloads: npmData.downloads || currentPackage.downloads,
+              license: npmData.license || currentPackage.license,
+            }
+          });
+          
+          // Update currentPackage object for consistency
+          currentPackage = {
+            ...currentPackage,
+            npm_url: npmData.npmUrl || currentPackage.npm_url,
+            downloads: npmData.downloads || currentPackage.downloads,
+            license: npmData.license || currentPackage.license,
+          };
+        }
       } else if (branchDependencyId) {
         // New flow - create or find package, then link to branch dependency
         currentPackage = await this.prisma.packages.findUnique({
@@ -54,14 +77,22 @@ export class FastSetupProcessor {
         });
 
         if (!currentPackage) {
-          // Create new package
+          // Fetch NPM data for new package
+          const npmData = await this.getNpmPackageData(packageName);
+          
+          // Create new package with NPM data
           currentPackage = await this.prisma.packages.create({
             data: {
               name: packageName,
               repo_url: repoUrl,
+              npm_url: npmData.npmUrl,
+              license: npmData.license,
+              downloads: npmData.downloads,
               status: 'queued',
             }
           });
+          
+          this.logger.log(`📦 Created new package with NPM data: ${packageName}`);
         }
         finalPackageId = currentPackage.id;
       } else {
@@ -81,7 +112,7 @@ export class FastSetupProcessor {
 
       let updateData: any = { status: 'fast' };
       
-      // If license is not set, try to fetch it from npm
+      // If license is not set, try to fetch it from npm (but we may have already fetched it above)
       if (!currentPackage?.license) {
         try {
           const license = await this.getDependencyLicense(packageName);
@@ -276,7 +307,7 @@ export class FastSetupProcessor {
           status: 'done',
           activity_score: activityScore.score,
           bus_factor_score: busFactorScore.score,
-          scorecard_score: scorecardScore.score,
+          scorecard_score: scorecardScore.score ? scorecardScore.score * 10 : null, // Multiply by 10 to convert from 0-10 to 0-100 scale
           vulnerability_score: vulnerabilityScore.score,
           license_score: licenseScore.score,
           total_score: totalScore.score,
@@ -734,6 +765,60 @@ export class FastSetupProcessor {
       return data.license || null;
     } catch (error) {
       return null;
+    }
+  }
+
+  private async getNpmPackageData(packageName: string): Promise<{
+    npmUrl: string | null;
+    downloads: number | null;
+    license: string | null;
+  }> {
+    try {
+      this.logger.log(`📦 Fetching NPM data for package: ${packageName}`);
+      
+      const npmUrl = `https://registry.npmjs.org/${packageName}`;
+      const response = await fetch(npmUrl);
+      
+      if (!response.ok) {
+        this.logger.log(`⚠️ NPM API returned ${response.status} for ${packageName}`);
+        return {
+          npmUrl: null,
+          downloads: null,
+          license: null
+        };
+      }
+      
+      const data = await response.json();
+      
+      // Get download stats from npm API
+      let downloads = null;
+      try {
+        const downloadStatsUrl = `https://api.npmjs.org/downloads/point/last-month/${packageName}`;
+        const downloadResponse = await fetch(downloadStatsUrl);
+        if (downloadResponse.ok) {
+          const downloadData = await downloadResponse.json();
+          downloads = downloadData.downloads || 0;
+        }
+      } catch (error) {
+        this.logger.log(`⚠️ Could not fetch download stats for ${packageName}: ${error.message}`);
+      }
+      
+      const result = {
+        npmUrl: `https://www.npmjs.com/package/${packageName}`,
+        downloads,
+        license: data.license || null
+      };
+      
+      this.logger.log(`✅ NPM data for ${packageName}: downloads=${downloads}, license=${result.license}`);
+      return result;
+      
+    } catch (error) {
+      this.logger.error(`❌ Error fetching NPM data for ${packageName}:`, error);
+      return {
+        npmUrl: null,
+        downloads: null,
+        license: null
+      };
     }
   }
 
