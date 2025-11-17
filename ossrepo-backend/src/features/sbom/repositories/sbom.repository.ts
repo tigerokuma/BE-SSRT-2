@@ -193,6 +193,7 @@ export class SbomRepository {
       select: {
         package_id: true,
         name: true,
+        version: true,
       },
     });
 
@@ -201,6 +202,7 @@ export class SbomRepository {
       .map((dep) => ({
         package_id: dep.package_id!,
         package_name: dep.name,
+        version: dep.version,
       }));
   }
 
@@ -223,6 +225,7 @@ export class SbomRepository {
       .map((item) => ({
         package_id: item.package_id!,
         package_name: item.package!.name,
+        version: null, // Watchlist packages don't have specific versions
       }));
   }
   

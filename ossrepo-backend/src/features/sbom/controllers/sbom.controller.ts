@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  Query,
+  BadRequestException,
+} from '@nestjs/common';
 import { SbomBuilderService } from '../services/sbom-builder.service';
 import { SbomQueryService } from '../services/sbom-query.service';
 import { SbomMemgraph } from '../services/sbom-graph-builder.service';
@@ -116,9 +124,67 @@ export class SbomController {
   //   return await this.sbomBuilderService.mergeSbom(project_id);
   // }
 
-  @Post('recommendations')
+  @Post('recommendations/:project_id')
   async getRecommendations(@Param('project_id') project_id: string) {
     return this.optimizer.getUpgradeRecommendations(project_id);
+  }
+
+  @Get('low-similarity/:project_id')
+  async getLowSimilarityPackages(
+    @Param('project_id') projectId: string,
+    @Query('sharedThreshold') sharedThreshold?: string,
+    @Query('similarityRatio') similarityRatio?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.optimizer.findLowSimilarityPackages(projectId, {
+      sharedThreshold:
+        sharedThreshold !== undefined ? Number(sharedThreshold) : undefined,
+      similarityRatio:
+        similarityRatio !== undefined ? Number(similarityRatio) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('vulnerable-packages/:project_id')
+  async getPackagesWithVulnerabilities(
+    @Param('project_id') projectId: string,
+    @Query('includePatched') includePatched?: string,
+    @Query('minSeverity') minSeverity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+    @Query('limit') limit?: string,
+  ) {
+    return this.optimizer.findPackagesWithVulnerabilities(projectId, {
+      includePatched:
+        includePatched !== undefined
+          ? includePatched === 'true'
+          : undefined,
+      minSeverity: minSeverity || undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('flattening-analysis/:project_id')
+  async getFlatteningAnalysis(@Param('project_id') projectId: string) {
+    return this.optimizer.getFlatteningAnalysis(projectId);
+  }
+
+  @Get('upgrade-graph/:project_id')
+  async getUpgradeDependencyGraph(
+    @Param('project_id') projectId: string,
+    @Query('packageName') packageName: string,
+    @Query('oldVersion') oldVersion: string,
+    @Query('newVersion') newVersion: string,
+  ) {
+    if (!packageName || !oldVersion || !newVersion) {
+      throw new BadRequestException(
+        'packageName, oldVersion, and newVersion are required',
+      );
+    }
+    return this.optimizer.getUpgradeDependencyGraph(
+      projectId,
+      packageName,
+      oldVersion,
+      newVersion,
+    );
   }
 
 }
