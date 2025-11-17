@@ -1,4 +1,4 @@
-import {Controller, Post, Get, Put, Delete, Body, Param} from '@nestjs/common';
+import {Controller, Post, Get, Put, Delete, Body, Param, BadRequestException} from '@nestjs/common';
 import {ProjectService} from '../services/project.service';
 import {CreateProjectDto} from '../dto/create-project.dto';
 import {UpdateProjectDto} from '../dto/update-project.dto';
@@ -6,6 +6,7 @@ import {CreateProjectCliDto} from '../dto/create-project-cli.dto';
 import {DependencyQueueService} from '../../dependencies/services/dependency-queue.service';
 import {AnalyzeProjectDto} from '../dto/analyze-project.dto';
 import {PrismaService} from 'src/common/prisma/prisma.service';
+import { ProjectAlertService } from '../services/project-alert.service';
 
 @Controller('projects')
 export class ProjectController {
@@ -13,6 +14,7 @@ export class ProjectController {
         private readonly projectService: ProjectService,
         private readonly dependencyQueueService: DependencyQueueService,
         private readonly prisma: PrismaService,
+        private readonly projectAlertService: ProjectAlertService,
     ) {
     }
 
@@ -269,5 +271,53 @@ export class ProjectController {
     @Get('debug/all')
     async debugAllProjects() {
         return this.projectService.debugAllProjects();
+    }
+
+    @Get(':id/alerts')
+    async getProjectAlerts(
+        @Param('id') projectId: string,
+        @Body() body?: { alertType?: string; status?: string; packageId?: string },
+    ) {
+        if (!projectId || projectId.trim().length === 0) {
+            throw new BadRequestException('Project ID is required');
+        }
+
+        // Get both ProjectAlert and ProjectPackageAlert
+        const [projectAlerts, packageAlerts] = await Promise.all([
+            this.projectAlertService.getProjectAlerts(projectId.trim(), body),
+            this.projectAlertService.getProjectPackageAlerts(projectId.trim(), body),
+        ]);
+
+        // Combine and return both types
+        return {
+            projectAlerts,
+            packageAlerts,
+        };
+    }
+
+    @Put(':id/alerts/:alertId')
+    async updateAlertStatus(
+        @Param('id') projectId: string,
+        @Param('alertId') alertId: string,
+        @Body() body: { status: 'unread' | 'read' | 'resolved' },
+    ) {
+        if (!projectId || projectId.trim().length === 0) {
+            throw new BadRequestException('Project ID is required');
+        }
+
+        if (!alertId || alertId.trim().length === 0) {
+            throw new BadRequestException('Alert ID is required');
+        }
+
+        if (!body.status || !['unread', 'read', 'resolved'].includes(body.status)) {
+            throw new BadRequestException('Status must be one of: unread, read, resolved');
+        }
+
+        const result = await this.projectAlertService.updateAlertStatus(
+            alertId.trim(),
+            body.status,
+        );
+
+        return result;
     }
 }

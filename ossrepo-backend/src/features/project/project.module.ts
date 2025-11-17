@@ -10,6 +10,7 @@ import { DependenciesModule } from '../dependencies/dependencies.module';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { ManualProcessorService } from 'src/common/queue/manual-processor.service';
 import {UserModule} from "../user/user.module";
+import { ProjectAlertService } from './services/project-alert.service';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import {UserModule} from "../user/user.module";
     UserModule
   ],
   controllers: [ProjectController],
-  providers: [ProjectService, ProjectRepository, ProjectSetupProcessor, ManualProcessorService],
+  providers: [ProjectService, ProjectRepository, ProjectSetupProcessor, ManualProcessorService, ProjectAlertService],
   exports: [ProjectService],
 })
 export class ProjectModule {}
