@@ -184,6 +184,327 @@ export class SbomMemgraph {
     }));
   }
 
+  /**
+   * Get filtered dependency graph for a package formatted for frontend visualization
+   * Returns direct dependencies with their transitive children, filtered by query, scope, and risk
+   */
+  async getFilteredPackageDependencyGraph(
+    packageId: string,
+    options?: {
+      query?: string;
+      scope?: 'direct' | 'all';
+      risk?: 'all' | 'low' | 'medium' | 'high';
+    },
+  ) {
+    try {
+      // Get package info
+      const packageInfo = await this.sbomRepo.getPackageById(packageId);
+      if (!packageInfo) {
+        return { directDependencies: [] };
+      }
+
+      const packageName = packageInfo.package_name;
+      const query = options?.query?.toLowerCase() || '';
+      const scope = options?.scope || 'all';
+      const riskFilter = options?.risk || 'all';
+
+      // Query Memgraph for direct dependencies
+      const directDepsResult = await this.session.run(
+        `
+        MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
+        RETURN DISTINCT direct.name AS name, direct.version AS version
+        ORDER BY direct.name
+        LIMIT 20
+        `,
+        { packageName },
+      );
+
+      const directDependencies: Array<{
+        id: string;
+        label: string;
+        riskScore: number;
+        children: Array<{ id: string; label: string; riskScore: number }>;
+      }> = [];
+
+      for (const record of directDepsResult.records) {
+        const depName = record.get('name');
+        const depVersion = record.get('version');
+
+        // Skip if query doesn't match (when scope is 'direct')
+        if (query && scope === 'direct' && !depName.toLowerCase().includes(query)) {
+          continue;
+        }
+
+        // Get transitive dependencies for this direct dependency
+        const transitiveResult = await this.session.run(
+          `
+          MATCH (direct:Package {name: $depName})-[:DEPENDS_ON*1..]->(transitive:Package)
+          RETURN DISTINCT transitive.name AS name, transitive.version AS version
+          ORDER BY transitive.name
+          LIMIT 10
+          `,
+          { depName },
+        );
+
+        const children: Array<{ id: string; label: string; riskScore: number }> = [];
+
+        for (const transRecord of transitiveResult.records) {
+          const transName = transRecord.get('name');
+          const transVersion = transRecord.get('version');
+
+          // Apply query filter for transitive dependencies when scope is 'all'
+          if (query && scope === 'all' && !transName.toLowerCase().includes(query)) {
+            continue;
+          }
+
+          // Calculate risk score (placeholder - you can enhance this with actual risk calculation)
+          const riskScore = this.calculatePackageRiskScore(transName);
+
+          // Apply risk filter
+          if (this.matchesRiskFilter(riskScore, riskFilter)) {
+            children.push({
+              id: transName,
+              label: transName,
+              riskScore,
+            });
+          }
+        }
+
+        // Calculate risk score for direct dependency
+        const directRiskScore = this.calculatePackageRiskScore(depName);
+
+        // Apply risk filter to direct dependency
+        if (this.matchesRiskFilter(directRiskScore, riskFilter)) {
+          // Sort children by risk score and limit
+          const sortedChildren = children
+            .sort((a, b) => b.riskScore - a.riskScore)
+            .slice(0, 6);
+
+          directDependencies.push({
+            id: depName,
+            label: depName,
+            riskScore: directRiskScore,
+            children: sortedChildren,
+          });
+        }
+      }
+
+      // Sort by risk score and limit to top 6
+      return {
+        directDependencies: directDependencies
+          .sort((a, b) => b.riskScore - a.riskScore)
+          .slice(0, 6),
+      };
+    } catch (error) {
+      console.error(`Error getting filtered dependency graph for package ${packageId}:`, error);
+      return { directDependencies: [] };
+    }
+  }
+
+  /**
+   * Calculate risk score for a package (placeholder - enhance with actual risk calculation)
+   */
+  private calculatePackageRiskScore(packageName: string): number {
+    // Placeholder: You can enhance this with actual risk calculation based on:
+    // - Vulnerability count
+    // - License compliance
+    // - Maintenance status
+    // - Activity score
+    // For now, return a random score between 40-90 for demonstration
+    const hash = packageName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return 40 + (hash % 50);
+  }
+
+  /**
+   * Check if risk score matches the risk filter
+   */
+  private matchesRiskFilter(riskScore: number, filter: 'all' | 'low' | 'medium' | 'high'): boolean {
+    if (filter === 'all') return true;
+    if (filter === 'high') return riskScore >= 75;
+    if (filter === 'medium') return riskScore >= 60 && riskScore < 75;
+    if (filter === 'low') return riskScore < 60;
+    return true;
+  }
+
+  /**
+   * Get dependency graph for a package by package_id
+   * Returns nodes and edges for visualization
+   */
+  async getPackageDependencyGraph(packageId: string) {
+    try {
+      // First, get the package name from PostgreSQL
+      const packageInfo = await this.sbomRepo.getPackageById(packageId);
+      if (!packageInfo) {
+        return { error: 'Package not found' };
+      }
+
+      const packageName = packageInfo.package_name;
+
+      // Query Memgraph for the dependency graph
+      const result = await this.session.run(
+        `
+        MATCH (p:Package {name: $packageName})
+        OPTIONAL MATCH path = (p)-[:DEPENDS_ON*0..]->(dep:Package)
+        WITH p, dep, relationships(path) as rels
+        RETURN DISTINCT p, dep
+        `,
+        { packageName }
+      );
+
+      const nodes = new Map<string, any>();
+      const edges: Array<{ from: string; to: string }> = [];
+
+      for (const record of result.records) {
+        const pkg = record.get('p');
+        const dep = record.get('dep');
+
+        // Add main package node
+        if (pkg) {
+          const purl = pkg.properties.purl || `${pkg.properties.name}@${pkg.properties.version}`;
+          if (!nodes.has(purl)) {
+            nodes.set(purl, {
+              id: purl,
+              name: pkg.properties.name,
+              version: pkg.properties.version,
+              type: pkg.properties.type || 'library',
+              license: pkg.properties.license || null,
+            });
+          }
+        }
+
+        // Add dependency node and edge
+        if (dep && pkg) {
+          const fromPurl = pkg.properties.purl || `${pkg.properties.name}@${pkg.properties.version}`;
+          const toPurl = dep.properties.purl || `${dep.properties.name}@${dep.properties.version}`;
+
+          if (!nodes.has(toPurl)) {
+            nodes.set(toPurl, {
+              id: toPurl,
+              name: dep.properties.name,
+              version: dep.properties.version,
+              type: dep.properties.type || 'library',
+              license: dep.properties.license || null,
+            });
+          }
+
+          // Add edge if not already present
+          const edgeExists = edges.some(
+            (e) => e.from === fromPurl && e.to === toPurl,
+          );
+          if (!edgeExists && fromPurl !== toPurl) {
+            edges.push({ from: fromPurl, to: toPurl });
+          }
+        }
+      }
+
+      return {
+        package: {
+          id: packageId,
+          name: packageName,
+        },
+        nodes: Array.from(nodes.values()),
+        edges: edges,
+      };
+    } catch (error) {
+      console.error(`Error getting dependency graph for package ${packageId}:`, error);
+      return { error: 'Failed to get dependency graph' };
+    }
+  }
+
+  /**
+   * Get dependency graph for a package by name and version
+   * Returns nodes and edges for visualization
+   */
+  async getPackageDependencyGraphByName(
+    packageName: string,
+    version?: string,
+  ) {
+    try {
+      const query = version
+        ? `
+        MATCH (p:Package {name: $packageName, version: $version})
+        OPTIONAL MATCH path = (p)-[:DEPENDS_ON*0..]->(dep:Package)
+        WITH p, dep, relationships(path) as rels
+        RETURN DISTINCT p, dep
+        `
+        : `
+        MATCH (p:Package {name: $packageName})
+        OPTIONAL MATCH path = (p)-[:DEPENDS_ON*0..]->(dep:Package)
+        WITH p, dep, relationships(path) as rels
+        RETURN DISTINCT p, dep
+        ORDER BY p.version DESC
+        LIMIT 1
+        `;
+
+      const params = version
+        ? { packageName, version }
+        : { packageName };
+
+      const result = await this.session.run(query, params);
+
+      const nodes = new Map<string, any>();
+      const edges: Array<{ from: string; to: string }> = [];
+
+      for (const record of result.records) {
+        const pkg = record.get('p');
+        const dep = record.get('dep');
+
+        // Add main package node
+        if (pkg) {
+          const purl = pkg.properties.purl || `${pkg.properties.name}@${pkg.properties.version}`;
+          if (!nodes.has(purl)) {
+            nodes.set(purl, {
+              id: purl,
+              name: pkg.properties.name,
+              version: pkg.properties.version,
+              type: pkg.properties.type || 'library',
+              license: pkg.properties.license || null,
+            });
+          }
+        }
+
+        // Add dependency node and edge
+        if (dep && pkg) {
+          const fromPurl = pkg.properties.purl || `${pkg.properties.name}@${pkg.properties.version}`;
+          const toPurl = dep.properties.purl || `${dep.properties.name}@${dep.properties.version}`;
+
+          if (!nodes.has(toPurl)) {
+            nodes.set(toPurl, {
+              id: toPurl,
+              name: dep.properties.name,
+              version: dep.properties.version,
+              type: dep.properties.type || 'library',
+              license: dep.properties.license || null,
+            });
+          }
+
+          // Add edge if not already present
+          const edgeExists = edges.some(
+            (e) => e.from === fromPurl && e.to === toPurl,
+          );
+          if (!edgeExists && fromPurl !== toPurl) {
+            edges.push({ from: fromPurl, to: toPurl });
+          }
+        }
+      }
+
+      return {
+        package: {
+          name: packageName,
+          version: version || (result.records[0]?.get('p')?.properties?.version || null),
+        },
+        nodes: Array.from(nodes.values()),
+        edges: edges,
+      };
+    } catch (error) {
+      console.error(
+        `Error getting dependency graph for package ${packageName}${version ? `@${version}` : ''}:`,
+        error,
+      );
+      return { error: 'Failed to get dependency graph' };
+    }
+  }
+
   // --- Import CycloneDX SBOM (components + dependencies) into Memgraph ---
   async importCycloneDxSbom(sbomJson: any, sbomId: string) {
     console.log(`Importing SBOM components and dependencies`);

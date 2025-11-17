@@ -187,4 +187,34 @@ export class SbomController {
     );
   }
 
+  @Get('package-graph/:package_id')
+  async getPackageDependencyGraph(@Param('package_id') packageId: string) {
+    return this.sbomMemgraph.getPackageDependencyGraph(packageId);
+  }
+
+  @Get('package-graph-by-name/:package_name')
+  async getPackageDependencyGraphByName(
+    @Param('package_name') packageName: string,
+    @Query('version') version?: string,
+  ) {
+    return this.sbomMemgraph.getPackageDependencyGraphByName(
+      packageName,
+      version,
+    );
+  }
+
+  @Get('dependency-graph/:package_id')
+  async getFilteredDependencyGraph(
+    @Param('package_id') packageId: string,
+    @Query('query') query?: string,
+    @Query('scope') scope?: 'direct' | 'all',
+    @Query('risk') risk?: 'all' | 'low' | 'medium' | 'high',
+  ) {
+    return this.sbomMemgraph.getFilteredPackageDependencyGraph(packageId, {
+      query,
+      scope,
+      risk,
+    });
+  }
+
 }

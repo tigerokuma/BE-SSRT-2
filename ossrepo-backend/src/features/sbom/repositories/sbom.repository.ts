@@ -281,4 +281,15 @@ export class SbomRepository {
       return null;
     }
   }
+
+  async getPackageById(packageId: string) {
+    const packageEntry = await this.prisma.package.findUnique({
+      where: { package_id: packageId },
+      select: {
+        package_id: true,
+        package_name: true,
+      },
+    });
+    return packageEntry;
+  }
 }
