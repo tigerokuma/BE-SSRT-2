@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { AiModule } from '../../common/ai/ai.module';
+import { AzureModule } from '../../common/azure/azure.module';
 import { FastSetupProcessor } from './processors/fast-setup.processor';
 import { FullSetupProcessor } from './processors/full-setup.processor';
 import { ScorecardPriorityProcessor } from './processors/scorecard-priority.processor';
@@ -22,6 +23,7 @@ import { AISummaryService } from '../activity/services/ai-summary.service';
     PrismaModule,
     QueueModule,
     AiModule,
+    AzureModule,
   ],
   providers: [
     FastSetupProcessor,

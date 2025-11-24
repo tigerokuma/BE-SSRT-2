@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { ConnectionService } from '../../../common/azure/azure.service';
 
 export interface ScorecardResult {
   score: number;
@@ -17,7 +14,10 @@ export class PackageScorecardService {
   private readonly logger = new Logger(PackageScorecardService.name);
   private readonly scorecardPath = 'scorecard'; // Assuming scorecard is in PATH
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly azureService: ConnectionService,
+  ) {}
 
   /**
    * Check Scorecard API for existing scores
@@ -64,30 +64,27 @@ export class PackageScorecardService {
       let command: string;
 
       if (commitSha) {
-        command = `${this.scorecardPath} --local=${repoPath} --commit=${commitSha} --format=json --show-details`;
-        this.logger.log(`🔍 Running Scorecard on local repository ${repoPath}@${commitSha.substring(0, 8)}`);
+        command = `docker run --rm gcr.io/openssf/scorecard:stable --local=${repoPath} --commit=${commitSha} --format=json --show-details`;
+        this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}@${commitSha.substring(0, 8)}`);
       } else {
-        command = `${this.scorecardPath} --local=${repoPath} --format=json --show-details`;
-        this.logger.log(`🔍 Running Scorecard on local repository ${repoPath}`);
+        command = `docker run --rm gcr.io/openssf/scorecard:stable --local=${repoPath} --format=json --show-details`;
+        this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}`);
       }
 
       let stdout: string;
       let stderr: string;
 
       try {
-        const result = await execAsync(command, {
-          timeout: 400000, // 6+ minutes timeout for scorecard
-        });
+        const result = await this.azureService.executeRemoteCommand(command);
         stdout = result.stdout;
         stderr = result.stderr;
-      } catch (execError: any) {
-        if (execError.stdout) {
-          stdout = execError.stdout;
-          stderr = execError.stderr || '';
-        } else {
-          this.logger.error(`❌ Scorecard failed for ${repoPath}: ${execError.message}`);
-          return null;
+        
+        if (result.code !== 0) {
+          this.logger.warn(`⚠️ Scorecard command exited with code ${result.code}`);
         }
+      } catch (execError: any) {
+        this.logger.error(`❌ Scorecard failed for ${repoPath}: ${execError.message}`);
+        return null;
       }
 
       let scorecardData;

@@ -20,6 +20,7 @@ import { VulnerabilityService } from './services/vulnerability.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { AiModule } from '../../common/ai/ai.module';
+import { AzureModule } from '../../common/azure/azure.module';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { GraphModule } from '../graph/graph.module';
@@ -36,6 +37,7 @@ import { AlertModule } from '../alert/alert.module';
     PrismaModule,
     QueueModule,
     AiModule,
+    AzureModule,
     HttpModule,
     GraphModule,
     SbomModule,
