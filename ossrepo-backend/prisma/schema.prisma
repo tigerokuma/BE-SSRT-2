@@ -751,6 +751,8 @@ model Project {
   anomalies_notifications     Json?
   health_score                Float?
   dependencies_json           Json?
+  github_app_installation_id  String?                   // GitHub installation ID for this repo
+  github_actions_enabled      Boolean                   @default(true) // Auto-enable for GitHub repos
   project_dependencies        project_dependencies[]
   projectUsers                ProjectUser[]
   projectWatchlistPackages    ProjectWatchlistPackage[]

@@ -31,7 +31,7 @@ export class WebhookService {
         return existingWebhook.id.toString();
       }
 
-      // Get the authenticated Octokit instance (use user's token if provided)
+      // Get the authenticated Octokit instance using the user's token
       const octokit = await this.githubService.getAuthenticatedOctokit(userId);
       
       // Create webhook
@@ -88,6 +88,7 @@ export class WebhookService {
 
       if (!monitoredBranch?.webhook_id) {
         // Try to find the webhook directly on GitHub
+        // Note: We don't have userId here, so this will use fallback token
         const existingWebhook = await this.findExistingWebhook(owner, repo);
         if (existingWebhook) {
           // Update the database with the found webhook ID

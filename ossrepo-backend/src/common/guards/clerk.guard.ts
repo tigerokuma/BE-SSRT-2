@@ -16,6 +16,12 @@ function csv(key: string, fallback?: string[]): string[] | undefined {
 export class ClerkAuthGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<Request>();
+    
+    // Skip authentication for webhook endpoints (GitHub webhooks don't have bearer tokens)
+    const url = req.url || '';
+    if (url.startsWith('/webhooks/')) {
+      return true;
+    }
 
     // 1) Internal-token bypass for backend-to-backend calls
     const internalToken = (req.headers['x-internal-token'] as string | undefined)?.trim();
