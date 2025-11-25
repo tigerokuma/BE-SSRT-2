@@ -11,7 +11,6 @@ const PASSWORD = "memgraph";
 @Injectable()
 export class SbomMemgraph {
   private driver;
-  private session;
 
   constructor(
     private readonly sbomRepo: SbomRepository,
@@ -22,11 +21,9 @@ export class SbomMemgraph {
       maxConnectionPoolSize: 50,
       connectionAcquisitionTimeout: 2 * 60 * 1000, // 2 minutes
     });
-    this.session = this.driver.session();
   }
 
   async close() {
-    await this.session.close();
     await this.driver.close();
   }
 
@@ -39,74 +36,116 @@ export class SbomMemgraph {
 
 
   // --- Create SBOM Node ---
-  async createSbom(id: string, source: string, tool: string, metadata?: any) {
-    await this.session.run(
-      `
-      MERGE (s:SBOM {id: $id})
-      SET s.source = $source,
-          s.tool = $tool,
-          s.created_at = timestamp(),
-          s.metadata = $metadata
-      `,
-      { id, source, tool, metadata }
-    );
+  async createSbom(
+    id: string,
+    source: string,
+    tool: string,
+    metadata?: any,
+    packageName?: string,
+    version?: string,
+  ) {
+    const session = this.driver.session();
+    try {
+      // Extract purl from metadata.component if available
+      let purl: string | null = null;
+      if (metadata?.component) {
+        purl = metadata.component.purl || metadata.component['bom-ref'] || null;
+      }
+      
+      await session.run(
+        `
+        MERGE (s:SBOM {id: $id})
+        SET s.source = $source,
+            s.tool = $tool,
+            s.created_at = timestamp(),
+            s.metadata = $metadata,
+            s.purl = $purl,
+            s.package_name = $packageName,
+            s.version = $version
+        `,
+        { id, source, tool, metadata, purl, packageName: packageName || null, version: version || null }
+      );
+    } finally {
+      await session.close();
+    }
   }
 
   // --- Add Package Node ---
   async addPackage(purl: string, name: string, version: string, license?: string) {
-    await this.session.run(
-      `
-      MERGE (p:Package {purl: $purl})
-      SET p.name = $name,
-          p.version = $version,
-          p.license = $license
-      `,
-      { purl, name, version, license }
-    );
+    const session = this.driver.session();
+    try {
+      await session.run(
+        `
+        MERGE (p:Package {purl: $purl})
+        SET p.name = $name,
+            p.version = $version,
+            p.license = $license
+        `,
+        { purl, name, version, license }
+      );
+    } finally {
+      await session.close();
+    }
   }
 
   // --- Link Package → SBOM ---
   async linkPackageToSbom(purl: string, sbomId: string) {
-    await this.session.run(
-      `
-      MATCH (p:Package {purl: $purl}), (s:SBOM {id: $sbomId})
-      MERGE (p)-[:BELONGS_TO]->(s)
-      `,
-      { purl, sbomId }
-    );
+    const session = this.driver.session();
+    try {
+      await session.run(
+        `
+        MATCH (p:Package {purl: $purl}), (s:SBOM {id: $sbomId})
+        MERGE (p)-[:BELONGS_TO]->(s)
+        `,
+        { purl, sbomId }
+      );
+    } finally {
+      await session.close();
+    }
   }
 
   // --- Add Dependency Edge ---
   async addDependency(fromPurl: string, toPurl: string) {
-    await this.session.run(
-      `
-      MATCH (a:Package {purl: $from}), (b:Package {purl: $to})
-      MERGE (a)-[:DEPENDS_ON]->(b)
-      `,
-      { from: fromPurl, to: toPurl }
-    );
+    const session = this.driver.session();
+    try {
+      await session.run(
+        `
+        MATCH (a:Package {purl: $from}), (b:Package {purl: $to})
+        MERGE (a)-[:DEPENDS_ON]->(b)
+        `,
+        { from: fromPurl, to: toPurl }
+      );
+    } finally {
+      await session.close();
+    }
   }
 
   // --- Query Dependencies of a Package ---
   async getDependencies(pkgName: string) {
-    const result = await this.session.run(
-      `
-      MATCH (p:Package {name: $name})-[:DEPENDS_ON*]->(d)
-      RETURN DISTINCT d.name AS name, d.version AS version
-      `,
-      { name: pkgName }
-    );
-    return result.records.map(r => ({
-      name: r.get("name"),
-      version: r.get("version"),
-    }));
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `
+        MATCH (p:Package {name: $name})-[:DEPENDS_ON*]->(d)
+        RETURN DISTINCT d.name AS name, d.version AS version
+        `,
+        { name: pkgName }
+      );
+      return result.records.map(r => ({
+        name: r.get("name"),
+        version: r.get("version"),
+      }));
+    } finally {
+      await session.close();
+    }
   }
 
   // --- Get Full Dependency Tree Recursively from Memgraph ---
   async getFullDependencyTree(sbomId: string) {
+    const session = this.driver.session();
     try {
       // Get all packages and their dependencies recursively from Memgraph
-      const result = await this.session.run(
+      const result = await session.run(
         `
         MATCH (s:SBOM {id: $sbomId})
         MATCH (s)<-[:BELONGS_TO]-(p:Package)
@@ -171,21 +210,28 @@ export class SbomMemgraph {
     } catch (error) {
       console.error(`Error getting full dependency tree from Memgraph for ${sbomId}:`, error);
       return null;
+    } finally {
+      await session.close();
     }
   }
 
   // --- Query Version Conflicts ---
   async findVersionConflicts() {
-    const result = await this.session.run(`
-      MATCH (p:Package)-[:BELONGS_TO]->(s:SBOM)
-      WITH p.name AS name, COLLECT(DISTINCT p.version) AS versions
-      WHERE size(versions) > 1
-      RETURN name, versions
-    `);
-    return result.records.map(r => ({
-      name: r.get("name"),
-      versions: r.get("versions"),
-    }));
+    const session = this.driver.session();
+    try {
+      const result = await session.run(`
+        MATCH (p:Package)-[:BELONGS_TO]->(s:SBOM)
+        WITH p.name AS name, COLLECT(DISTINCT p.version) AS versions
+        WHERE size(versions) > 1
+        RETURN name, versions
+      `);
+      return result.records.map(r => ({
+        name: r.get("name"),
+        versions: r.get("versions"),
+      }));
+    } finally {
+      await session.close();
+    }
   }
 
   /**
@@ -193,41 +239,257 @@ export class SbomMemgraph {
    * Returns direct dependencies with their transitive children, filtered by query, scope, and risk
    */
   async getFilteredPackageDependencyGraph(
-    packageId: string,
+    packageIdOrName: string,
+    version?: string,
     options?: {
       query?: string;
       scope?: 'direct' | 'all';
       risk?: 'all' | 'low' | 'medium' | 'high';
     },
   ) {
+    const session = this.driver.session();
     try {
-      // Get package info
-      const packageInfo = await this.sbomRepo.getPackageById(packageId);
+      // Try to get package info by ID first
+      let packageInfo = await this.sbomRepo.getPackageById(packageIdOrName);
+      let packageId: string | null = null;
+      let packageName: string | null = null;
+      
+      // If not found by ID, try to find by name
       if (!packageInfo) {
-        return { directDependencies: [] };
+        const packageByName = await this.sbomRepo.findPackageByName(packageIdOrName);
+        if (packageByName) {
+          // Found by name, now get full package info
+          packageInfo = await this.sbomRepo.getPackageById(packageByName.id);
+        }
+      }
+      
+      if (packageInfo) {
+        packageId = packageInfo.package_id;
+        packageName = packageInfo.package_name;
+      } else {
+        // If still not found, try using the input as package name directly
+        packageName = packageIdOrName;
       }
 
-      const packageName = packageInfo.package_name;
       const query = options?.query?.toLowerCase() || '';
       const scope = options?.scope || 'all';
       const riskFilter = options?.risk || 'all';
 
-      // Query Memgraph for direct dependencies
-      const directDepsResult = await this.session.run(
-        `
-        MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
-        RETURN DISTINCT direct.name AS name, direct.version AS version
-        ORDER BY direct.name
-        LIMIT 20
-        `,
-        { packageName },
+      // STEP 1: Try to find SBOM first (by package ID or package name)
+      if (packageId || packageName) {
+        let sbomResult;
+        if (packageId) {
+          // Try to find SBOM by package ID
+          sbomResult = await session.run(
+            `
+            MATCH (s:SBOM {id: $packageId})
+            RETURN s.id AS sbomId
+            LIMIT 1
+            `,
+            { packageId }
+          );
+        }
+        
+        // If not found by ID, try by package name and version (if provided)
+        if ((!sbomResult || sbomResult.records.length === 0) && packageName) {
+          if (version) {
+            // Try to find SBOM by package name and version
+            sbomResult = await session.run(
+              `
+              MATCH (s:SBOM {package_name: $packageName, version: $version})
+              RETURN s.id AS sbomId
+              ORDER BY s.created_at DESC
+              LIMIT 1
+              `,
+              { packageName, version }
+            );
+          }
+          
+          // If still not found, try by package name only
+          if ((!sbomResult || sbomResult.records.length === 0)) {
+            sbomResult = await session.run(
+              `
+              MATCH (s:SBOM {package_name: $packageName})
+              RETURN s.id AS sbomId
+              ORDER BY s.created_at DESC
+              LIMIT 1
+              `,
+              { packageName }
+            );
+          }
+        }
+
+        // If SBOM found, query dependencies from SBOM
+        if (sbomResult && sbomResult.records.length > 0) {
+          const sbomId = sbomResult.records[0].get('sbomId');
+          console.log(`Found SBOM ${sbomId} for package ${packageName || packageId}, querying from SBOM`);
+          
+          // Query dependencies from SBOM structure
+          // Find the main package in the SBOM, then get its direct dependencies
+          // The main package should match the package name or be linked via db_package_id
+          let directDepsResult;
+          if (packageId) {
+            // Try to find by db_package_id first (more specific)
+            // Only get DIRECT dependencies (one hop, no transitive)
+            // Use a pattern that explicitly excludes any path through intermediate nodes
+            const versionCondition = version ? 'AND main.version = $version' : '';
+            directDepsResult = await session.run(
+              `
+              MATCH (s:SBOM {id: $sbomId})<-[:BELONGS_TO]-(main:Package)
+              WHERE main.db_package_id = $packageId
+              ${versionCondition}
+              WITH main, s
+              MATCH (main)-[:DEPENDS_ON]->(direct:Package)
+              WHERE (direct)-[:BELONGS_TO]->(s)
+              AND NOT (main)-[:DEPENDS_ON*2..]->(direct)
+              RETURN DISTINCT direct.name AS name, direct.version AS version
+              `,
+              version ? { sbomId, packageId, version } : { sbomId, packageId }
+            );
+          }
+          
+          // If not found by packageId or packageId not available, try by name and version
+          // Only get DIRECT dependencies (one hop, no transitive)
+          // Use a pattern that explicitly excludes any path through intermediate nodes
+          if ((!directDepsResult || directDepsResult.records.length === 0) && packageName) {
+            const versionCondition = version ? 'AND main.version = $version' : '';
+            directDepsResult = await session.run(
+              `
+              MATCH (s:SBOM {id: $sbomId})<-[:BELONGS_TO]-(main:Package)
+              WHERE main.name = $packageName
+              ${versionCondition}
+              WITH main, s
+              MATCH (main)-[:DEPENDS_ON]->(direct:Package)
+              WHERE (direct)-[:BELONGS_TO]->(s)
+              AND NOT (main)-[:DEPENDS_ON*2..]->(direct)
+              RETURN DISTINCT direct.name AS name, direct.version AS version
+              `,
+              version ? { sbomId, packageName, version } : { sbomId, packageName }
+            );
+          }
+
+          if (directDepsResult.records.length > 0) {
+            const directDependencies: Array<{
+              id: string;
+              label: string;
+              version?: string;
+              riskScore: number;
+              children: Array<{ id: string; label: string; version?: string; riskScore: number }>;
+            }> = [];
+
+            for (const record of directDepsResult.records) {
+              const depName = record.get('name');
+              const depVersion = record.get('version');
+
+              // Skip if query doesn't match (when scope is 'direct')
+              if (query && scope === 'direct' && !depName.toLowerCase().includes(query)) {
+                continue;
+              }
+
+              // Get transitive dependencies for this direct dependency from SBOM
+              const transitiveResult = await session.run(
+                `
+                MATCH (s:SBOM {id: $sbomId})<-[:BELONGS_TO]-(direct:Package {name: $depName})
+                WITH direct, s
+                MATCH (direct)-[:DEPENDS_ON*1..]->(transitive:Package)
+                WHERE (transitive)-[:BELONGS_TO]->(s)
+                RETURN DISTINCT transitive.name AS name, transitive.version AS version
+                ORDER BY transitive.name
+                LIMIT 10
+                `,
+                { depName, sbomId }
+              );
+
+              const children: Array<{ id: string; label: string; version?: string; riskScore: number }> = [];
+
+              for (const transRecord of transitiveResult.records) {
+                const transName = transRecord.get('name');
+                const transVersion = transRecord.get('version');
+
+                // Apply query filter for transitive dependencies when scope is 'all'
+                if (query && scope === 'all' && !transName.toLowerCase().includes(query)) {
+                  continue;
+                }
+
+                // Get risk score from database
+                const riskScore = await this.calculatePackageRiskScore(transName);
+
+                // Apply risk filter
+                if (this.matchesRiskFilter(riskScore, riskFilter)) {
+                  children.push({
+                    id: transName,
+                    label: transName,
+                    version: transVersion || undefined,
+                    riskScore,
+                  });
+                }
+              }
+
+              // Get risk score for direct dependency from database
+              const directRiskScore = await this.calculatePackageRiskScore(depName);
+
+              // Apply risk filter to direct dependency
+              if (this.matchesRiskFilter(directRiskScore, riskFilter)) {
+                // Sort children by risk score and limit
+                const sortedChildren = children
+                  .sort((a, b) => b.riskScore - a.riskScore)
+                  .slice(0, 6);
+
+                directDependencies.push({
+                  id: depName,
+                  label: depName,
+                  version: depVersion || undefined,
+                  riskScore: directRiskScore,
+                  children: sortedChildren,
+                });
+              }
+            }
+
+            // Sort by risk score and limit to top 6
+            return {
+              directDependencies: directDependencies
+                .sort((a, b) => b.riskScore - a.riskScore)
+                .slice(0, 6),
+            };
+          }
+        }
+      }
+
+      // STEP 2: Fallback to regular Package dependencies if no SBOM found
+      console.log(`No SBOM found for package ${packageName || packageIdOrName}, falling back to Package dependencies`);
+      
+      if (!packageName) {
+        packageName = packageIdOrName;
+      }
+
+      // Query Memgraph for DIRECT dependencies only (one hop, no transitive)
+      // Use a pattern that explicitly excludes any path through intermediate nodes
+      // Filter by version if provided
+      const directDepsResult = await session.run(
+        version
+          ? `
+          MATCH (p:Package {name: $packageName, version: $version})-[:DEPENDS_ON]->(direct:Package)
+          WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+          RETURN DISTINCT direct.name AS name, direct.version AS version
+          ORDER BY direct.name
+          LIMIT 20
+          `
+          : `
+          MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
+          WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+          RETURN DISTINCT direct.name AS name, direct.version AS version
+          ORDER BY direct.name
+          LIMIT 20
+          `,
+        version ? { packageName, version } : { packageName },
       );
 
       const directDependencies: Array<{
         id: string;
         label: string;
+        version?: string;
         riskScore: number;
-        children: Array<{ id: string; label: string; riskScore: number }>;
+        children: Array<{ id: string; label: string; version?: string; riskScore: number }>;
       }> = [];
 
       for (const record of directDepsResult.records) {
@@ -240,7 +502,7 @@ export class SbomMemgraph {
         }
 
         // Get transitive dependencies for this direct dependency
-        const transitiveResult = await this.session.run(
+        const transitiveResult = await session.run(
           `
           MATCH (direct:Package {name: $depName})-[:DEPENDS_ON*1..]->(transitive:Package)
           RETURN DISTINCT transitive.name AS name, transitive.version AS version
@@ -250,7 +512,7 @@ export class SbomMemgraph {
           { depName },
         );
 
-        const children: Array<{ id: string; label: string; riskScore: number }> = [];
+        const children: Array<{ id: string; label: string; version?: string; riskScore: number }> = [];
 
         for (const transRecord of transitiveResult.records) {
           const transName = transRecord.get('name');
@@ -261,21 +523,22 @@ export class SbomMemgraph {
             continue;
           }
 
-          // Calculate risk score (placeholder - you can enhance this with actual risk calculation)
-          const riskScore = this.calculatePackageRiskScore(transName);
+          // Get risk score from database
+          const riskScore = await this.calculatePackageRiskScore(transName);
 
           // Apply risk filter
           if (this.matchesRiskFilter(riskScore, riskFilter)) {
             children.push({
               id: transName,
               label: transName,
+              version: transVersion || undefined,
               riskScore,
             });
           }
         }
 
-        // Calculate risk score for direct dependency
-        const directRiskScore = this.calculatePackageRiskScore(depName);
+        // Get risk score for direct dependency from database
+        const directRiskScore = await this.calculatePackageRiskScore(depName);
 
         // Apply risk filter to direct dependency
         if (this.matchesRiskFilter(directRiskScore, riskFilter)) {
@@ -287,6 +550,7 @@ export class SbomMemgraph {
           directDependencies.push({
             id: depName,
             label: depName,
+            version: depVersion || undefined,
             riskScore: directRiskScore,
             children: sortedChildren,
           });
@@ -300,33 +564,43 @@ export class SbomMemgraph {
           .slice(0, 6),
       };
     } catch (error) {
-      console.error(`Error getting filtered dependency graph for package ${packageId}:`, error);
+      console.error(`Error getting filtered dependency graph for package ${packageIdOrName}:`, error);
       return { directDependencies: [] };
+    } finally {
+      await session.close();
     }
   }
 
   /**
-   * Calculate risk score for a package (placeholder - enhance with actual risk calculation)
+   * Get risk score for a package from the database
+   * Inverts total_score (health score) to risk score (higher = worse)
    */
-  private calculatePackageRiskScore(packageName: string): number {
-    // Placeholder: You can enhance this with actual risk calculation based on:
-    // - Vulnerability count
-    // - License compliance
-    // - Maintenance status
-    // - Activity score
-    // For now, return a random score between 40-90 for demonstration
-    const hash = packageName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return 40 + (hash % 50);
+  private async calculatePackageRiskScore(packageName: string): Promise<number> {
+    // Fetch risk score from database (already inverted if from total_score)
+    const riskScore = await this.sbomRepo.getPackageRiskScore(packageName);
+    
+    // If risk score exists in database, use it
+    if (riskScore !== null && riskScore !== undefined) {
+      return riskScore;
+    }
+    
+    // Fallback: return a default score if not in database
+    // This should rarely happen, but provides a default for packages not yet analyzed
+    return 50;
   }
 
   /**
    * Check if risk score matches the risk filter
+   * Risk ranges:
+   * - low: 0-10
+   * - medium: 10-30
+   * - high: 30+
    */
   private matchesRiskFilter(riskScore: number, filter: 'all' | 'low' | 'medium' | 'high'): boolean {
     if (filter === 'all') return true;
-    if (filter === 'high') return riskScore >= 75;
-    if (filter === 'medium') return riskScore >= 60 && riskScore < 75;
-    if (filter === 'low') return riskScore < 60;
+    if (filter === 'high') return riskScore >= 30;
+    if (filter === 'medium') return riskScore >= 10 && riskScore < 30;
+    if (filter === 'low') return riskScore >= 0 && riskScore < 10;
     return true;
   }
 
@@ -335,8 +609,9 @@ export class SbomMemgraph {
    * Returns nodes and edges for visualization
    */
   async getPackageDependencyGraph(packageId: string) {
+    const session = this.driver.session();
     try {
-      // First, get the package name from PostgreSQL
+      // First, get the package name from PostgreSQL (using new Packages table)
       const packageInfo = await this.sbomRepo.getPackageById(packageId);
       if (!packageInfo) {
         return { error: 'Package not found' };
@@ -345,7 +620,7 @@ export class SbomMemgraph {
       const packageName = packageInfo.package_name;
 
       // Query Memgraph for the dependency graph
-      const result = await this.session.run(
+      const result = await session.run(
         `
         MATCH (p:Package {name: $packageName})
         OPTIONAL MATCH path = (p)-[:DEPENDS_ON*0..]->(dep:Package)
@@ -412,6 +687,8 @@ export class SbomMemgraph {
     } catch (error) {
       console.error(`Error getting dependency graph for package ${packageId}:`, error);
       return { error: 'Failed to get dependency graph' };
+    } finally {
+      await session.close();
     }
   }
 
@@ -423,6 +700,7 @@ export class SbomMemgraph {
     packageName: string,
     version?: string,
   ) {
+    const session = this.driver.session();
     try {
       const query = version
         ? `
@@ -444,7 +722,7 @@ export class SbomMemgraph {
         ? { packageName, version }
         : { packageName };
 
-      const result = await this.session.run(query, params);
+      const result = await session.run(query, params);
 
       const nodes = new Map<string, any>();
       const edges: Array<{ from: string; to: string }> = [];
@@ -506,7 +784,58 @@ export class SbomMemgraph {
         error,
       );
       return { error: 'Failed to get dependency graph' };
+    } finally {
+      await session.close();
     }
+  }
+
+
+  async getRepoUrlFromNpm(packageName: string): Promise<string | null> {
+    try {
+      const res = await fetch(`https://registry.npmjs.org/${packageName}`);
+
+      if (!res.ok) {
+        console.warn(`Failed to fetch metadata for ${packageName}: ${res.status}`);
+        return null;
+      }
+
+      const data = await res.json();
+      const repoUrl = data?.repository?.url;
+
+      if (!repoUrl) return null;
+
+      return this.normalizeRepoUrl(repoUrl);
+    } catch (err) {
+      // console.error(`Error fetching metadata for ${packageName}`);
+      return null;
+    }
+  }
+
+  /** Clean / normalize npm repo URL */
+  private normalizeRepoUrl(repo: string): string | null {
+    if (!repo) return null;
+
+    let url = repo.trim();
+
+    // Remove "git+"
+    url = url.replace(/^git\+/, '');
+
+    // Convert "git://" → "https://"
+    url = url.replace(/^git:\/\//, 'https://');
+
+    // Convert "git@github.com:" → "https://github.com/"
+    url = url.replace(/^git@([^:]+):/, 'https://$1/');
+
+    // Remove trailing ".git"
+    url = url.replace(/\.git$/, '');
+
+    // Remove any trailing slashes
+    url = url.replace(/\/+$/, '');
+
+    // Fix double slashes (but preserve https://)
+    url = url.replace(/([^:]\/)\/+/g, '$1');
+
+    return url;
   }
 
   // --- Import CycloneDX SBOM (components + dependencies) into Memgraph ---
@@ -517,14 +846,6 @@ export class SbomMemgraph {
     const projectId = sbomJson.metadata?.properties?.find(
       (prop: any) => prop.name === 'deply:project:id'
     )?.value || sbomId; // Fallback to sbomId if projectId not found
-    
-    // Extract repoUrl from component's externalReferences if available
-    const getRepoUrlFromComponent = (c: any): string | undefined => {
-      const vcsRef = c.externalReferences?.find(
-        (ref: any) => ref.type === 'vcs' || ref.type === 'repository'
-      );
-      return vcsRef?.url;
-    };
     
     // Batch create all components at once
     const components = sbomJson.components || [];
@@ -539,7 +860,7 @@ export class SbomMemgraph {
         const purlName = this.extractNameFromPurl(purl);
         const finalPackageName = purlName || packageName;
         const license = c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null;
-        const repoUrl = getRepoUrlFromComponent(c);
+        const repoUrl = await this.getRepoUrlFromNpm(finalPackageName);
         
         // Check if package already exists (read-only operation)
         let existingPackage = null;
@@ -548,30 +869,31 @@ export class SbomMemgraph {
         } catch (error) {
           console.error(`Error checking for existing package ${finalPackageName}:`, error);
         }
+        this.sbomRepo.upsertPackage(finalPackageName, repoUrl, license);
         
         // Queue package setup through dependencies module instead of direct database call
-        queuePromises.push(
-          this.dependencyQueueService
-            .queueFastSetup({
-              packageId: existingPackage?.id, // Use existing package ID if available
-              packageName: finalPackageName,
-              repoUrl: repoUrl,
-              projectId: projectId,
-            })
-            .then(() => {
-              console.log(
-                `✅ Queued fast setup for package: ${finalPackageName}${
-                  existingPackage ? ' (existing)' : ' (new)'
-                }`,
-              );
-            })
-            .catch((error) => {
-              console.error(
-                `❌ Error queueing fast setup for package ${finalPackageName}:`,
-                error,
-              );
-            }),
-        );
+        // await queuePromises.push(
+        //   this.dependencyQueueService
+        //     .queueFastSetup({
+        //       packageId: existingPackage?.id, // Use existing package ID if available
+        //       packageName: finalPackageName,
+        //       repoUrl: repoUrl,
+        //       projectId: projectId,
+        //     })
+        //     .then(() => {
+        //       console.log(
+        //         `✅ Queued fast setup for package: ${finalPackageName}${
+        //           existingPackage ? ' (existing)' : ' (new)'
+        //         }`,
+        //       );
+        //     })
+        //     .catch((error) => {
+        //       console.error(
+        //         `❌ Error queueing fast setup for package ${finalPackageName}:`,
+        //         error,
+        //       );
+        //     }),
+        // );
         
         // Use existing package ID if available, otherwise null (will be populated by fast-setup processor)
         const dbPackageId = existingPackage?.id || null;
@@ -594,8 +916,9 @@ export class SbomMemgraph {
       // Ensure all queue jobs have been dispatched asynchronously
       await Promise.all(queuePromises);
 
+      const session = this.driver.session();
       try {
-        await this.session.run(
+        await session.run(
           `
           UNWIND $components AS comp
           MERGE (p:Package {purl: comp.purl})
@@ -616,6 +939,8 @@ export class SbomMemgraph {
         console.log(`Batch created ${components.length} package nodes with PostgreSQL links`);
       } catch (error) {
         console.error(`Error batch creating package nodes:`, error);
+      } finally {
+        await session.close();
       }
     }
 
@@ -629,8 +954,9 @@ export class SbomMemgraph {
     }
 
     if (dependencies.length > 0) {
+      const session = this.driver.session();
       try {
-        await this.session.run(
+        await session.run(
           `
           UNWIND $dependencies AS dep
           MATCH (a:Package {purl: dep.from}), (b:Package {purl: dep.to})
@@ -641,6 +967,8 @@ export class SbomMemgraph {
         console.log(`Batch created ${dependencies.length} dependency relationships`);
       } catch (error) {
         console.error(`Error batch creating dependencies:`, error);
+      } finally {
+        await session.close();
       }
     }
     
@@ -648,12 +976,13 @@ export class SbomMemgraph {
   }
   // --- Get SBOM data from Memgraph and convert to CycloneDX format ---
   async getCompDeps(watchlistIds) {
+    const session = this.driver.session();
     try {
       // Normalize to array
       const ids = Array.isArray(watchlistIds) ? watchlistIds : [watchlistIds];
   
       // Query all SBOMs at once
-      const result = await this.session.run(
+      const result = await session.run(
         `
         MATCH (s:SBOM)
         WHERE s.id IN $watchlistIds
@@ -735,6 +1064,8 @@ export class SbomMemgraph {
     } catch (error) {
       console.error(`Error getting SBOMs from Memgraph:`, error);
       return { components: [], dependencies: [] };
+    } finally {
+      await session.close();
     }
   }
   

@@ -94,15 +94,25 @@ export class SbomController {
   // }
 
   @Post('generate-SBOM/:package_id')
-  async genSbom(@Param('package_id') package_id: string) {
-    // Generate SBOM synchronously
-    const sbomJson = await this.sbomBuilderService.addSbom(package_id);
+  async genSbom(
+    @Param('package_id') package_id: string,
+    @Query('version') version?: string,
+  ) {
+    // Generate SBOM synchronously with optional version
+    const result = await this.sbomBuilderService.addSbom(package_id, version);
     
-    // Store in Memgraph
-    await this.sbomMemgraph.createSbom(package_id, 'package', 'cdxgen', sbomJson.metadata);
-    await this.sbomMemgraph.importCycloneDxSbom(sbomJson, package_id);
+    // Store in Memgraph with package name and version
+    await this.sbomMemgraph.createSbom(
+      package_id,
+      'package',
+      'cdxgen',
+      result.sbom.metadata,
+      result.packageName,
+      result.version,
+    );
+    await this.sbomMemgraph.importCycloneDxSbom(result.sbom, package_id);
     
-    return sbomJson;
+    return result.sbom;
   }
 
   @Post('sbom/create-custom')
@@ -209,8 +219,9 @@ export class SbomController {
     @Query('query') query?: string,
     @Query('scope') scope?: 'direct' | 'all',
     @Query('risk') risk?: 'all' | 'low' | 'medium' | 'high',
+    @Query('version') version?: string,
   ) {
-    return this.sbomMemgraph.getFilteredPackageDependencyGraph(packageId, {
+    return this.sbomMemgraph.getFilteredPackageDependencyGraph(packageId, version, {
       query,
       scope,
       risk,

@@ -29,6 +29,6 @@ import { DependenciesModule } from '../dependencies/dependencies.module';
     DependencyOptimizerService,
   ],
   controllers: [SbomController],
-  exports: [SbomBuilderService, SbomQueryService, SbomQueueService],
+  exports: [SbomQueueService, SbomBuilderService, SbomQueryService],
 })
 export class SbomModule {}

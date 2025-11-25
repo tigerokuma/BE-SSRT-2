@@ -43,25 +43,52 @@ export class DependencyOptimizerService {
    * Given a list of package names, simulate upgrades and measure
    * the change in total transitive dependencies.
    */
-  async simulateUpgradeImpact(packageNames: string[]) {
+  async simulateUpgradeImpact(sbomIds: string[]) {
     const session = this.driver.session();
 
-  // Step 1: get all versions + their transitive dependencies
+  // Step 1: get all versions + their transitive dependencies from SBOMs
   const pkgDepsMap: Record<string, { version: string, deps: string[] }[]> = {};
+  const sbomToPackageMap: Record<string, string> = {}; // Map SBOM ID to package name
 
-  for (const name of packageNames) {
+  for (const sbomId of sbomIds) {
+    // Query SBOM to get main package and its dependencies
     const q = `
-      MATCH (p:Package {name: $name})
-      OPTIONAL MATCH (p)-[:DEPENDS_ON*0..]->(dep:Package)
-      WITH p, collect(DISTINCT dep.name + '@' + dep.version) AS deps
-      RETURN p.version AS version, deps
-      ORDER BY p.version DESC
+      MATCH (s:SBOM {id: $sbomId})<-[:BELONGS_TO]-(main:Package)
+      WITH s, main
+      ORDER BY main.version DESC
+      LIMIT 1
+      WITH s, main
+      OPTIONAL MATCH (main)-[:DEPENDS_ON*0..]->(dep:Package)
+      WHERE (dep)-[:BELONGS_TO]->(s)
+      WITH main, collect(DISTINCT dep.name + '@' + dep.version) AS deps
+      RETURN main.name AS name, main.version AS version, deps
+      ORDER BY main.version DESC
     `;
-    const res = await session.run(q, { name });
-    pkgDepsMap[name] = res.records.map(r => ({
-      version: r.get('version'),
-      deps: r.get('deps'),
-    }));
+    const res = await session.run(q, { sbomId });
+    
+    if (res.records.length > 0) {
+      const record = res.records[0];
+      const packageName = record.get('name');
+      const version = record.get('version');
+      const deps = record.get('deps') || [];
+      
+      if (!pkgDepsMap[packageName]) {
+        pkgDepsMap[packageName] = [];
+      }
+      pkgDepsMap[packageName].push({
+        version: version,
+        deps: deps,
+      });
+      sbomToPackageMap[sbomId] = packageName;
+    }
+  }
+  
+  // Extract unique package names from SBOMs
+  const packageNames = Array.from(new Set(Object.values(sbomToPackageMap)));
+  
+  if (packageNames.length === 0) {
+    await session.close();
+    return { error: 'No packages found in SBOMs' };
   }
   
   // Step 2: generate all combinations of main package versions
@@ -85,7 +112,7 @@ export class DependencyOptimizerService {
   const allCombinations = cartesian(versionsList);
   // 3️⃣ Evaluate conflicts for each combination
   const scored = allCombinations.map((combo) => {
-    const allDeps = combo.flatMap((v) => v.deps);
+    const allDeps = combo.flatMap((v: { version: string; deps: string[] }) => v.deps);
     const versionMap: Record<string, Set<string>> = {};
 
     for (const dep of allDeps) {
@@ -97,7 +124,7 @@ export class DependencyOptimizerService {
     const conflicts = Object.values(versionMap).filter((s) => s.size > 1).length;
 
     return {
-      combo: combo.map((v, i) => ({
+      combo: combo.map((v: { version: string; deps: string[] }, i: number) => ({
         name: packageNames[i],
         version: v.version,
       })),
@@ -133,20 +160,20 @@ export class DependencyOptimizerService {
   }
 
   /**
-   * Given a project_id, get upgrade recommendations for packages in that project.
+   * Given a project_id, get upgrade recommendations for SBOMs in that project.
    */
   async getUpgradeRecommendations(projectId: string) {
-    // Get packages from project
+    // Get package IDs from project (these correspond to SBOM IDs in Memgraph)
     let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
     let projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
     projectDeps = [...projectDeps, ...projectWatchlist];
     
-    const packageNames = projectDeps.map((dep) => dep.package_name);
-    if (!packageNames.length) {
-      return { error: 'No packages found for this project' };
+    const sbomIds = projectDeps.map((dep) => dep.package_id).filter(Boolean);
+    if (!sbomIds.length) {
+      return { error: 'No SBOMs found for this project' };
     }
     
-    const all = await this.simulateUpgradeImpact(packageNames);
+    const all = await this.simulateUpgradeImpact(sbomIds);
     return all;
   }
 
@@ -213,6 +240,29 @@ export class DependencyOptimizerService {
         });
       }
 
+      // Get packages that depend on each anchor package (from SBOMs)
+      // Query all SBOMs and find which packages depend on the anchor packages
+      const dependentsQuery = await session.run(
+        `
+        MATCH (s:SBOM)
+        MATCH (anchor:Package)-[:BELONGS_TO]->(s)
+        WHERE anchor.db_package_id IN $packageIds
+        WITH anchor, s
+        MATCH (dependent:Package)-[:DEPENDS_ON]->(anchor)
+        WHERE (dependent)-[:BELONGS_TO]->(s)
+        RETURN anchor.db_package_id AS packageId,
+               collect(DISTINCT dependent.name) AS dependents
+        `,
+        { packageIds },
+      );
+
+      const dependentsMap = new Map<string, string[]>();
+      for (const record of dependentsQuery.records) {
+        const pkgId = record.get('packageId');
+        const dependents = (record.get('dependents') || []).filter(Boolean);
+        dependentsMap.set(pkgId, dependents);
+      }
+
       const stats = packageIds.map((packageId) => {
         const pkgMeta = uniquePackages.get(packageId);
         const info = dependencySets.get(packageId) ?? { deps: new Set(), dependencyCount: 0 };
@@ -240,6 +290,7 @@ export class DependencyOptimizerService {
           sharedDependencyCount: shared,
           sharedRatio: Number(ratio.toFixed(3)),
           isLowSimilarity,
+          dependents: dependentsMap.get(packageId) || [],
         };
       });
 
@@ -391,8 +442,6 @@ export class DependencyOptimizerService {
     oldVersion: string,
     newVersion: string,
   ) {
-    const session = this.driver.session();
-
     try {
       // Get project name
       const project = await this.prisma.project.findUnique({
@@ -410,34 +459,44 @@ export class DependencyOptimizerService {
         (name) => name.toLowerCase() !== packageName.toLowerCase(),
       );
 
-      // Helper to get dependencies for a version
+      // Helper to get dependencies for a version (creates its own session to avoid transaction conflicts)
       const getDependencies = async (version: string) => {
-        const query = `
-          MATCH (p:Package {name: $packageName, version: $version})
-          OPTIONAL MATCH (p)-[:DEPENDS_ON*1..]->(dep:Package)
-          WITH collect(DISTINCT dep.name) AS deps
-          RETURN deps
-        `;
-        const result = await session.run(query, { packageName, version });
-        if (result.records.length === 0) return [];
-        return result.records[0].get('deps').filter(Boolean);
+        const session = this.driver.session();
+        try {
+          const query = `
+            MATCH (p:Package {name: $packageName, version: $version})
+            OPTIONAL MATCH (p)-[:DEPENDS_ON]->(dep:Package)
+            WITH collect(DISTINCT dep.name) AS deps
+            RETURN deps
+          `;
+          const result = await session.run(query, { packageName, version });
+          if (result.records.length === 0) return [];
+          return result.records[0].get('deps').filter(Boolean);
+        } finally {
+          await session.close();
+        }
       };
 
-      // Get dependencies of other project packages
+      // Get dependencies of other project packages (creates its own session to avoid transaction conflicts)
       const getOtherProjectDependencies = async () => {
         if (otherProjectPackages.length === 0) return [];
-        const query = `
-          MATCH (p:Package)
-          WHERE p.name IN $packageNames
-          OPTIONAL MATCH (p)-[:DEPENDS_ON*1..]->(dep:Package)
-          WITH collect(DISTINCT dep.name) AS deps
-          RETURN deps
-        `;
-        const result = await session.run(query, {
-          packageNames: otherProjectPackages,
-        });
-        if (result.records.length === 0) return [];
-        return result.records[0].get('deps').filter(Boolean);
+        const session = this.driver.session();
+        try {
+          const query = `
+            MATCH (p:Package)
+            WHERE p.name IN $packageNames
+            OPTIONAL MATCH (p)-[:DEPENDS_ON]->(dep:Package)
+            WITH collect(DISTINCT dep.name) AS deps
+            RETURN deps
+          `;
+          const result = await session.run(query, {
+            packageNames: otherProjectPackages,
+          });
+          if (result.records.length === 0) return [];
+          return result.records[0].get('deps').filter(Boolean);
+        } finally {
+          await session.close();
+        }
       };
 
       // Get dependencies for old and new versions
@@ -497,8 +556,6 @@ export class DependencyOptimizerService {
         changeSeparate: 0,
         changeShared: 0,
       };
-    } finally {
-      await session.close();
     }
   }
 
@@ -584,12 +641,19 @@ export class DependencyOptimizerService {
     // Format low similarity packages
     const formattedLowSimilarity = lowSimilarityPackages.map((pkg: any) => {
       const pkgName = pkg.packageName || pkg.packageId || 'unknown';
+      const dependents = pkg.dependents || [];
+      // Include the anchor package and packages that depend on it
+      const allDependencies = [pkgName, ...dependents];
+      
       return {
         packageName: pkgName,
         title: `Review high-risk anchor package: ${pkgName}`,
-        description: `This package has low similarity with the rest of your dependency tree (${pkg.sharedDependencyCount || 0} shared dependencies, ${pkg.dependencyCount || 0} total). Consider reviewing or isolating this package.`,
+        description: dependents.length > 0
+          ? `This package is an anchor for ${dependents.length} package${dependents.length > 1 ? 's' : ''} (${dependents.slice(0, 3).join(', ')}${dependents.length > 3 ? '...' : ''}) and has low similarity with the rest of your dependency tree (${pkg.sharedDependencyCount || 0} shared dependencies, ${pkg.dependencyCount || 0} total). Consider reviewing or isolating this package.`
+          : `This package has low similarity with the rest of your dependency tree (${pkg.sharedDependencyCount || 0} shared dependencies, ${pkg.dependencyCount || 0} total). Consider reviewing or isolating this package.`,
         impact: 'high' as const,
-        dependencies: [pkgName],
+        dependencies: allDependencies,
+        dependents: dependents,
         sharedDependencyCount: pkg.sharedDependencyCount || 0,
         dependencyCount: pkg.dependencyCount || 0,
       };

@@ -7,6 +7,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as Docker from 'dockerode';
 import * as os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 @Injectable()
 export class SbomBuilderService {
@@ -16,7 +20,7 @@ export class SbomBuilderService {
   private readonly docker = new Docker.default();
 
   // Clone Git repo into a temp directory
-  private async cloneRepo(gitUrl: string): Promise<string> {
+  private async cloneRepo(gitUrl: string, version?: string): Promise<string> {
     const targetDir = path.join(os.tmpdir(), 'sbom-repos');
     const uniqueDir = path.join(targetDir, randomUUID());
 
@@ -27,6 +31,46 @@ export class SbomBuilderService {
       console.log(`Cloning ${gitUrl} into ${clonePath}...`);
       await git.clone(gitUrl, clonePath);
       console.log('Clone complete.');
+      
+      // Check out specific version if provided
+      if (version) {
+        console.log(`Checking out version: ${version}`);
+        const repoGit = simpleGit(clonePath);
+        try {
+          // Fetch all tags and branches first
+          await repoGit.fetch(['--all', '--tags']);
+          
+          // Try to checkout as a tag first (most common for versions)
+          try {
+            await repoGit.checkout(`tags/${version}`);
+            console.log(`Successfully checked out tag: ${version}`);
+          } catch (tagError) {
+            // If tag fails, try as a branch
+            try {
+              await repoGit.checkout(version);
+              console.log(`Successfully checked out branch: ${version}`);
+            } catch (branchError) {
+              // If branch fails, try as a commit hash
+              try {
+                await repoGit.checkout(version);
+                console.log(`Successfully checked out commit: ${version}`);
+              } catch (commitError) {
+                console.warn(`Could not checkout version ${version}, using default branch. Error: ${commitError.message}`);
+                // Continue with default branch - don't throw error
+              }
+            }
+          }
+        } catch (fetchError) {
+          // If fetch fails, still try to checkout (might be a local branch or commit)
+          try {
+            await repoGit.checkout(version);
+            console.log(`Successfully checked out: ${version}`);
+          } catch (checkoutError) {
+            console.warn(`Could not checkout version ${version}, using default branch. Error: ${checkoutError.message}`);
+            // Continue with default branch - don't throw error
+          }
+        }
+      }
     } catch (err) {
       console.error('Error cloning repo:', err);
       throw err;
@@ -227,7 +271,14 @@ export class SbomBuilderService {
   }
 
 
-  async addSbom(packageId: string) {
+  async addSbom(packageId: string, version?: string) {
+    const packageInfo = await this.sbomRepo.getPackageById(packageId);
+    if (!packageInfo) {
+      throw new Error(`Package with ID ${packageId} not found`);
+    }
+
+    const packageName = packageInfo.package_name;
+    console.log(`Package Name: ${packageName}`);
     const gitUrl = (await this.sbomRepo.getUrl(packageId))?.repo_url;
     const repoPath = await this.cloneRepo(gitUrl!);
     await this.cleanupRepo(repoPath);
@@ -240,7 +291,11 @@ export class SbomBuilderService {
     await this.sbomRepo.upsertPackageSbom(createSbomDto);
     await this.cleanupTempFolder(repoPath);
 
-    return jsonData;
+    return {
+      sbom: jsonData,
+      packageName,
+      version,
+    };
   }
 
   private async writeSbomsToTempFiles(sboms: Array<{ sbom: any }>) {

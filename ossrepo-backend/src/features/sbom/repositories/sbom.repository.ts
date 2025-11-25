@@ -132,6 +132,13 @@ export class SbomRepository {
       select: { sbom: true, updated_at: true },
     });
   }
+  async upsertPackage(packageName: string, repoUrl: string, license: string) {
+    return await this.prisma.packages.upsert({
+      where: { name: packageName },
+      update: { repo_url: repoUrl, license: license },
+      create: { name: packageName, repo_url: repoUrl, license: license },
+    });
+  }
 
   async getProjectSbom(id: string) {
     return await this.prisma.userWatchlistSbom.findUnique({
@@ -296,14 +303,82 @@ export class SbomRepository {
     }
   }
 
+  async getPackageRiskScore(packageName: string): Promise<number | null> {
+    try {
+      // Try the new Packages table first (using total_score)
+      const newPackage = await this.prisma.packages.findUnique({
+        where: { name: packageName },
+        select: { total_score: true },
+      });
+      
+      if (newPackage?.total_score !== null && newPackage?.total_score !== undefined) {
+        // Invert total_score (health score) to risk score
+        // Health score: higher is better (0-100)
+        // Risk score: higher is worse (0-100)
+        return 100 - newPackage.total_score;
+      }
+      
+      // Fallback to old Package table (using risk_score)
+      const oldPackage = await this.prisma.package.findUnique({
+        where: { package_name: packageName },
+        select: { risk_score: true },
+      });
+      
+      if (oldPackage?.risk_score !== null && oldPackage?.risk_score !== undefined) {
+        return oldPackage.risk_score;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`Error fetching risk score for package ${packageName}:`, error);
+      return null;
+    }
+  }
+
+  async getPackageTotalScore(packageName: string): Promise<number | null> {
+    try {
+      // Get total_score from the new Packages table
+      const newPackage = await this.prisma.packages.findUnique({
+        where: { name: packageName },
+        select: { total_score: true },
+      });
+      
+      if (newPackage?.total_score !== null && newPackage?.total_score !== undefined) {
+        return newPackage.total_score;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`Error fetching total score for package ${packageName}:`, error);
+      return null;
+    }
+  }
+
   async getPackageById(packageId: string) {
-    const packageEntry = await this.prisma.package.findUnique({
+    // Try the new Packages table first (using id)
+    const packageEntry = await this.prisma.packages.findUnique({
+      where: { id: packageId },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+    
+    if (packageEntry) {
+      return {
+        package_id: packageEntry.id,
+        package_name: packageEntry.name,
+      };
+    }
+    
+    // Fallback to old package table (using package_id)
+    const oldPackageEntry = await this.prisma.package.findUnique({
       where: { package_id: packageId },
       select: {
         package_id: true,
         package_name: true,
       },
     });
-    return packageEntry;
+    return oldPackageEntry;
   }
 }
