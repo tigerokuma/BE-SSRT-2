@@ -26,9 +26,25 @@ export class DependencyQueueService {
     this.logger.log(`🔍 Job name: fast-setup`);
     this.logger.log(`🔍 Job data:`, JSON.stringify(data, null, 2));
     
+    // Generate unique jobId to prevent duplicates
+    const jobId = `fast-setup-${data.packageName}-${data.projectId}${data.branchDependencyId ? `-${data.branchDependencyId}` : ''}`;
+    
+    // Check if job already exists
+    const existingJob = await this.fastSetupQueue.getJob(jobId);
+    if (existingJob) {
+      const state = await existingJob.getState();
+      if (state === 'active' || state === 'waiting' || state === 'delayed') {
+        this.logger.log(`⚠️ Fast setup job already exists for ${data.packageName}, skipping duplicate`);
+        return existingJob;
+      }
+    }
+    
     const job = await this.fastSetupQueue.add('fast-setup', data, {
+      jobId, // Unique ID to prevent duplicates
       priority: 10, // High priority for fast setup
       delay: 0, // Start immediately
+      removeOnComplete: 100, // Keep last 100 completed jobs for visibility
+      removeOnFail: false, // Keep failed jobs for debugging
     });
 
     this.logger.log(`✅ Fast setup job queued: ${job.id}`);
@@ -49,9 +65,25 @@ export class DependencyQueueService {
   }) {
     this.logger.log(`📦 Queuing full setup for package: ${data.packageName}`);
     
+    // Generate unique jobId to prevent duplicates
+    const jobId = `full-setup-${data.packageId}-${data.projectId}`;
+    
+    // Check if job already exists
+    const existingJob = await this.fullSetupQueue.getJob(jobId);
+    if (existingJob) {
+      const state = await existingJob.getState();
+      if (state === 'active' || state === 'waiting' || state === 'delayed') {
+        this.logger.log(`⚠️ Full setup job already exists for ${data.packageName}, skipping duplicate`);
+        return existingJob;
+      }
+    }
+    
     const job = await this.fullSetupQueue.add('full-setup', data, {
+      jobId, // Unique ID to prevent duplicates
       priority: 5, // Medium priority for full setup
       delay: 5000, // Wait 5 seconds before starting
+      removeOnComplete: 100, // Keep last 100 completed jobs for visibility
+      removeOnFail: false, // Keep failed jobs for debugging
     });
 
     this.logger.log(`✅ Full setup job queued: ${job.id}`);

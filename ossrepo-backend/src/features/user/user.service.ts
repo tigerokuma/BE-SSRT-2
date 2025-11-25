@@ -91,7 +91,7 @@ export class UserService {
 
         if (!github_id) {
             // No GH account linked; return the current local user record unchanged
-            return this.userRepository.getUserByClerkId(user_id);
+            return this.userRepository.getUserByClerkId(clerk_id);
         }
 
         // 3) Try to fetch the stored OAuth access token from Clerk for GitHub
@@ -128,8 +128,8 @@ export class UserService {
         }
 
         // 4) Persist to your local DB
-        // (refresh_token is usually not present for GitHub; store null/undefined if you don’t have one)
-        const updated = await this.userRepository.setGithubFieldsByClerkId(user_id, {
+        // (refresh_token is usually not present for GitHub; store null/undefined if you don't have one)
+        const updated = await this.userRepository.setGithubFieldsByClerkId(clerk_id, {
             github_id,
             github_username,
             access_token: accessToken ?? null,
