@@ -46,10 +46,13 @@ export class GitHubService {
   // ────────────────────────────────────────────────────────────────────────────
 
   async getUserRepositoriesByClerkId(clerk_id: string) {
-    const user = await this.userService.getUserByClerkId(clerk_id);
+    // getUserById now handles both user_id and clerk_id thanks to the OR clause
+    const user = await this.userService.getUserById(clerk_id);
     if (!user) {
-      // choose your behavior: mock, 404, or create
-      throw new Error(`No local user for clerk_id=${clerk_id}`);
+      // User doesn't exist yet - return mock data instead of throwing
+      // This can happen if the frontend calls before user sync completes
+      console.warn(`No local user found for identifier=${clerk_id}, returning mock repositories`);
+      return this.getMockRepositories();
     }
     return this.getUserRepositoriesByUserId(user.user_id);
   }

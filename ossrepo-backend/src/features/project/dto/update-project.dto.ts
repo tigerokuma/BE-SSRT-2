@@ -21,4 +21,7 @@ export class UpdateProjectDto {
 
   @IsOptional()
   health_notifications?: { alerts: boolean; slack: boolean; discord: boolean };
+
+  @IsOptional()
+  anomalies_notifications?: { alerts: boolean; slack: boolean; discord: boolean };
 }

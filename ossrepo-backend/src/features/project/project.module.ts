@@ -3,6 +3,7 @@ import { ProjectController } from './controllers/project.controller';
 import { ProjectService } from './services/project.service';
 import { ProjectRepository } from './repositories/project.repository';
 import { ProjectSetupProcessor } from './processors/project-setup.processor';
+import { PRPackageCheckService } from './services/pr-package-check.service';
 import { PrismaModule } from 'src/common/prisma/prisma.module';
 import { GitHubModule } from 'src/common/github/github.module';
 import { WebhookModule } from 'src/common/webhook/webhook.module';
@@ -10,6 +11,7 @@ import { DependenciesModule } from '../dependencies/dependencies.module';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { ManualProcessorService } from 'src/common/queue/manual-processor.service';
 import {UserModule} from "../user/user.module";
+import { ProjectAlertService } from './services/project-alert.service';
 
 @Module({
   imports: [
@@ -21,7 +23,7 @@ import {UserModule} from "../user/user.module";
     UserModule
   ],
   controllers: [ProjectController],
-  providers: [ProjectService, ProjectRepository, ProjectSetupProcessor, ManualProcessorService],
-  exports: [ProjectService],
+  providers: [ProjectService, ProjectRepository, ProjectSetupProcessor, ManualProcessorService, PRPackageCheckService, ProjectAlertService],
+  exports: [ProjectService, PRPackageCheckService],
 })
 export class ProjectModule {}

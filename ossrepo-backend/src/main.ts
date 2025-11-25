@@ -33,6 +33,8 @@ async function bootstrap() {
     serverAdapter,
   });
 
+  // Mount Bull Board BEFORE global guards so it's accessible without authentication
+  // Note: In production, you may want to add authentication to this route
   app.use('/admin/queues', serverAdapter.getRouter());
 
   // Enable CORS for local development and production
