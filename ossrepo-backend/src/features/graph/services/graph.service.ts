@@ -10,6 +10,7 @@ import {Queue} from 'bull';
 
 @Injectable()
 export class GraphService {
+
     constructor(
         private readonly repo: GraphRepository,
         private readonly graphBuilder: GraphBuilderService,
