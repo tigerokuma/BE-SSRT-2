@@ -2,27 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import neo4j from 'neo4j-driver';
 import { SbomRepository } from '../repositories/sbom.repository';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ConnectionService } from '../../../common/azure/azure.service';
 import axios from 'axios';
-
-const MEMGRAPH_URI = "bolt://localhost:7687";
-const USER = "memgraph";
-const PASSWORD = "memgraph";
 
 @Injectable()
 export class DependencyOptimizerService {
   private readonly logger = new Logger(DependencyOptimizerService.name);
-  private readonly driver;
+  
+  private get driver() {
+    return this.connectionService.getMemgraph();
+  }
 
   constructor(
     private readonly sbomRepo: SbomRepository,
     private readonly prisma: PrismaService,
-  ) {
-    this.driver = neo4j.driver(MEMGRAPH_URI, neo4j.auth.basic(USER, PASSWORD), {
-        maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
-        maxConnectionPoolSize: 50,
-        connectionAcquisitionTimeout: 2 * 60 * 1000, // 2 minutes
-      });
-  }
+    private readonly connectionService: ConnectionService,
+  ) {}
 
   /**
    * Count total unique packages in the graph.

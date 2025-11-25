@@ -9,12 +9,16 @@ import * as Docker from 'dockerode';
 import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { ConnectionService } from '../../../common/azure/azure.service';
 
 const execAsync = promisify(exec);
 
 @Injectable()
 export class SbomBuilderService {
-  constructor(private readonly sbomRepo: SbomRepository) {}
+  constructor(
+    private readonly sbomRepo: SbomRepository,
+    private readonly azureService: ConnectionService,
+  ) {}
 
   private readonly logger = new Logger(SbomBuilderService.name);
   private readonly docker = new Docker.default();
@@ -133,68 +137,61 @@ export class SbomBuilderService {
     }
   }
 
-  // Generate SBOM using cdxgen inside a container
-  private async genSbom(repoPath: string): Promise<string> {
-    const absPath = path.resolve(repoPath);
-    const outputFileName = 'sbom-output1.json';
-    const containerPath = '/app';
-    const outputPath = path.join(absPath, outputFileName);
-
-    if (!fs.existsSync(absPath)) {
-      throw new Error(`Repo path not found: ${absPath}`);
-    }
+  // Generate SBOM using remote command execution
+  private async genSbom(packageName: string, version?: string): Promise<string> {
+    let sbom: any;
+    
     try {
-      // Regular command
-      await this.runCommand({
-        image: 'ghcr.io/cyclonedx/cdxgen:latest',
-        cmd: ['-o', outputFileName],
-        workingDir: containerPath,
-        volumeHostPath: absPath,
-      });
-    } catch (err1) {
-      this.logger.warn(
-        `cdxgen failed: ${err1.message}, retrying with --no-recurse`,
+      // Execute remote command to generate SBOM with package@version format
+      const packageVersion = version ? `${packageName}@${version}` : packageName;
+      const result = await this.azureService.executeRemoteCommand(
+        `./scripts/gen_sbom.sh ${packageVersion}`,
       );
 
-      try {
-        // Retry with --no-recurse
-        await this.runCommand({
-          image: 'ghcr.io/cyclonedx/cdxgen:latest',
-          cmd: ['--no-recurse', '-o', outputFileName],
-          workingDir: containerPath,
-          volumeHostPath: absPath,
-        });
-      } catch (err2) {
+      if (result.code !== 0) {
         this.logger.error(
-          `cdxgen with --no-recurse failed: ${err2.message}. Writing empty SBOM.`,
+          `Remote SBOM generation failed with code ${result.code}: ${result.stderr}`,
         );
-
-        // Fallback: write empty SBOM
-        fs.writeFileSync(
-          outputPath,
-          JSON.stringify(
-            {
-              bomFormat: 'CycloneDX',
-              specVersion: '1.5',
-              version: 1,
-              components: [],
-            },
-            null,
-            2,
-          ),
-        );
+        throw new Error(`SBOM generation failed: ${result.stderr}`);
       }
-    }
+      // Parse the SBOM from stdout
+      try {
+        const output = `${result.stdout}\n${result.stderr}`;
+        const match = output.match(
+          /----- SBOM OUTPUT START -----(.*?)----- SBOM OUTPUT END -----/s
+        );
 
-    if (!fs.existsSync(outputPath)) {
-      this.logger.log('SBOM generation was unsuccessful');
+        
+        if (!match) {
+          throw new Error("Failed to extract SBOM JSON from output");
+        }
+        
+        const sbomJson = match[1].trim();
+        sbom = JSON.parse(sbomJson);
+        
+        this.logger.log('SBOM generation successful');
+      } catch (parseError) {
+        this.logger.error(
+          `Failed to parse SBOM JSON from remote output: ${parseError.message}`,
+        );
+        throw new Error('Invalid SBOM JSON received from remote command');
+      }
+    } catch (err) {
+      this.logger.error(
+        `Remote SBOM generation failed: ${err.message}. Writing empty SBOM.`,
+      );
+
+      // Fallback: write empty SBOM
+      sbom = {
+        bomFormat: 'CycloneDX',
+        specVersion: '1.5',
+        version: 1,
+        components: [],
+      };
     }
-    this.logger.log('SBOM generation successful');
 
     // Post-process: ensure licenses are populated using purl (npm/GitHub)
     try {
-      const raw = fs.readFileSync(outputPath, 'utf-8');
-      const sbom = JSON.parse(raw);
 
       if (Array.isArray(sbom.components)) {
         // Find components that need license enrichment
@@ -223,15 +220,12 @@ export class SbomBuilderService {
             await Promise.all(licensePromises);
           }
         }
-        
-        // write back enriched SBOM
-        fs.writeFileSync(outputPath, JSON.stringify(sbom, null, 2));
       }
     } catch (e) {
       this.logger.warn(`License enrichment skipped: ${e?.message || e}`);
     }
 
-    return fs.readFileSync(outputPath, 'utf-8');
+    return JSON.stringify(sbom, null, 2);
   }
 
   private async cleanupTempFolder(repoPath: string) {
@@ -279,17 +273,13 @@ export class SbomBuilderService {
 
     const packageName = packageInfo.package_name;
     console.log(`Package Name: ${packageName}`);
-    const gitUrl = (await this.sbomRepo.getUrl(packageId))?.repo_url;
-    const repoPath = await this.cloneRepo(gitUrl!);
-    await this.cleanupRepo(repoPath);
-    const data = await this.genSbom(repoPath);
+    const data = await this.genSbom(packageName, version);
     const jsonData = await JSON.parse(data);
     const createSbomDto: CreateSbomDto = {
       id: packageId,
       sbom: jsonData,
     };
     await this.sbomRepo.upsertPackageSbom(createSbomDto);
-    await this.cleanupTempFolder(repoPath);
 
     return {
       sbom: jsonData,

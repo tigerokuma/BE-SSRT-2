@@ -11,11 +11,13 @@ import { SbomProcessor } from './processors/sbom.processor';
 import { SbomMemgraph } from './services/sbom-graph-builder.service';
 import { DependencyOptimizerService } from './services/dependency-upgrade.service';
 import { DependenciesModule } from '../dependencies/dependencies.module';
+import { AzureModule } from '../../common/azure/azure.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: 'sbom' }),
     DependenciesModule,
+    AzureModule,
   ],
   providers: [
     SbomRepository,

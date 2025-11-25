@@ -3,28 +3,22 @@ import neo4j from "neo4j-driver";
 import { v4 as uuidv4 } from 'uuid';
 import { SbomRepository } from "../repositories/sbom.repository";
 import { DependencyQueueService } from "../../dependencies/services/dependency-queue.service";
-
-const MEMGRAPH_URI = "bolt://localhost:7687";
-const USER = "memgraph";
-const PASSWORD = "memgraph";
+import { ConnectionService } from "../../../common/azure/azure.service";
 
 @Injectable()
 export class SbomMemgraph {
-  private driver;
+  private get driver() {
+    return this.connectionService.getMemgraph();
+  }
 
   constructor(
     private readonly sbomRepo: SbomRepository,
     private readonly dependencyQueueService: DependencyQueueService,
-  ) {
-    this.driver = neo4j.driver(MEMGRAPH_URI, neo4j.auth.basic(USER, PASSWORD), {
-      maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
-      maxConnectionPoolSize: 50,
-      connectionAcquisitionTimeout: 2 * 60 * 1000, // 2 minutes
-    });
-  }
+    private readonly connectionService: ConnectionService,
+  ) {}
 
   async close() {
-    await this.driver.close();
+    // Don't close the shared connection - it's managed by ConnectionService
   }
 
   // --- Helper function to extract package name from PURL ---
