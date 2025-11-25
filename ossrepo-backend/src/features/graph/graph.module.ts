@@ -11,9 +11,11 @@ import { AiModule } from '../../common/ai/ai.module';
 import { GraphBuildProcessor } from './queue/graph-build.processor';
 import { GraphDailyService } from './services/graph-daily.service';
 import {QueueModule} from "../../common/queue/queue.module";
+import { AzureModule } from '../../common/azure/azure.module';
+
 @Module({
   controllers: [GraphController],
-  imports: [HttpModule, AiModule, QueueModule],
+  imports: [HttpModule, AiModule, QueueModule, AzureModule],
   providers: [
     GraphService,
     GraphBuilderService,

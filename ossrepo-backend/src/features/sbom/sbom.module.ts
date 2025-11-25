@@ -8,9 +8,17 @@ import { SbomController } from './controllers/sbom.controller';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { SbomProcessor } from './processors/sbom.processor';
+import { SbomMemgraph } from './services/sbom-graph-builder.service';
+import { DependencyOptimizerService } from './services/dependency-upgrade.service';
+import { DependenciesModule } from '../dependencies/dependencies.module';
+import { AzureModule } from '../../common/azure/azure.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: 'sbom' })],
+  imports: [
+    BullModule.registerQueue({ name: 'sbom' }),
+    DependenciesModule,
+    AzureModule,
+  ],
   providers: [
     SbomRepository,
     SbomBuilderService,
@@ -19,8 +27,10 @@ import { SbomProcessor } from './processors/sbom.processor';
     SbomProcessor,
     QueueModule,
     PrismaService,
+    SbomMemgraph,
+    DependencyOptimizerService,
   ],
   controllers: [SbomController],
-  exports: [SbomBuilderService, SbomQueryService, SbomQueueService],
+  exports: [SbomQueueService, SbomBuilderService, SbomQueryService],
 })
 export class SbomModule {}

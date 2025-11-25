@@ -1,27 +1,22 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import neo4j, { Driver } from 'neo4j-driver';
+import { Driver } from 'neo4j-driver';
+import { ConnectionService } from '../../../common/azure/azure.service';
 
 @Injectable()
 export class MemgraphService implements OnModuleDestroy {
-  private driver: Driver;
-
-  constructor(configService: ConfigService) {
-    const uri = configService.get<string>('MEMGRAPH_URI', 'bolt://localhost:7687');
-    const user = configService.get<string>('MEMGRAPH_USER');
-    const password = configService.get<string>('MEMGRAPH_PASSWORD');
-
-    this.driver = user
-      ? neo4j.driver(uri, neo4j.auth.basic(user, password ?? ''))
-      : neo4j.driver(uri); // unauthenticated (dev/local)
-  }
+  constructor(private readonly azureService: ConnectionService) {}
 
   async onModuleDestroy() {
-    await this.driver?.close();
+    // Connection is managed by AzureService, no need to close here
+  }
+
+  private getDriver(): Driver {
+    return this.azureService.getMemgraph();
   }
 
   async verifyConnectivity(): Promise<void> {
-    await this.driver.verifyAuthentication();
+    const driver = this.getDriver();
+    await driver.verifyAuthentication();
   }
 
   /**
@@ -32,7 +27,8 @@ export class MemgraphService implements OnModuleDestroy {
     cypher: string,
     params: Record<string, unknown> = {},
   ): Promise<T[]> {
-    const session = this.driver.session();
+    const driver = this.getDriver();
+    const session = driver.session();
     try {
       // Preflight: EXPLAIN (catches parsing issues without executing)
       await session.run(`EXPLAIN ${cypher}`, params);

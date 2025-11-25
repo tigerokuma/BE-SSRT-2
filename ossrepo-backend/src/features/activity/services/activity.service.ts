@@ -75,7 +75,6 @@ export class ActivityService {
           },
         });
 
-        await this.sbomQueueService.mergeSbom(user.user_id);
 
         shouldQueueSetup = false;
       } else {
