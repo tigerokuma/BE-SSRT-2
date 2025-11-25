@@ -15,6 +15,7 @@ import { ProjectModule } from './features/project/project.module';
 import { GitHubModule } from './features/github/github.module';
 import { WebhookModule } from './features/webhooks/webhook.module';
 import { DependenciesModule } from './features/dependencies/dependencies.module';
+import { AzureModule } from './common/azure/azure.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DependenciesModule } from './features/dependencies/dependencies.module'
     GitHubModule,
     WebhookModule,
     DependenciesModule,
+    AzureModule,
   ],
 })
 export class AppModule {}

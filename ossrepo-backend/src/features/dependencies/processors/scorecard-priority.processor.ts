@@ -2,10 +2,7 @@ import { Process, Processor } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { ConnectionService } from '../../../common/azure/azure.service';
 
 interface ScorecardPriorityJobData {
   packageId: string;
@@ -21,6 +18,7 @@ export class ScorecardPriorityProcessor {
 
   constructor(
     private prisma: PrismaService,
+    private azureService: ConnectionService,
   ) {
     this.logger.log(`🔧 ScorecardPriorityProcessor initialized and ready to process jobs`);
   }
@@ -84,16 +82,13 @@ export class ScorecardPriorityProcessor {
       }
       
       // Run scorecard with optimized flags and GitHub token
-      const scorecardCommand = `scorecard --repo=github.com/${owner}/${repo} --format=json --commit-depth=100 --checks=Maintained,Security-Policy,Vulnerabilities,Dangerous-Workflow`;
+      const scorecardCommand = `docker run --rm gcr.io/openssf/scorecard:stable --repo=github.com/${owner}/${repo} --format=json --commit-depth=100 --checks=Maintained,Security-Policy,Vulnerabilities,Dangerous-Workflow`;
       this.logger.log(`🔧 Running scorecard command: ${scorecardCommand}`);
       this.logger.log(`🔐 Using GitHub token: ${githubToken.substring(0, 10)}...`);
       
       try {
-        const { stdout, stderr } = await execAsync(scorecardCommand, {
-          timeout: 300000, // 5 minutes timeout
-          maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        const { stdout, stderr } = await this.azureService.executeRemoteCommand(scorecardCommand, {
           env: {
-            ...process.env,
             GITHUB_AUTH_TOKEN: githubToken,
             GITHUB_TOKEN: githubToken,
           }
