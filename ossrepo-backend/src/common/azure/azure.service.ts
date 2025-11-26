@@ -34,7 +34,7 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
 
     const host = process.env.AZURE_HOST!;
     const username = process.env.AZURE_USER!;
-    const privateKey = fs.readFileSync(process.env.AZURE_PATH!, 'utf8');
+    const privateKey = process.env.AZURE_PRIVATE_KEY!;
     const memgraphUrl = process.env.AZURE_BOLT!;
 
     this.logger.log('🔌 Connecting to Azure via SSH...');
