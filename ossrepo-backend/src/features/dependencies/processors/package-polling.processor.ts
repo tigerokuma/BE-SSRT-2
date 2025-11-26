@@ -44,6 +44,7 @@ export class PackagePollingProcessor implements OnModuleInit {
     private readonly packageScorecard: PackageScorecardService,
     @InjectQueue('package-polling') private readonly pollingQueue: Queue,
     @InjectQueue('dependency-full-setup') private readonly setupQueue: Queue,
+    @InjectQueue('graph-build') private readonly graphBuildQueue: Queue,
   ) {}
 
   async onModuleInit() {
@@ -391,6 +392,28 @@ export class PackagePollingProcessor implements OnModuleInit {
       // Update latest commit SHA immediately after storing commits
       // This ensures we don't reprocess the same commits if later steps fail
       await this.updateLatestCommitSha(packageId, latestRemoteSha);
+
+      // 🧠 NEW: queue graph incremental update for this dependency
+      try {
+        const repoSlug = `${owner}/${repo}`.replace(/\.git$/, '');
+        this.logger.log(
+          `🧠 Queuing graph incremental update for ${repoSlug}: ` +
+          `${storedLatestSha.substring(0, 8)} -> ${latestRemoteSha.substring(0, 8)}`,
+        );
+
+        await this.graphBuildQueue.add('update-package-graph', {
+          repoSlug,
+          fromSha: storedLatestSha,       // the old head we had stored
+          toSha: latestRemoteSha,         // newest remote head
+          packageId,
+          branch,
+          source: 'package-daily-poll',
+        });
+      } catch (err: any) {
+        this.logger.error(
+          `❌ Failed to queue graph update for ${owner}/${repo}: ${err.message}`,
+        );
+      }
 
       // Check for vulnerabilities and create alerts
       await this.checkVulnerabilitiesAndCreateAlerts(packageId);

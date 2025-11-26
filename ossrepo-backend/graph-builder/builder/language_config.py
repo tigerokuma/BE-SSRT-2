@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Callable
 
+
 @dataclass
 class LanguageConfig:
     """Configuration for language-specific Tree-sitter parsing."""
@@ -36,11 +37,13 @@ class LanguageConfig:
     def is_statement(self, node) -> bool:
         return getattr(node, "is_named", False) and not str(getattr(node, "type", "")).endswith("comment")
 
+
 # Language configurations
 LANGUAGE_CONFIGS = {
     "python": LanguageConfig(
         name="python",
         file_extensions=[".py"],
+        # FIX: remove async_function_definition (not in your tree-sitter-python grammar)
         function_node_types=["function_definition"],
         class_node_types=["class_definition"],
         module_node_types=["module"],
@@ -60,7 +63,13 @@ LANGUAGE_CONFIGS = {
     "javascript": LanguageConfig(
         name="javascript",
         file_extensions=[".js", ".jsx"],
-        function_node_types=["function_declaration", "arrow_function", "method_definition"],
+        function_node_types=[
+            "function_declaration",
+            "function_expression",   # optional
+            "generator_function",    # optional (grammar-dependent)
+            "arrow_function",
+            "method_definition",
+        ],
         class_node_types=["class_declaration"],
         module_node_types=["program"],
         call_node_types=["call_expression", "new_expression"],
@@ -145,7 +154,12 @@ LANGUAGE_CONFIGS = {
         name="java",
         file_extensions=[".java"],
         function_node_types=["method_declaration", "constructor_declaration"],
-        class_node_types=["class_declaration", "interface_declaration", "enum_declaration", "annotation_type_declaration"],
+        class_node_types=[
+            "class_declaration",
+            "interface_declaration",
+            "enum_declaration",
+            "annotation_type_declaration",
+        ],
         module_node_types=["program"],
         call_node_types=["method_invocation", "object_creation_expression"],
         if_node_types=["if_statement"],
@@ -161,7 +175,12 @@ LANGUAGE_CONFIGS = {
         name="cpp",
         file_extensions=[".cpp", ".h", ".hpp", ".cc", ".cxx", ".hxx", ".hh"],
         function_node_types=["function_definition"],
-        class_node_types=["class_specifier", "struct_specifier", "union_specifier", "enum_specifier"],
+        class_node_types=[
+            "class_specifier",
+            "struct_specifier",
+            "union_specifier",
+            "enum_specifier",
+        ],
         module_node_types=["translation_unit", "namespace_definition"],
         call_node_types=["call_expression"],
         if_node_types=["if_statement"],
@@ -173,7 +192,7 @@ LANGUAGE_CONFIGS = {
         name_field="name",
         body_field="body",
     ),
-"markdown": LanguageConfig(
+    "markdown": LanguageConfig(
         name="markdown",
         file_extensions=[".md", ".markdown", ".mdx"],
         # markdown has no functions/classes/calls
@@ -206,7 +225,7 @@ LANGUAGE_CONFIGS = {
             # optional inline things you may want to see
             "link",
             "image",
-            # if you use a GFM grammar, you can add:
+            # GFM extras (if grammar supports them)
             # "table", "table_row", "table_cell",
         ],
         # name/body fields aren’t used for markdown

@@ -33,5 +33,7 @@ export class BuildTaskDto {
 }
 
 export class TriggerBuildDto {
-  commitId?: string;
+  commitId?: string;   // optional metadata for your DB / UI
+  branch?: string;     // e.g. "main", "dev", etc.
+  startSha?: string;   // used for incremental builds; null = use graph cursor
 }

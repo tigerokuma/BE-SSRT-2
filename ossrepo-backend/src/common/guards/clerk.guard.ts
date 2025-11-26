@@ -23,6 +23,17 @@ export class ClerkAuthGuard implements CanActivate {
       return true;
     }
 
+    // 1) Internal-token bypass for backend-to-backend calls
+    const internalToken = (req.headers['x-internal-token'] as string | undefined)?.trim();
+    const expected = process.env.INTERNAL_API_TOKEN;
+
+    if (expected && internalToken && internalToken === expected) {
+      // Optionally attach a fake "internal" user if you want
+      (req as any).user = { sub: 'internal-service', role: 'internal' };
+      return true;
+    }
+
+    // 2) Normal Clerk bearer token path
     const authz = (req.headers['authorization'] as string | undefined) ?? '';
     if (!authz.startsWith('Bearer ')) {
       throw new UnauthorizedException('Missing Authorization bearer token');
@@ -31,20 +42,14 @@ export class ClerkAuthGuard implements CanActivate {
 
     try {
       const payload = await verifyToken(token, {
-        // Use ONE of these: prefer jwtKey (PEM) for networkless verification,
         jwtKey: process.env.CLERK_JWT_KEY,
-        // or fall back to Clerk secret which will fetch JWKS:
         secretKey: process.env.CLERK_SECRET_KEY,
-
-        // Optional hardening (only set if you actually configured them)
-        audience: process.env.CLERK_JWT_AUDIENCE,                 // e.g. "BACKEND"
-        authorizedParties: process.env.CLERK_AUTHED_PARTIES
-          ? process.env.CLERK_AUTHED_PARTIES.split(',')
-          : undefined,
-        clockSkewInMs: 60_000,                                    // match your Clerk template
+        audience: process.env.CLERK_JWT_AUDIENCE,
+        authorizedParties: csv('CLERK_AUTHED_PARTIES'),
+        clockSkewInMs: 60_000,
       });
 
-      (req as any).user = payload; // attach claims if you need them downstream
+      (req as any).user = payload;
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');

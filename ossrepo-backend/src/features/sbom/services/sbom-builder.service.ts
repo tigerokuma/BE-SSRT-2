@@ -1,4 +1,4 @@
-import { Injectable, Logger, Body } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
 import { CreateSbomDto } from '../dto/sbom.dto';
 import { simpleGit } from 'simple-git';
@@ -7,16 +7,24 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as Docker from 'dockerode';
 import * as os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { ConnectionService } from '../../../common/azure/azure.service';
+
+const execAsync = promisify(exec);
 
 @Injectable()
 export class SbomBuilderService {
-  constructor(private readonly sbomRepo: SbomRepository) {}
+  constructor(
+    private readonly sbomRepo: SbomRepository,
+    private readonly azureService: ConnectionService,
+  ) {}
 
   private readonly logger = new Logger(SbomBuilderService.name);
   private readonly docker = new Docker.default();
 
   // Clone Git repo into a temp directory
-  private async cloneRepo(gitUrl: string): Promise<string> {
+  private async cloneRepo(gitUrl: string, version?: string): Promise<string> {
     const targetDir = path.join(os.tmpdir(), 'sbom-repos');
     const uniqueDir = path.join(targetDir, randomUUID());
 
@@ -27,6 +35,46 @@ export class SbomBuilderService {
       console.log(`Cloning ${gitUrl} into ${clonePath}...`);
       await git.clone(gitUrl, clonePath);
       console.log('Clone complete.');
+      
+      // Check out specific version if provided
+      if (version) {
+        console.log(`Checking out version: ${version}`);
+        const repoGit = simpleGit(clonePath);
+        try {
+          // Fetch all tags and branches first
+          await repoGit.fetch(['--all', '--tags']);
+          
+          // Try to checkout as a tag first (most common for versions)
+          try {
+            await repoGit.checkout(`tags/${version}`);
+            console.log(`Successfully checked out tag: ${version}`);
+          } catch (tagError) {
+            // If tag fails, try as a branch
+            try {
+              await repoGit.checkout(version);
+              console.log(`Successfully checked out branch: ${version}`);
+            } catch (branchError) {
+              // If branch fails, try as a commit hash
+              try {
+                await repoGit.checkout(version);
+                console.log(`Successfully checked out commit: ${version}`);
+              } catch (commitError) {
+                console.warn(`Could not checkout version ${version}, using default branch. Error: ${commitError.message}`);
+                // Continue with default branch - don't throw error
+              }
+            }
+          }
+        } catch (fetchError) {
+          // If fetch fails, still try to checkout (might be a local branch or commit)
+          try {
+            await repoGit.checkout(version);
+            console.log(`Successfully checked out: ${version}`);
+          } catch (checkoutError) {
+            console.warn(`Could not checkout version ${version}, using default branch. Error: ${checkoutError.message}`);
+            // Continue with default branch - don't throw error
+          }
+        }
+      }
     } catch (err) {
       console.error('Error cloning repo:', err);
       throw err;
@@ -89,64 +137,95 @@ export class SbomBuilderService {
     }
   }
 
-  // Generate SBOM using cdxgen inside a container
-  private async genSbom(repoPath: string): Promise<string> {
-    const absPath = path.resolve(repoPath);
-    const outputFileName = 'sbom-output1.json';
-    const containerPath = '/app';
-    const outputPath = path.join(absPath, outputFileName);
-
-    if (!fs.existsSync(absPath)) {
-      throw new Error(`Repo path not found: ${absPath}`);
-    }
+  // Generate SBOM using remote command execution
+  private async genSbom(packageName: string, version?: string): Promise<string> {
+    let sbom: any;
+    
     try {
-      // Regular command
-      await this.runCommand({
-        image: 'ghcr.io/cyclonedx/cdxgen:latest',
-        cmd: ['-o', outputFileName],
-        workingDir: containerPath,
-        volumeHostPath: absPath,
-      });
-    } catch (err1) {
-      this.logger.warn(
-        `cdxgen failed: ${err1.message}, retrying with --no-recurse`,
+      // Execute remote command to generate SBOM with package@version format
+      const packageVersion = version ? `${packageName}@${version}` : packageName;
+      const result = await this.azureService.executeRemoteCommand(
+        `./scripts/gen_sbom.sh ${packageVersion}`,
       );
 
-      try {
-        // Retry with --no-recurse
-        await this.runCommand({
-          image: 'ghcr.io/cyclonedx/cdxgen:latest',
-          cmd: ['--no-recurse', '-o', outputFileName],
-          workingDir: containerPath,
-          volumeHostPath: absPath,
-        });
-      } catch (err2) {
+      if (result.code !== 0) {
         this.logger.error(
-          `cdxgen with --no-recurse failed: ${err2.message}. Writing empty SBOM.`,
+          `Remote SBOM generation failed with code ${result.code}: ${result.stderr}`,
         );
-
-        // Fallback: write empty SBOM
-        fs.writeFileSync(
-          outputPath,
-          JSON.stringify(
-            {
-              bomFormat: 'CycloneDX',
-              specVersion: '1.5',
-              version: 1,
-              components: [],
-            },
-            null,
-            2,
-          ),
-        );
+        throw new Error(`SBOM generation failed: ${result.stderr}`);
       }
+      // Parse the SBOM from stdout
+      try {
+        const output = `${result.stdout}\n${result.stderr}`;
+        const match = output.match(
+          /----- SBOM OUTPUT START -----(.*?)----- SBOM OUTPUT END -----/s
+        );
+
+        
+        if (!match) {
+          throw new Error("Failed to extract SBOM JSON from output");
+        }
+        
+        const sbomJson = match[1].trim();
+        sbom = JSON.parse(sbomJson);
+        
+        this.logger.log('SBOM generation successful');
+      } catch (parseError) {
+        this.logger.error(
+          `Failed to parse SBOM JSON from remote output: ${parseError.message}`,
+        );
+        throw new Error('Invalid SBOM JSON received from remote command');
+      }
+    } catch (err) {
+      this.logger.error(
+        `Remote SBOM generation failed: ${err.message}. Writing empty SBOM.`,
+      );
+
+      // Fallback: write empty SBOM
+      sbom = {
+        bomFormat: 'CycloneDX',
+        specVersion: '1.5',
+        version: 1,
+        components: [],
+      };
     }
 
-    if (!fs.existsSync(outputPath)) {
-      this.logger.log('SBOM generation was unsuccessful');
+    // Post-process: ensure licenses are populated using purl (npm/GitHub)
+    try {
+
+      if (Array.isArray(sbom.components)) {
+        // Find components that need license enrichment
+        const componentsNeedingLicense = sbom.components.filter(component => {
+          const hasLicenseArray = Array.isArray(component.licenses) && component.licenses.length > 0;
+          const currentLicense = hasLicenseArray ? (component.licenses[0]?.license?.id || component.licenses[0]?.license?.name) : undefined;
+          return !currentLicense && component.purl;
+        });
+
+        if (componentsNeedingLicense.length > 0) {
+          // Fetch licenses in parallel (batch of 10 to avoid rate limits)
+          const batchSize = 10;
+          for (let i = 0; i < componentsNeedingLicense.length; i += batchSize) {
+            const batch = componentsNeedingLicense.slice(i, i + batchSize);
+            const licensePromises = batch.map(async (component) => {
+              try {
+                const fetched = await this.getLicenseFromPurl(component.purl);
+                if (fetched && typeof fetched === 'string') {
+                  component.licenses = [{ license: { id: fetched } }];
+                }
+              } catch (e) {
+                // ignore fetch errors per component
+              }
+            });
+            
+            await Promise.all(licensePromises);
+          }
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`License enrichment skipped: ${e?.message || e}`);
     }
-    this.logger.log('SBOM generation successful');
-    return fs.readFileSync(outputPath, 'utf-8');
+
+    return JSON.stringify(sbom, null, 2);
   }
 
   private async cleanupTempFolder(repoPath: string) {
@@ -158,20 +237,55 @@ export class SbomBuilderService {
     }
   }
 
-  async addSbom(watchlistId: string) {
-    const gitUrl = (await this.sbomRepo.getUrl(watchlistId))?.repo_url;
-    const repoPath = await this.cloneRepo(gitUrl!);
-    await this.cleanupRepo(repoPath);
-    const data = await this.genSbom(repoPath);
+  private async getLicenseFromPurl(purl: string): Promise<string> {
+    try {
+      // Example purl: "pkg:npm/lodash@4.17.21"
+      const match = purl.match(/^pkg:(\w+)\/([^@]+)(?:@(.+))?/);
+      if (!match) return "";
+
+      const [, type, name, version] = match;
+      if (type === 'npm') {
+        const res = await fetch(`https://registry.npmjs.org/${name}`);
+        if (res.ok) {
+          const data = await res.json();
+          // Handle different license formats from npm registry
+          if (typeof data.license === 'string') {
+            return data.license;
+          } else if (typeof data.license === 'object' && data.license !== null) {
+            return data.license.type || data.license.name || "";
+          }
+        }
+      }
+      // Add similar logic for PyPI, Maven, etc.
+      return "";
+    } catch (error) {
+      console.error(`Error fetching license for ${purl}: ${error}`);
+      return "";
+    }
+  }
+
+
+  async addSbom(packageId: string, version?: string) {
+    const packageInfo = await this.sbomRepo.getPackageById(packageId);
+    if (!packageInfo) {
+      throw new Error(`Package with ID ${packageId} not found`);
+    }
+
+    const packageName = packageInfo.package_name;
+    console.log(`Package Name: ${packageName}`);
+    const data = await this.genSbom(packageName, version);
     const jsonData = await JSON.parse(data);
     const createSbomDto: CreateSbomDto = {
-      id: watchlistId,
+      id: packageId,
       sbom: jsonData,
     };
-    await this.sbomRepo.upsertWatchSbom(createSbomDto);
-    await this.cleanupTempFolder(repoPath);
+    await this.sbomRepo.upsertPackageSbom(createSbomDto);
 
-    return jsonData;
+    return {
+      sbom: jsonData,
+      packageName,
+      version,
+    };
   }
 
   private async writeSbomsToTempFiles(sboms: Array<{ sbom: any }>) {
@@ -191,8 +305,8 @@ export class SbomBuilderService {
     return { tempDir, filePaths };
   }
 
-  async mergeSbom(user_id: string) {
-    const sboms = await this.sbomRepo.getFollowSboms(user_id);
+  async mergeSbom(projectId: string) {
+    const sboms = await this.sbomRepo.getProjectDependencySboms(projectId);
     const { tempDir, filePaths } = await this.writeSbomsToTempFiles(sboms);
 
     const absPath = tempDir;
@@ -229,8 +343,8 @@ export class SbomBuilderService {
 
     const newTop = {
       type: 'application',
-      'bom-ref': `pkg:user/${user_id}@latest`,
-      name: `user-watchlist-sbom-${user_id}`,
+      'bom-ref': `pkg:project/${projectId}@latest`,
+      name: `project-sbom-${projectId}`,
       version: '1.0.0',
     };
 
@@ -251,10 +365,10 @@ export class SbomBuilderService {
 
     // Insert to database
     const createSbomDto = {
-      id: user_id,
+      id: projectId,
       sbom: mergedData,
     };
-    this.sbomRepo.upsertUserSbom(createSbomDto);
+    this.sbomRepo.upsertProjectSbom(createSbomDto);
     return await mergedData;
   }
 }

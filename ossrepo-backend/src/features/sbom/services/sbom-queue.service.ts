@@ -6,11 +6,12 @@ import { Queue } from 'bull';
 export class SbomQueueService {
   constructor(@InjectQueue('sbom') private readonly sbomQueue: Queue) {}
 
-  async mergeSbom(user: string) {
-    await this.sbomQueue.add('merge-sbom', { user });
-  }
 
-  async fullProcessSbom(pkg: string, user: string) {
-    await this.sbomQueue.add('full-process-sbom', { pkg, user });
+  /**
+   * Queue full SBOM process job for a package (generates SBOM and stores in Memgraph)
+   * This matches the generate-SBOM endpoint behavior
+   */
+  async fullProcessSbom(package_id: string, version?: string) {
+    await this.sbomQueue.add('full-process-sbom', { package_id, version });
   }
 }

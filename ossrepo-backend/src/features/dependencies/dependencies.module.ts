@@ -19,14 +19,16 @@ import { ActivityAnalysisService } from '../activity/services/activity-analysis.
 import { GitManagerService } from '../activity/services/git-manager.service';
 import { AISummaryService } from '../activity/services/ai-summary.service';
 import { PackagesModule } from '../packages/packages.module';
+import {GraphModule} from "../graph/graph.module";
 
 @Module({
   imports: [
     PrismaModule,
     QueueModule,
     AiModule,
-    AzureModule,
     PackagesModule,
+    GraphModule,
+    AzureModule,
   ],
   providers: [
     FastSetupProcessor,
