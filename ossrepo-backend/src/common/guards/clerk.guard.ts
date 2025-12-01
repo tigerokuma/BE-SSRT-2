@@ -23,6 +23,11 @@ export class ClerkAuthGuard implements CanActivate {
       return true;
     }
 
+    // Skip authentication for Jira OAuth callback (called by Atlassian, not authenticated users)
+    if (url.startsWith('/jira/oauth/callback')) {
+      return true;
+    }
+
     // 1) Internal-token bypass for backend-to-backend calls
     const internalToken = (req.headers['x-internal-token'] as string | undefined)?.trim();
     const expected = process.env.INTERNAL_API_TOKEN;
