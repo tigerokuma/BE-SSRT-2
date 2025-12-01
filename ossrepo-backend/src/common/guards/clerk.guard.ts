@@ -28,6 +28,11 @@ export class ClerkAuthGuard implements CanActivate {
       return true;
     }
 
+    // Skip authentication for Slack OAuth callback (called by Slack, not authenticated users)
+    if (url.startsWith('/slack/oauth/callback')) {
+      return true;
+    }
+
     // 1) Internal-token bypass for backend-to-backend calls
     const internalToken = (req.headers['x-internal-token'] as string | undefined)?.trim();
     const expected = process.env.INTERNAL_API_TOKEN;
