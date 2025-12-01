@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bull';
 import { SbomRepository } from './repositories/sbom.repository';
 import { SbomBuilderService } from './services/sbom-builder.service';
 import { SbomQueryService } from './services/sbom-query.service';
@@ -15,7 +14,7 @@ import { AzureModule } from '../../common/azure/azure.module';
 
 @Module({
   imports: [
-    BullModule.registerQueue({ name: 'sbom' }),
+    QueueModule,
     DependenciesModule,
     AzureModule,
   ],
@@ -25,7 +24,6 @@ import { AzureModule } from '../../common/azure/azure.module';
     SbomQueryService,
     SbomQueueService,
     SbomProcessor,
-    QueueModule,
     PrismaService,
     SbomMemgraph,
     DependencyOptimizerService,
