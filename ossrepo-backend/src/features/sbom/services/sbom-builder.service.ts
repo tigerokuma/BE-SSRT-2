@@ -137,24 +137,59 @@ export class SbomBuilderService {
     }
   }
 
-  // Generate SBOM using remote command execution
+  // Generate SBOM using local or remote command execution based on CDXGEN_LOCATION env variable
   private async genSbom(packageName: string, version?: string): Promise<string> {
     let sbom: any;
     
+    // Check CDXGEN_LOCATION environment variable
+    // "local" = run locally, "remote" or undefined = run remotely
+    const cdxgenLocation = process.env.CDXGEN_LOCATION?.toLowerCase() || 'remote';
+    const useLocal = cdxgenLocation === 'local';
+    
     try {
-      // Execute remote command to generate SBOM with package@version format
       const packageVersion = version ? `${packageName}@${version}` : packageName;
-      const result = await this.azureService.executeRemoteCommand(
-        `./scripts/gen_sbom.sh ${packageVersion}`,
-      );
+      let result: { stdout: string; stderr: string };
+      
+      if (useLocal) {
+        // Execute local command to generate SBOM
+        const scriptPath = path.join(process.cwd(), 'scripts', 'gen_sbom.sh');
+        const command = `bash "${scriptPath}" ${packageVersion}`;
+        
+        this.logger.log(`Executing local SBOM generation command: ${command}`);
+        
+        result = await execAsync(command, {
+          cwd: process.cwd(),
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        });
 
-      if (result.code !== 0) {
-        this.logger.error(
-          `Remote SBOM generation failed with code ${result.code}: ${result.stderr}`,
-        );
-        throw new Error(`SBOM generation failed: ${result.stderr}`);
+        // Check if there's stderr output as an indicator of issues
+        if (result.stderr && result.stderr.trim().length > 0) {
+          this.logger.warn(`SBOM generation stderr: ${result.stderr}`);
+        }
+      } else {
+        console.log("wrong");
+        // Execute remote command to generate SBOM
+        // this.logger.log(`Executing remote SBOM generation command for: ${packageVersion}`);
+        
+        // const remoteResult = await this.azureService.executeRemoteCommand(
+        //   `./scripts/gen_sbom.sh ${packageVersion}`,
+        // );
+
+        // if (remoteResult.code !== 0) {
+        //   this.logger.error(
+        //     `Remote SBOM generation failed with code ${remoteResult.code}: ${remoteResult.stderr}`,
+        //   );
+        //   throw new Error(`SBOM generation failed: ${remoteResult.stderr}`);
+        // }
+        
+        // // Convert remote result format to match local format
+        // result = {
+        //   stdout: remoteResult.stdout || '',
+        //   stderr: remoteResult.stderr || '',
+        // };
       }
-      // Parse the SBOM from stdout
+      
+      // Parse the SBOM from stdout (works for both local and remote)
       try {
         const output = `${result.stdout}\n${result.stderr}`;
         const match = output.match(
@@ -169,16 +204,16 @@ export class SbomBuilderService {
         const sbomJson = match[1].trim();
         sbom = JSON.parse(sbomJson);
         
-        this.logger.log('SBOM generation successful');
+        this.logger.log(`SBOM generation successful (${useLocal ? 'local' : 'remote'})`);
       } catch (parseError) {
         this.logger.error(
-          `Failed to parse SBOM JSON from remote output: ${parseError.message}`,
+          `Failed to parse SBOM JSON from ${useLocal ? 'local' : 'remote'} output: ${parseError.message}`,
         );
-        throw new Error('Invalid SBOM JSON received from remote command');
+        throw new Error(`Invalid SBOM JSON received from ${useLocal ? 'local' : 'remote'} command`);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
-        `Remote SBOM generation failed: ${err.message}. Writing empty SBOM.`,
+        `${useLocal ? 'Local' : 'Remote'} SBOM generation failed: ${err.message}. Writing empty SBOM.`,
       );
 
       // Fallback: write empty SBOM

@@ -261,19 +261,33 @@ export class SbomMemgraph {
         packageId = packageInfo.package_id;
         packageName = packageInfo.package_name;
       } else {
-        // If still not found, try using the input as package name directly
-        packageName = packageIdOrName;
+        // If still not found, check if input looks like a UUID (package ID)
+        // UUIDs are typically in format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(packageIdOrName);
+        if (isUUID) {
+          // If it's a UUID, treat it as a package_id
+          packageId = packageIdOrName;
+        } else {
+          // Otherwise, treat it as a package name
+          packageName = packageIdOrName;
+        }
       }
 
       const query = options?.query?.toLowerCase() || '';
       const scope = options?.scope || 'all';
       const riskFilter = options?.risk || 'all';
+      
+      // Use very high limits to return all matches (unlimited)
+      const directLimit = 100000;
+      const transitiveLimit = 100000;
 
       // STEP 1: Try to find SBOM first (by package ID or package name)
+      // Prioritize package_id when available
       if (packageId || packageName) {
         let sbomResult;
+        
+        // First, try to find SBOM directly by its id (which is the package_id)
         if (packageId) {
-          // Try to find SBOM by package ID
           sbomResult = await session.run(
             `
             MATCH (s:SBOM {id: $packageId})
@@ -282,9 +296,23 @@ export class SbomMemgraph {
             `,
             { packageId }
           );
+          console.log(`SBOM query by id (package_id) returned ${sbomResult?.records.length || 0} results`);
         }
         
-        // If not found by ID, try by package name and version (if provided)
+        // If not found by direct id, try to find SBOM by looking for a Package node with matching db_package_id
+        if ((!sbomResult || sbomResult.records.length === 0) && packageId) {
+          sbomResult = await session.run(
+            `
+            MATCH (p:Package {db_package_id: $packageId})-[:BELONGS_TO]->(s:SBOM)
+            RETURN s.id AS sbomId
+            LIMIT 1
+            `,
+            { packageId }
+          );
+          console.log(`SBOM query by Package.db_package_id returned ${sbomResult?.records.length || 0} results`);
+        }
+        
+        // If not found by package_id, try finding SBOM by package name and version
         if ((!sbomResult || sbomResult.records.length === 0) && packageName) {
           if (version) {
             // Try to find SBOM by package name and version
@@ -297,6 +325,7 @@ export class SbomMemgraph {
               `,
               { packageName, version }
             );
+            console.log(`SBOM query by package_name and version returned ${sbomResult?.records.length || 0} results`);
           }
           
           // If still not found, try by package name only
@@ -310,7 +339,26 @@ export class SbomMemgraph {
               `,
               { packageName }
             );
+            console.log(`SBOM query by package_name only returned ${sbomResult?.records.length || 0} results`);
           }
+        }
+        
+        // Debug: List all SBOMs if still not found
+        if ((!sbomResult || sbomResult.records.length === 0)) {
+          const allSboms = await session.run(
+            `
+            MATCH (s:SBOM)
+            RETURN s.id AS id, s.package_name AS package_name, s.version AS version
+            LIMIT 10
+            `
+          );
+          console.log(`Debug: Found ${allSboms.records.length} SBOMs in database:`, 
+            allSboms.records.map(r => ({
+              id: r.get('id'),
+              package_name: r.get('package_name'),
+              version: r.get('version')
+            }))
+          );
         }
 
         // If SBOM found, query dependencies from SBOM
@@ -337,6 +385,7 @@ export class SbomMemgraph {
               WHERE (direct)-[:BELONGS_TO]->(s)
               AND NOT (main)-[:DEPENDS_ON*2..]->(direct)
               RETURN DISTINCT direct.name AS name, direct.version AS version
+              LIMIT ${Number(directLimit)}
               `,
               version ? { sbomId, packageId, version } : { sbomId, packageId }
             );
@@ -357,6 +406,7 @@ export class SbomMemgraph {
               WHERE (direct)-[:BELONGS_TO]->(s)
               AND NOT (main)-[:DEPENDS_ON*2..]->(direct)
               RETURN DISTINCT direct.name AS name, direct.version AS version
+              LIMIT ${Number(directLimit)}
               `,
               version ? { sbomId, packageName, version } : { sbomId, packageName }
             );
@@ -371,13 +421,45 @@ export class SbomMemgraph {
               children: Array<{ id: string; label: string; version?: string; riskScore: number }>;
             }> = [];
 
+            // Use the predefined transitiveLimit
+
             for (const record of directDepsResult.records) {
               const depName = record.get('name');
               const depVersion = record.get('version');
 
+              // Get risk score for direct dependency first to check if it matches filters
+              const directRiskScore = await this.calculatePackageRiskScore(depName);
+              
               // Skip if query doesn't match (when scope is 'direct')
               if (query && scope === 'direct' && !depName.toLowerCase().includes(query)) {
                 continue;
+              }
+
+              // Skip if risk filter doesn't match
+              if (!this.matchesRiskFilter(directRiskScore, riskFilter)) {
+                // If scope is 'all', still check transitive dependencies for matches
+                if (scope === 'all' && query) {
+                  // Check if any transitive dependency matches the query
+                  const transitiveCheckResult = await session.run(
+                    `
+                    MATCH (s:SBOM {id: $sbomId})<-[:BELONGS_TO]-(direct:Package {name: $depName})
+                    WITH direct, s
+                    MATCH (direct)-[:DEPENDS_ON*1..]->(transitive:Package)
+                    WHERE (transitive)-[:BELONGS_TO]->(s)
+                    AND toLower(transitive.name) CONTAINS toLower($query)
+                    RETURN COUNT(transitive) AS count
+                    LIMIT 1
+                    `,
+                    { depName, sbomId, query }
+                  );
+                  
+                  // If no transitive matches, skip this direct dependency
+                  if (transitiveCheckResult.records.length === 0 || transitiveCheckResult.records[0].get('count') === 0) {
+                    continue;
+                  }
+                } else {
+                  continue;
+                }
               }
 
               // Get transitive dependencies for this direct dependency from SBOM
@@ -389,7 +471,7 @@ export class SbomMemgraph {
                 WHERE (transitive)-[:BELONGS_TO]->(s)
                 RETURN DISTINCT transitive.name AS name, transitive.version AS version
                 ORDER BY transitive.name
-                LIMIT 10
+                LIMIT ${Number(transitiveLimit)}
                 `,
                 { depName, sbomId }
               );
@@ -419,15 +501,10 @@ export class SbomMemgraph {
                 }
               }
 
-              // Get risk score for direct dependency from database
-              const directRiskScore = await this.calculatePackageRiskScore(depName);
-
-              // Apply risk filter to direct dependency
-              if (this.matchesRiskFilter(directRiskScore, riskFilter)) {
-                // Sort children by risk score and limit
-                const sortedChildren = children
-                  .sort((a, b) => b.riskScore - a.riskScore)
-                  .slice(0, 6);
+              // Include direct dependency if it matches risk filter OR has matching transitive dependencies
+              if (this.matchesRiskFilter(directRiskScore, riskFilter) || (scope === 'all' && children.length > 0)) {
+                // Return all children - no limits
+                const sortedChildren = children.sort((a, b) => b.riskScore - a.riskScore);
 
                 directDependencies.push({
                   id: depName,
@@ -439,44 +516,151 @@ export class SbomMemgraph {
               }
             }
 
-            // Sort by risk score and limit to top 6
+            // Return all results - no limits
+            const sortedDeps = directDependencies.sort((a, b) => b.riskScore - a.riskScore);
             return {
-              directDependencies: directDependencies
-                .sort((a, b) => b.riskScore - a.riskScore)
-                .slice(0, 6),
+              directDependencies: sortedDeps,
             };
           }
         }
       }
 
       // STEP 2: Fallback to regular Package dependencies if no SBOM found
-      console.log(`No SBOM found for package ${packageName || packageIdOrName}, falling back to Package dependencies`);
+      console.log(`No SBOM found for package ${packageName || packageId || packageIdOrName}, falling back to Package dependencies`);
+      console.log(`Querying with packageId: ${packageId}, packageName: ${packageName}, original input: ${packageIdOrName}`);
       
-      if (!packageName) {
-        packageName = packageIdOrName;
-      }
-
       // Query Memgraph for DIRECT dependencies only (one hop, no transitive)
       // Use a pattern that explicitly excludes any path through intermediate nodes
-      // Filter by version if provided
-      const directDepsResult = await session.run(
-        version
-          ? `
-          MATCH (p:Package {name: $packageName, version: $version})-[:DEPENDS_ON]->(direct:Package)
-          WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
-          RETURN DISTINCT direct.name AS name, direct.version AS version
-          ORDER BY direct.name
-          LIMIT 20
+      // Prioritize package_name when available (more reliable in Memgraph), then try db_package_id
+      let directDepsResult;
+      
+      // Use the predefined directLimit
+      
+      // First try by package_name if available (most reliable)
+      if (packageName) {
+        directDepsResult = await session.run(
+          version
+            ? `
+            MATCH (p:Package {name: $packageName, version: $version})-[:DEPENDS_ON]->(direct:Package)
+            WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+            RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+            ORDER BY direct.name
+            LIMIT ${Number(directLimit)}
+            `
+            : `
+            MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
+            WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+            RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+            ORDER BY direct.name
+            LIMIT ${Number(directLimit)}
+            `,
+          version ? { packageName, version } : { packageName },
+        );
+        console.log(`Query by package_name returned ${directDepsResult?.records.length || 0} results`);
+      }
+      
+      // If no results with package_name and we have packageId, try by db_package_id
+      if ((!directDepsResult || directDepsResult.records.length === 0) && packageId) {
+        // Query by db_package_id (preferred when we have package_id)
+        // Try with version first if provided
+        if (version) {
+          directDepsResult = await session.run(
+            `
+            MATCH (p:Package {db_package_id: $packageId, version: $version})-[:DEPENDS_ON]->(direct:Package)
+            WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+            RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+            ORDER BY direct.name
+            LIMIT ${Number(directLimit)}
+            `,
+            { packageId, version },
+          );
+          console.log(`Query by db_package_id with version returned ${directDepsResult?.records.length || 0} results`);
+        }
+        
+        // If no results with version, try without version constraint
+        if (!directDepsResult || directDepsResult.records.length === 0) {
+          directDepsResult = await session.run(
+            `
+            MATCH (p:Package {db_package_id: $packageId})-[:DEPENDS_ON]->(direct:Package)
+            WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+            RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+            ORDER BY direct.name
+            LIMIT ${Number(directLimit)}
+            `,
+            { packageId },
+          );
+          console.log(`Query by db_package_id without version returned ${directDepsResult?.records.length || 0} results`);
+        }
+        
+        // If still no results, try to find the package node first to see what properties it has
+        if (!directDepsResult || directDepsResult.records.length === 0) {
+          const packageNodeCheck = await session.run(
+            `
+            MATCH (p:Package {db_package_id: $packageId})
+            RETURN p.name AS name, p.db_package_id AS db_package_id, p.version AS version, keys(p) AS keys
+            LIMIT 1
+            `,
+            { packageId },
+          );
+          if (packageNodeCheck.records.length > 0) {
+            const nodeInfo = packageNodeCheck.records[0];
+            console.log(`Found package node with db_package_id ${packageId}:`, {
+              name: nodeInfo.get('name'),
+              db_package_id: nodeInfo.get('db_package_id'),
+              version: nodeInfo.get('version'),
+              keys: nodeInfo.get('keys'),
+            });
+            // If we found the node but no dependencies, it might be that the node exists but has no dependencies
+            // Or the db_package_id might not match exactly - try querying by name if we have it
+            if (packageName) {
+              console.log(`Retrying query by package name: ${packageName}`);
+              directDepsResult = await session.run(
+                `
+                MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
+                WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+                RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+                ORDER BY direct.name
+                LIMIT ${Number(directLimit)}
+                `,
+                { packageName },
+              );
+              console.log(`Query by package name returned ${directDepsResult?.records.length || 0} results`);
+            }
+          } else {
+            console.log(`No package node found with db_package_id: ${packageId}`);
+            // If no node found with db_package_id, try querying by name if available
+            if (packageName) {
+              console.log(`Trying to find package by name: ${packageName}`);
+              directDepsResult = await session.run(
+                `
+                MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
+                WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+                RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+                ORDER BY direct.name
+                LIMIT ${Number(directLimit)}
+                `,
+                { packageName },
+              );
+              console.log(`Query by package name (fallback) returned ${directDepsResult?.records.length || 0} results`);
+            }
+          }
+        }
+      }
+      
+      
+      // If still no results and we have packageIdOrName, try using it directly as name
+      if ((!directDepsResult || directDepsResult.records.length === 0) && !packageName && !packageId) {
+        directDepsResult = await session.run(
           `
-          : `
           MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
           WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
-          RETURN DISTINCT direct.name AS name, direct.version AS version
+          RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
           ORDER BY direct.name
-          LIMIT 20
+          LIMIT ${Number(directLimit)}
           `,
-        version ? { packageName, version } : { packageName },
-      );
+          { packageName: packageIdOrName },
+        );
+      }
 
       const directDependencies: Array<{
         id: string;
@@ -486,14 +670,84 @@ export class SbomMemgraph {
         children: Array<{ id: string; label: string; version?: string; riskScore: number }>;
       }> = [];
 
+      // If no direct dependencies found, return empty array
+      if (!directDepsResult || directDepsResult.records.length === 0) {
+        console.log(`No direct dependencies found for package ${packageId || packageName || packageIdOrName}`);
+        return { directDependencies: [] };
+      }
+
+      // Re-fetch with higher limit if risk filter is active
+      if (riskFilter !== 'all' && directDepsResult.records.length < directLimit) {
+        if (packageName) {
+          directDepsResult = await session.run(
+            version
+              ? `
+              MATCH (p:Package {name: $packageName, version: $version})-[:DEPENDS_ON]->(direct:Package)
+              WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+                  RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+                  ORDER BY direct.name
+                  LIMIT ${Number(directLimit)}
+                  `
+                  : `
+                  MATCH (p:Package {name: $packageName})-[:DEPENDS_ON]->(direct:Package)
+                  WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+                  RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+                  ORDER BY direct.name
+                  LIMIT ${Number(directLimit)}
+                  `,
+            version ? { packageName, version } : { packageName },
+          );
+        } else if (packageId) {
+          directDepsResult = await session.run(
+            `
+            MATCH (p:Package {db_package_id: $packageId})-[:DEPENDS_ON]->(direct:Package)
+            WHERE NOT (p)-[:DEPENDS_ON*2..]->(direct)
+            RETURN DISTINCT direct.name AS name, direct.version AS version, direct.db_package_id AS db_package_id
+            ORDER BY direct.name
+            LIMIT ${Number(directLimit)}
+            `,
+            { packageId },
+          );
+        }
+      }
+
       for (const record of directDepsResult.records) {
         const depName = record.get('name');
         const depVersion = record.get('version');
+
+        // Get risk score for direct dependency first to check if it matches filters
+        const directRiskScore = await this.calculatePackageRiskScore(depName);
 
         // Skip if query doesn't match (when scope is 'direct')
         if (query && scope === 'direct' && !depName.toLowerCase().includes(query)) {
           continue;
         }
+
+        // Skip if risk filter doesn't match
+        if (!this.matchesRiskFilter(directRiskScore, riskFilter)) {
+          // If scope is 'all', still check transitive dependencies for matches
+          if (scope === 'all' && query) {
+            // Check if any transitive dependency matches the query
+            const transitiveCheckResult = await session.run(
+              `
+              MATCH (direct:Package {name: $depName})-[:DEPENDS_ON*1..]->(transitive:Package)
+              WHERE toLower(transitive.name) CONTAINS toLower($query)
+              RETURN COUNT(transitive) AS count
+              LIMIT 1
+              `,
+              { depName, query }
+            );
+            
+            // If no transitive matches, skip this direct dependency
+            if (transitiveCheckResult.records.length === 0 || transitiveCheckResult.records[0].get('count') === 0) {
+              continue;
+            }
+          } else {
+            continue;
+          }
+        }
+
+        // Use the predefined transitiveLimit
 
         // Get transitive dependencies for this direct dependency
         const transitiveResult = await session.run(
@@ -501,7 +755,7 @@ export class SbomMemgraph {
           MATCH (direct:Package {name: $depName})-[:DEPENDS_ON*1..]->(transitive:Package)
           RETURN DISTINCT transitive.name AS name, transitive.version AS version
           ORDER BY transitive.name
-          LIMIT 10
+          LIMIT ${Number(transitiveLimit)}
           `,
           { depName },
         );
@@ -531,15 +785,10 @@ export class SbomMemgraph {
           }
         }
 
-        // Get risk score for direct dependency from database
-        const directRiskScore = await this.calculatePackageRiskScore(depName);
-
-        // Apply risk filter to direct dependency
-        if (this.matchesRiskFilter(directRiskScore, riskFilter)) {
-          // Sort children by risk score and limit
-          const sortedChildren = children
-            .sort((a, b) => b.riskScore - a.riskScore)
-            .slice(0, 6);
+        // Include direct dependency if it matches risk filter OR has matching transitive dependencies
+        if (this.matchesRiskFilter(directRiskScore, riskFilter) || (scope === 'all' && children.length > 0)) {
+          // Return all children - no limits
+          const sortedChildren = children.sort((a, b) => b.riskScore - a.riskScore);
 
           directDependencies.push({
             id: depName,
@@ -551,11 +800,10 @@ export class SbomMemgraph {
         }
       }
 
-      // Sort by risk score and limit to top 6
+      // Return all results - no limits
+      const sortedDeps = directDependencies.sort((a, b) => b.riskScore - a.riskScore);
       return {
-        directDependencies: directDependencies
-          .sort((a, b) => b.riskScore - a.riskScore)
-          .slice(0, 6),
+        directDependencies: sortedDeps,
       };
     } catch (error) {
       console.error(`Error getting filtered dependency graph for package ${packageIdOrName}:`, error);
@@ -840,6 +1088,113 @@ export class SbomMemgraph {
     const projectId = sbomJson.metadata?.properties?.find(
       (prop: any) => prop.name === 'deply:project:id'
     )?.value || sbomId; // Fallback to sbomId if projectId not found
+    
+    // First, create the root/main package node from metadata.component
+    // This is the package that the SBOM is for - it must exist in Memgraph for queries to work
+    const rootComponent = sbomJson.metadata?.component;
+    if (rootComponent) {
+      const rootPurl = rootComponent.purl || rootComponent['bom-ref'] || `${rootComponent.name}@${rootComponent.version || ''}`;
+      const rootPackageName = rootComponent.name;
+      const rootVersion = rootComponent.version || '';
+      const rootLicense = rootComponent.licenses?.[0]?.license?.id || rootComponent.licenses?.[0]?.license?.name || null;
+      
+      // Get the package info from database to get the db_package_id
+      // The sbomId is the package_id, so we should use it as db_package_id
+      let existingPackage = null;
+      try {
+        existingPackage = await this.sbomRepo.getPackageById(sbomId);
+        if (!existingPackage) {
+          existingPackage = await this.sbomRepo.findPackageByName(rootPackageName);
+        }
+      } catch (error) {
+        console.error(`Error checking for existing package ${rootPackageName}:`, error);
+      }
+      
+      // Use sbomId (package_id) as db_package_id for the root package
+      // This ensures queries by db_package_id will find it
+      const rootDbPackageId = sbomId;
+      
+      const session = this.driver.session();
+      try {
+        await session.run(
+          `
+          MERGE (p:Package {purl: $purl})
+          SET p.name = $name,
+              p.version = $version,
+              p.license = $license,
+              p.type = $type,
+              p.bom_ref = $bom_ref,
+              p.db_package_id = $db_package_id
+          WITH p
+          MATCH (s:SBOM {id: $sbomId})
+          MERGE (p)-[:BELONGS_TO]->(s)
+          `,
+          {
+            purl: rootPurl,
+            name: rootPackageName,
+            version: rootVersion,
+            license: rootLicense,
+            type: rootComponent.type || 'application',
+            bom_ref: rootComponent['bom-ref'] || rootPurl,
+            db_package_id: rootDbPackageId,
+            sbomId
+          }
+        );
+        console.log(`✅ Created root package node: ${rootPackageName}@${rootVersion} with db_package_id: ${rootDbPackageId}`);
+      } catch (error) {
+        console.error(`❌ Error creating root package node:`, error);
+      } finally {
+        await session.close();
+      }
+    } else {
+      console.warn(`⚠️ No root component found in SBOM metadata for ${sbomId}, creating fallback root package`);
+      
+      // Create a fallback root package node using the sbomId
+      // Try to get package info from database
+      let packageName = sbomId;
+      let packageVersion = '';
+      try {
+        const existingPackage = await this.sbomRepo.getPackageById(sbomId);
+        if (existingPackage) {
+          packageName = existingPackage.package_name || sbomId;
+          // Version might not be in the package object, use empty string as fallback
+          packageVersion = (existingPackage as any).version || '';
+        }
+      } catch (error) {
+        console.error(`Error checking for existing package ${sbomId}:`, error);
+      }
+      
+      const fallbackPurl = `pkg:generic/${packageName}@${packageVersion || 'unknown'}`;
+      const rootDbPackageId = sbomId;
+      
+      const session = this.driver.session();
+      try {
+        await session.run(
+          `
+          MERGE (p:Package {purl: $purl})
+          SET p.name = $name,
+              p.version = $version,
+              p.db_package_id = $db_package_id,
+              p.type = 'application'
+          WITH p
+          MATCH (s:SBOM {id: $sbomId})
+          MERGE (p)-[:BELONGS_TO]->(s)
+          `,
+          {
+            purl: fallbackPurl,
+            name: packageName,
+            version: packageVersion,
+            db_package_id: rootDbPackageId,
+            sbomId
+          }
+        );
+        console.log(`✅ Created fallback root package node: ${packageName}@${packageVersion || 'unknown'} with db_package_id: ${rootDbPackageId}`);
+      } catch (error) {
+        console.error(`❌ Error creating fallback root package node:`, error);
+      } finally {
+        await session.close();
+      }
+    }
     
     // Batch create all components at once
     const components = sbomJson.components || [];
