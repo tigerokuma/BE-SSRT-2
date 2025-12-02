@@ -34,8 +34,9 @@ mkdir repo
 tar -xzf "$TARBALL" -C repo
 
 if [ -d "repo/package" ]; then
-  mv repo/package/* repo/
-  rmdir repo/package
+  mv repo/package/* repo/ 2>/dev/null || true
+  # Remove the package directory (use rm -rf in case there are hidden files)
+  rm -rf repo/package
 fi
 
 echo "📦 Installing dependencies inside repo/"

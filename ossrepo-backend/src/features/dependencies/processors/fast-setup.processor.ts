@@ -6,6 +6,7 @@ import { GitHubApiService } from '../../activity/services/github-api.service';
 import { ActivityAnalysisService, CommitData } from '../../activity/services/activity-analysis.service';
 import { DependencyQueueService } from '../services/dependency-queue.service';
 import { GraphService } from '../../graph/services/graph.service';
+import { SbomQueueService } from '../../sbom/services/sbom-queue.service';
 interface FastSetupJobData {
   packageId?: string;
   branchDependencyId?: string;
@@ -26,6 +27,7 @@ export class FastSetupProcessor {
     private activityAnalysisService: ActivityAnalysisService,
     private dependencyQueueService: DependencyQueueService,
     private readonly graphService: GraphService,
+    private readonly sbomQueueService: SbomQueueService,
   ) {
     this.logger.log(`🔧 FastSetupProcessor initialized and ready to process jobs`);
   }
@@ -129,6 +131,14 @@ export class FastSetupProcessor {
                 `❌ [FastSetup] Failed to queue graph build for already-analysed package ${packageName}: ${err.message}`,
               );
             }
+
+            try {
+              await this.sbomQueueService.fullProcessSbom(finalPackageId);
+              this.logger.log(`📦 Queued SBOM generation for package: ${packageName}`);
+            } catch (sbomError: any) {
+              this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
+            }
+      
           } else {
             this.logger.warn(
               `⚠️ [FastSetup] Package ${packageName} is done but has an invalid repo URL (${effectiveRepoUrl}), skipping graph build.`,
@@ -391,6 +401,14 @@ export class FastSetupProcessor {
       // If this was triggered by a branch dependency, link it and check completion
       if (branchDependencyId && branchId) {
         await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
+      }
+
+      // Queue SBOM generation after fast-setup processor is completely done
+      try {
+        await this.sbomQueueService.fullProcessSbom(finalPackageId);
+        this.logger.log(`📦 Queued SBOM generation for package: ${packageName}`);
+      } catch (sbomError: any) {
+        this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
       }
 
     } catch (error) {
