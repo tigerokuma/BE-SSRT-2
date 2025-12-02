@@ -2,7 +2,7 @@ import { Processor, Process } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { SbomBuilderService } from '../services/sbom-builder.service';
-import { SbomMemgraph } from '../services/sbom-graph-builder.service';
+import { SbomMemgraphService } from '../services/sbom-memgraph.service';
 
 @Processor('sbom')
 export class SbomProcessor {
@@ -10,7 +10,7 @@ export class SbomProcessor {
 
   constructor(
     private readonly sbomBuilderService: SbomBuilderService,
-    private readonly sbomMemgraph: SbomMemgraph,
+    private readonly sbomMemgraphService: SbomMemgraphService,
   ) {}
 
   @Process('full-process-sbom')
@@ -24,7 +24,7 @@ export class SbomProcessor {
       this.logger.log(`✅ SBOM generated for package: ${result.packageName}@${result.version}`);
       
       // Store in Memgraph (same as generate-SBOM endpoint) with package name and version
-      await this.sbomMemgraph.createSbom(
+      await this.sbomMemgraphService.createSbom(
         package_id,
         'package',
         'cdxgen',
@@ -32,7 +32,7 @@ export class SbomProcessor {
         result.packageName,
         result.version,
       );
-      await this.sbomMemgraph.importCycloneDxSbom(result.sbom, package_id);
+      await this.sbomMemgraphService.importCycloneDxSbom(result.sbom, package_id);
       this.logger.log(`✅ SBOM stored in Memgraph for package: ${result.packageName}@${result.version}`);
       
       return { success: true, package_id, version: result.version, sbom: result.sbom };

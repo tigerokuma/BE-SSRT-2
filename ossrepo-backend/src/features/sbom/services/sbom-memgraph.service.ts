@@ -1,0 +1,384 @@
+import { Injectable, Logger } from '@nestjs/common';
+import neo4j from 'neo4j-driver';
+import { SbomRepository } from '../repositories/sbom.repository';
+import { ConnectionService } from '../../../common/azure/azure.service';
+
+/**
+ * Service for Memgraph CRUD operations
+ * Handles creating SBOM nodes, packages, and relationships in Memgraph
+ */
+@Injectable()
+export class SbomMemgraphService {
+  private readonly logger = new Logger(SbomMemgraphService.name);
+  
+  private get driver() {
+    return this.connectionService.getMemgraph();
+  }
+
+  constructor(
+    private readonly sbomRepo: SbomRepository,
+    private readonly connectionService: ConnectionService,
+  ) {}
+
+  /**
+   * Create SBOM node in Memgraph
+   */
+  async createSbom(
+    id: string,
+    source: string,
+    tool: string,
+    metadata?: any,
+    packageName?: string,
+    version?: string,
+  ) {
+    const session = this.driver.session();
+    try {
+      let purl: string | null = null;
+      if (metadata?.component) {
+        purl = metadata.component.purl || metadata.component['bom-ref'] || null;
+      }
+      
+      // Ensure metadata is null if undefined (Memgraph doesn't accept undefined)
+      const metadataValue = metadata ?? null;
+      
+      await session.run(
+        `
+        MERGE (s:SBOM {id: $id})
+        SET s.source = $source,
+            s.tool = $tool,
+            s.created_at = timestamp(),
+            s.metadata = $metadata,
+            s.purl = $purl,
+            s.package_name = $packageName,
+            s.version = $version
+        `,
+        { id, source, tool, metadata: metadataValue, purl, packageName: packageName || null, version: version || null }
+      );
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Add Package node to Memgraph
+   */
+  async addPackage(purl: string, name: string, version: string, license?: string) {
+    const session = this.driver.session();
+    try {
+      await session.run(
+        `
+        MERGE (p:Package {purl: $purl})
+        SET p.name = $name,
+            p.version = $version,
+            p.license = $license
+        `,
+        { purl, name, version, license }
+      );
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Link Package to SBOM
+   */
+  async linkPackageToSbom(purl: string, sbomId: string) {
+    const session = this.driver.session();
+    try {
+      await session.run(
+        `
+        MATCH (p:Package {purl: $purl}), (s:SBOM {id: $sbomId})
+        MERGE (p)-[:BELONGS_TO]->(s)
+        `,
+        { purl, sbomId }
+      );
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Add dependency relationship between packages
+   */
+  async addDependency(fromPurl: string, toPurl: string) {
+    const session = this.driver.session();
+    try {
+      await session.run(
+        `
+        MATCH (a:Package {purl: $from}), (b:Package {purl: $to})
+        MERGE (a)-[:DEPENDS_ON]->(b)
+        `,
+        { from: fromPurl, to: toPurl }
+      );
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Extract package name from PURL
+   */
+  private extractNameFromPurl(purl: string): string {
+    const match = purl.match(/^pkg:\w+\/[^@\/]+\/([^@\/]+)/) || purl.match(/^pkg:\w+\/([^@\/]+)/);
+    return match ? match[1] : purl;
+  }
+
+  /**
+   * Get repository URL from NPM registry
+   */
+  async getRepoUrlFromNpm(packageName: string): Promise<string | null> {
+    try {
+      // Skip packages that are clearly not NPM packages (e.g., internal packages with __)
+      if (packageName.includes('__') || packageName.startsWith('resolver-binding-') || packageName.startsWith('wasm-')) {
+        return null;
+      }
+
+      // Handle scoped packages (e.g., @babel/traverse -> @babel%2Ftraverse)
+      const encodedPackageName = packageName.replace('/', '%2F');
+      
+      const res = await fetch(`https://registry.npmjs.org/${encodedPackageName}`);
+
+      if (!res.ok) {
+        // 404 is expected for packages that don't exist in NPM - don't log warnings
+        // Only log for unexpected errors (5xx, network errors, etc.)
+        if (res.status !== 404) {
+          this.logger.debug(`Failed to fetch metadata for ${packageName}: ${res.status}`);
+        }
+        return null;
+      }
+
+      const data = await res.json();
+      const repoUrl = data?.repository?.url;
+
+      if (!repoUrl) return null;
+
+      return this.normalizeRepoUrl(repoUrl);
+    } catch (err) {
+      // Silently handle errors - these are expected for packages not in NPM
+      return null;
+    }
+  }
+
+  /**
+   * Normalize repository URL
+   */
+  private normalizeRepoUrl(repo: string): string | null {
+    if (!repo) return null;
+
+    let url = repo.trim();
+    url = url.replace(/^git\+/, '');
+    url = url.replace(/^git:\/\//, 'https://');
+    url = url.replace(/^git@([^:]+):/, 'https://$1/');
+    url = url.replace(/\.git$/, '');
+    url = url.replace(/\/+$/, '');
+    url = url.replace(/([^:]\/)\/+/g, '$1');
+
+    return url;
+  }
+
+  /**
+   * Import CycloneDX SBOM into Memgraph
+   */
+  async importCycloneDxSbom(sbomJson: any, sbomId: string) {
+    this.logger.log(`Importing SBOM components and dependencies`);
+    
+    const projectId = sbomJson.metadata?.properties?.find(
+      (prop: any) => prop.name === 'deply:project:id'
+    )?.value || sbomId;
+    
+    // Create root package node
+    const rootComponent = sbomJson.metadata?.component;
+    if (rootComponent) {
+      const rootPurl = rootComponent.purl || rootComponent['bom-ref'] || `${rootComponent.name}@${rootComponent.version || ''}`;
+      const rootPackageName = rootComponent.name;
+      const rootVersion = rootComponent.version || '';
+      const rootLicense = rootComponent.licenses?.[0]?.license?.id || rootComponent.licenses?.[0]?.license?.name || null;
+      
+      let existingPackage = null;
+      try {
+        existingPackage = await this.sbomRepo.getPackageById(sbomId);
+        if (!existingPackage) {
+          existingPackage = await this.sbomRepo.findPackageByName(rootPackageName);
+        }
+      } catch (error) {
+        this.logger.error(`Error checking for existing package ${rootPackageName}:`, error);
+      }
+      
+      const rootDbPackageId = sbomId;
+      
+      const session = this.driver.session();
+      try {
+        await session.run(
+          `
+          MERGE (p:Package {purl: $purl})
+          SET p.name = $name,
+              p.version = $version,
+              p.license = $license,
+              p.type = $type,
+              p.bom_ref = $bom_ref,
+              p.db_package_id = $db_package_id
+          WITH p
+          MATCH (s:SBOM {id: $sbomId})
+          MERGE (p)-[:BELONGS_TO]->(s)
+          `,
+          {
+            purl: rootPurl,
+            name: rootPackageName,
+            version: rootVersion,
+            license: rootLicense,
+            type: rootComponent.type || 'application',
+            bom_ref: rootComponent['bom-ref'] || rootPurl,
+            db_package_id: rootDbPackageId,
+            sbomId
+          }
+        );
+        this.logger.log(`✅ Created root package node: ${rootPackageName}@${rootVersion} with db_package_id: ${rootDbPackageId}`);
+      } catch (error) {
+        this.logger.error(`❌ Error creating root package node:`, error);
+      } finally {
+        await session.close();
+      }
+    } else {
+      this.logger.warn(`⚠️ No root component found in SBOM metadata for ${sbomId}, creating fallback root package`);
+      
+      let packageName = sbomId;
+      let packageVersion = '';
+      try {
+        const existingPackage = await this.sbomRepo.getPackageById(sbomId);
+        if (existingPackage) {
+          packageName = existingPackage.package_name || sbomId;
+          packageVersion = (existingPackage as any).version || '';
+        }
+      } catch (error) {
+        this.logger.error(`Error checking for existing package ${sbomId}:`, error);
+      }
+      
+      const fallbackPurl = `pkg:generic/${packageName}@${packageVersion || 'unknown'}`;
+      const rootDbPackageId = sbomId;
+      
+      const session = this.driver.session();
+      try {
+        await session.run(
+          `
+          MERGE (p:Package {purl: $purl})
+          SET p.name = $name,
+              p.version = $version,
+              p.db_package_id = $db_package_id,
+              p.type = 'application'
+          WITH p
+          MATCH (s:SBOM {id: $sbomId})
+          MERGE (p)-[:BELONGS_TO]->(s)
+          `,
+          {
+            purl: fallbackPurl,
+            name: packageName,
+            version: packageVersion,
+            db_package_id: rootDbPackageId,
+            sbomId
+          }
+        );
+        this.logger.log(`✅ Created fallback root package node: ${packageName}@${packageVersion || 'unknown'} with db_package_id: ${rootDbPackageId}`);
+      } catch (error) {
+        this.logger.error(`❌ Error creating fallback root package node:`, error);
+      } finally {
+        await session.close();
+      }
+    }
+    
+    // Batch create all components
+    const components = sbomJson.components || [];
+    if (components.length > 0) {
+      const componentPromises = components.map(async (c) => {
+        const purl = c.purl || c['bom-ref'] || `${c.name}@${c.version || ''}`;
+        const packageName = c.name;
+        
+        const purlName = this.extractNameFromPurl(purl);
+        const finalPackageName = purlName || packageName;
+        const license = c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null;
+        const repoUrl = await this.getRepoUrlFromNpm(finalPackageName);
+        
+        let existingPackage = null;
+        try {
+          existingPackage = await this.sbomRepo.findPackageByName(finalPackageName);
+        } catch (error) {
+          this.logger.error(`Error checking for existing package ${finalPackageName}:`, error);
+        }
+        this.sbomRepo.upsertPackage(finalPackageName, repoUrl, license);
+        
+        const dbPackageId = existingPackage?.id || null;
+        
+        return {
+          purl: purl,
+          name: packageName,
+          version: c.version || '',
+          license: c.licenses?.[0]?.license?.id || c.licenses?.[0]?.license?.name || null,
+          scope: c.scope || '',
+          type: c.type || '',
+          bom_ref: c['bom-ref'] || '',
+          hashes: Object.values(c.hashes || {}),
+          db_package_id: dbPackageId,
+        };
+      });
+
+      const componentData = await Promise.all(componentPromises);
+
+      const session = this.driver.session();
+      try {
+        await session.run(
+          `
+          UNWIND $components AS comp
+          MERGE (p:Package {purl: comp.purl})
+          SET p.name = comp.name,
+              p.version = comp.version,
+              p.license = comp.license,
+              p.scope = comp.scope,
+              p.type = comp.type,
+              p.bom_ref = comp.bom_ref,
+              p.hashes = comp.hashes,
+              p.db_package_id = comp.db_package_id
+          WITH p
+          MATCH (s:SBOM {id: $sbomId})
+          MERGE (p)-[:BELONGS_TO]->(s)
+          `,
+          { components: componentData, sbomId }
+        );
+        this.logger.log(`Batch created ${components.length} package nodes with PostgreSQL links`);
+      } catch (error) {
+        this.logger.error(`Error batch creating package nodes:`, error);
+      } finally {
+        await session.close();
+      }
+    }
+
+    // Batch create all dependencies
+    const dependencies = [];
+    for (const dep of (sbomJson.dependencies || [])) {
+      const fromRef = dep.ref;
+      for (const toRef of (dep.dependsOn || [])) {
+        dependencies.push({ from: fromRef, to: toRef });
+      }
+    }
+
+    if (dependencies.length > 0) {
+      const session = this.driver.session();
+      try {
+        await session.run(
+          `
+          UNWIND $dependencies AS dep
+          MATCH (a:Package {purl: dep.from}), (b:Package {purl: dep.to})
+          MERGE (a)-[:DEPENDS_ON]->(b)
+          `,
+          { dependencies }
+        );
+        this.logger.log(`Batch created ${dependencies.length} dependency relationships`);
+      } catch (error) {
+        this.logger.error(`Error batch creating dependencies:`, error);
+      } finally {
+        await session.close();
+      }
+    }
+    
+    this.logger.log(`Importing SBOM components and dependencies completed`);
+  }
+}
+

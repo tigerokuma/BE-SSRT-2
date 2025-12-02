@@ -1,23 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
-import { CreateSbomDto } from '../dto/sbom.dto';
 import { simpleGit } from 'simple-git';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as Docker from 'dockerode';
 import * as os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { ConnectionService } from '../../../common/azure/azure.service';
-
-const execAsync = promisify(exec);
+import { SbomGenerationService } from './sbom-generation.service';
 
 @Injectable()
 export class SbomBuilderService {
   constructor(
     private readonly sbomRepo: SbomRepository,
     private readonly azureService: ConnectionService,
+    private readonly sbomGenerationService: SbomGenerationService,
   ) {}
 
   private readonly logger = new Logger(SbomBuilderService.name);
@@ -137,130 +134,12 @@ export class SbomBuilderService {
     }
   }
 
-  // Generate SBOM using local or remote command execution based on CDXGEN_LOCATION env variable
+  /**
+   * @deprecated Use SbomGenerationService.generateSbom instead
+   * This method delegates to SbomGenerationService for backward compatibility
+   */
   private async genSbom(packageName: string, version?: string): Promise<string> {
-    let sbom: any;
-    
-    // Check CDXGEN_LOCATION environment variable
-    // "local" = run locally, "remote" or undefined = run remotely
-    const cdxgenLocation = process.env.CDXGEN_LOCATION?.toLowerCase() || 'remote';
-    const useLocal = cdxgenLocation === 'local';
-    
-    try {
-      const packageVersion = version ? `${packageName}@${version}` : packageName;
-      let result: { stdout: string; stderr: string };
-      
-      if (useLocal) {
-        // Execute local command to generate SBOM
-        const scriptPath = path.join(process.cwd(), 'scripts', 'gen_sbom.sh');
-        const command = `bash "${scriptPath}" ${packageVersion}`;
-        
-        this.logger.log(`Executing local SBOM generation command: ${command}`);
-        
-        result = await execAsync(command, {
-          cwd: process.cwd(),
-          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-        });
-
-        // Check if there's stderr output as an indicator of issues
-        if (result.stderr && result.stderr.trim().length > 0) {
-          this.logger.warn(`SBOM generation stderr: ${result.stderr}`);
-        }
-      } else {
-        console.log("wrong");
-        // Execute remote command to generate SBOM
-        // this.logger.log(`Executing remote SBOM generation command for: ${packageVersion}`);
-        
-        // const remoteResult = await this.azureService.executeRemoteCommand(
-        //   `./scripts/gen_sbom.sh ${packageVersion}`,
-        // );
-
-        // if (remoteResult.code !== 0) {
-        //   this.logger.error(
-        //     `Remote SBOM generation failed with code ${remoteResult.code}: ${remoteResult.stderr}`,
-        //   );
-        //   throw new Error(`SBOM generation failed: ${remoteResult.stderr}`);
-        // }
-        
-        // // Convert remote result format to match local format
-        // result = {
-        //   stdout: remoteResult.stdout || '',
-        //   stderr: remoteResult.stderr || '',
-        // };
-      }
-      
-      // Parse the SBOM from stdout (works for both local and remote)
-      try {
-        const output = `${result.stdout}\n${result.stderr}`;
-        const match = output.match(
-          /----- SBOM OUTPUT START -----(.*?)----- SBOM OUTPUT END -----/s
-        );
-
-        
-        if (!match) {
-          throw new Error("Failed to extract SBOM JSON from output");
-        }
-        
-        const sbomJson = match[1].trim();
-        sbom = JSON.parse(sbomJson);
-        
-        this.logger.log(`SBOM generation successful (${useLocal ? 'local' : 'remote'})`);
-      } catch (parseError) {
-        this.logger.error(
-          `Failed to parse SBOM JSON from ${useLocal ? 'local' : 'remote'} output: ${parseError.message}`,
-        );
-        throw new Error(`Invalid SBOM JSON received from ${useLocal ? 'local' : 'remote'} command`);
-      }
-    } catch (err: any) {
-      this.logger.error(
-        `${useLocal ? 'Local' : 'Remote'} SBOM generation failed: ${err.message}. Writing empty SBOM.`,
-      );
-
-      // Fallback: write empty SBOM
-      sbom = {
-        bomFormat: 'CycloneDX',
-        specVersion: '1.5',
-        version: 1,
-        components: [],
-      };
-    }
-
-    // Post-process: ensure licenses are populated using purl (npm/GitHub)
-    try {
-
-      if (Array.isArray(sbom.components)) {
-        // Find components that need license enrichment
-        const componentsNeedingLicense = sbom.components.filter(component => {
-          const hasLicenseArray = Array.isArray(component.licenses) && component.licenses.length > 0;
-          const currentLicense = hasLicenseArray ? (component.licenses[0]?.license?.id || component.licenses[0]?.license?.name) : undefined;
-          return !currentLicense && component.purl;
-        });
-
-        if (componentsNeedingLicense.length > 0) {
-          // Fetch licenses in parallel (batch of 10 to avoid rate limits)
-          const batchSize = 10;
-          for (let i = 0; i < componentsNeedingLicense.length; i += batchSize) {
-            const batch = componentsNeedingLicense.slice(i, i + batchSize);
-            const licensePromises = batch.map(async (component) => {
-              try {
-                const fetched = await this.getLicenseFromPurl(component.purl);
-                if (fetched && typeof fetched === 'string') {
-                  component.licenses = [{ license: { id: fetched } }];
-                }
-              } catch (e) {
-                // ignore fetch errors per component
-              }
-            });
-            
-            await Promise.all(licensePromises);
-          }
-        }
-      }
-    } catch (e) {
-      this.logger.warn(`License enrichment skipped: ${e?.message || e}`);
-    }
-
-    return JSON.stringify(sbom, null, 2);
+    return this.sbomGenerationService.generateSbom(packageName, version);
   }
 
   private async cleanupTempFolder(repoPath: string) {
@@ -272,55 +151,14 @@ export class SbomBuilderService {
     }
   }
 
-  private async getLicenseFromPurl(purl: string): Promise<string> {
-    try {
-      // Example purl: "pkg:npm/lodash@4.17.21"
-      const match = purl.match(/^pkg:(\w+)\/([^@]+)(?:@(.+))?/);
-      if (!match) return "";
-
-      const [, type, name, version] = match;
-      if (type === 'npm') {
-        const res = await fetch(`https://registry.npmjs.org/${name}`);
-        if (res.ok) {
-          const data = await res.json();
-          // Handle different license formats from npm registry
-          if (typeof data.license === 'string') {
-            return data.license;
-          } else if (typeof data.license === 'object' && data.license !== null) {
-            return data.license.type || data.license.name || "";
-          }
-        }
-      }
-      // Add similar logic for PyPI, Maven, etc.
-      return "";
-    } catch (error) {
-      console.error(`Error fetching license for ${purl}: ${error}`);
-      return "";
-    }
-  }
 
 
+  /**
+   * @deprecated Use SbomGenerationService.addSbom instead
+   * This method delegates to SbomGenerationService for backward compatibility
+   */
   async addSbom(packageId: string, version?: string) {
-    const packageInfo = await this.sbomRepo.getPackageById(packageId);
-    if (!packageInfo) {
-      throw new Error(`Package with ID ${packageId} not found`);
-    }
-
-    const packageName = packageInfo.package_name;
-    console.log(`Package Name: ${packageName}`);
-    const data = await this.genSbom(packageName, version);
-    const jsonData = await JSON.parse(data);
-    const createSbomDto: CreateSbomDto = {
-      id: packageId,
-      sbom: jsonData,
-    };
-    await this.sbomRepo.upsertPackageSbom(createSbomDto);
-
-    return {
-      sbom: jsonData,
-      packageName,
-      version,
-    };
+    return this.sbomGenerationService.addSbom(packageId, version);
   }
 
   private async writeSbomsToTempFiles(sboms: Array<{ sbom: any }>) {
