@@ -7,28 +7,41 @@ import { SbomController } from './controllers/sbom.controller';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueModule } from 'src/common/queue/queue.module';
 import { SbomProcessor } from './processors/sbom.processor';
-import { SbomMemgraph } from './services/sbom-graph-builder.service';
 import { DependencyOptimizerService } from './services/dependency-upgrade.service';
-import { DependenciesModule } from '../dependencies/dependencies.module';
 import { AzureModule } from '../../common/azure/azure.module';
+// New reorganized services
+import { SbomGenerationService } from './services/sbom-generation.service';
+import { SbomMemgraphService } from './services/sbom-memgraph.service';
+import { SbomGraphService } from './services/sbom-graph.service';
 
 @Module({
   imports: [
     QueueModule,
-    DependenciesModule,
     AzureModule,
   ],
   providers: [
     SbomRepository,
+    // New reorganized services (must be before old ones for dependency injection)
+    SbomGenerationService,
+    SbomMemgraphService,
+    SbomGraphService,
+    // Legacy services (kept for backward compatibility)
     SbomBuilderService,
     SbomQueryService,
     SbomQueueService,
     SbomProcessor,
     PrismaService,
-    SbomMemgraph,
     DependencyOptimizerService,
   ],
   controllers: [SbomController],
-  exports: [SbomQueueService, SbomBuilderService, SbomQueryService],
+  exports: [
+    SbomQueueService, 
+    SbomBuilderService, 
+    SbomQueryService,
+    // Export new services
+    SbomGenerationService,
+    SbomMemgraphService,
+    SbomGraphService,
+  ],
 })
 export class SbomModule {}

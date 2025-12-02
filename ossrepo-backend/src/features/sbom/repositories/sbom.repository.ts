@@ -148,20 +148,41 @@ export class SbomRepository {
   }
 
   async getProjectDependencySboms(projectId: string) {
-    // Get all project dependencies for a project through project_dependencies table
-    const projectDeps = await this.prisma.project_dependencies.findMany({
-      where: { project_id: projectId },
-      include: { 
-        Package: {
-          select: { package_name: true }
-        }
+    // First, get the project to find its monitored branch
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        monitored_branch_id: true,
       },
     });
 
-    // Get corresponding watchlist IDs for these packages
-    const packageNames = projectDeps
-      .map((dep) => dep.Package?.package_name)
-      .filter((name): name is string => name !== null && name !== undefined);
+    let packageNames: string[] = [];
+
+    // Get branch dependencies from the monitored branch (these are the actual project dependencies)
+    if (project?.monitored_branch_id) {
+      const branchDeps = await this.prisma.branchDependency.findMany({
+        where: { monitored_branch_id: project.monitored_branch_id },
+        select: {
+          name: true,
+        },
+      });
+      packageNames = branchDeps.map(dep => dep.name);
+    }
+
+    // Fallback to project_dependencies if no monitored branch
+    if (packageNames.length === 0) {
+      const projectDeps = await this.prisma.project_dependencies.findMany({
+        where: { project_id: projectId },
+        include: { 
+          Package: {
+            select: { package_name: true }
+          }
+        },
+      });
+      packageNames = projectDeps
+        .map((dep) => dep.Package?.package_name)
+        .filter((name): name is string => name !== null && name !== undefined);
+    }
 
     if (packageNames.length === 0) {
       return [];
@@ -174,6 +195,10 @@ export class SbomRepository {
     });
 
     const packageIds = packageEntries.map(p => p.package_id);
+
+    if (packageIds.length === 0) {
+      return [];
+    }
 
     // Find watchlists for these packages
     const watchlists = await this.prisma.watchlist.findMany({
@@ -194,7 +219,35 @@ export class SbomRepository {
   }
 
   async getProjectDependencies(projectId: string) {
-    // Get all project dependencies for a project
+    // First, get the project to find its monitored branch
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        monitored_branch_id: true,
+      },
+    });
+
+    // Get branch dependencies from the monitored branch (these are the actual project dependencies)
+    if (project?.monitored_branch_id) {
+      const branchDeps = await this.prisma.branchDependency.findMany({
+        where: { monitored_branch_id: project.monitored_branch_id },
+        select: {
+          package_id: true,
+          name: true,
+          version: true,
+        },
+      });
+
+      return branchDeps
+        .filter((dep) => dep.package_id !== null)
+        .map((dep) => ({
+          package_id: dep.package_id!,
+          package_name: dep.name,
+          version: dep.version,
+        }));
+    }
+
+    // Fallback to project_dependencies if no monitored branch
     const projectDeps = await this.prisma.project_dependencies.findMany({
       where: { project_id: projectId },
       select: {
