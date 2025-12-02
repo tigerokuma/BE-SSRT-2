@@ -24,3 +24,7 @@ export class UpdateUserDto {
 export class IngestClerkGithubDto {
   clerk_id: string
 }
+
+export class IngestClerkJiraDto {
+  clerk_id: string
+}

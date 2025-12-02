@@ -23,6 +23,6 @@ import { ScheduleModule } from '@nestjs/schedule';
     JiraRepository,
     EmailRepository,
   ],
-  exports: [SlackService],
+  exports: [SlackService, JiraRepository, JiraService],
 })
 export class AlertModule {}

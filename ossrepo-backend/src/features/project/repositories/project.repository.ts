@@ -101,7 +101,6 @@ export class ProjectRepository {
         monitoredBranch: true,
       },
     });
-    console.log('getProjectWithBranch result:', JSON.stringify(result, null, 2));
     return result;
   }
 
