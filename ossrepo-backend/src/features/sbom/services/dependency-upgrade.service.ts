@@ -438,9 +438,13 @@ export class DependencyOptimizerService {
     const projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
     projectDeps = [...projectDeps, ...projectWatchlist];
 
-    const uniquePackages = new Map<string, { package_id: string; package_name?: string }>();
+    const uniquePackages = new Map<string, { package_id: string; package_name?: string; version?: string }>();
+    const packageNames = new Map<string, string>(); // Map package_id to package_name for watchlist packages
     for (const dep of projectDeps) {
       uniquePackages.set(dep.package_id, dep);
+      if (dep.package_name) {
+        packageNames.set(dep.package_id, dep.package_name);
+      }
     }
 
     if (!uniquePackages.size) {
@@ -451,16 +455,24 @@ export class DependencyOptimizerService {
     const session = this.driver.session();
 
     try {
+      // Query by db_package_id first, then fallback to package name for watchlist packages
       const result = await session.run(
         `
         MATCH (p:Package)
         WHERE p.db_package_id IN $packageIds
+           OR (p.db_package_id IS NULL AND p.name IN $packageNames)
         OPTIONAL MATCH (p)-[:DEPENDS_ON]->(dep:Package)
-        RETURN p.db_package_id AS packageId,
+        WITH p, collect(DISTINCT dep.name) AS depNames, collect(DISTINCT dep.db_package_id) AS depIds
+        RETURN COALESCE(p.db_package_id, p.name) AS packageId,
                COALESCE(p.name, p.purl) AS packageName,
-               collect(DISTINCT dep.db_package_id) AS dependencies
+               depNames AS dependencyNames,
+               depIds AS dependencies,
+               size(depNames) AS dependencyCount
         `,
-        { packageIds },
+        { 
+          packageIds: packageIds.filter(id => id !== null),
+          packageNames: Array.from(packageNames.values())
+        },
       );
 
       type DependencyInfo = { deps: Set<string>; dependencyCount: number };
@@ -502,7 +514,13 @@ export class DependencyOptimizerService {
         dependentsMap.set(pkgId, dependents);
       }
 
-      const stats = packageIds.map((packageId) => {
+      const stats = packageIds
+        .filter((packageId) => {
+          // Only include packages with at least 5 dependencies in flattening calculation
+          const info = dependencySets.get(packageId);
+          return info && info.dependencyCount >= 3;
+        })
+        .map((packageId) => {
         const pkgMeta = uniquePackages.get(packageId);
         const info = dependencySets.get(packageId) ?? { deps: new Set(), dependencyCount: 0 };
         const dependencyCount = info.dependencyCount;
@@ -811,7 +829,7 @@ export class DependencyOptimizerService {
   private async calculatePackageDependencyStats(
     projectId: string,
     packageName: string,
-    packageVersion: string,
+    packageVersion: string | null | undefined,
     excludePackageName?: string
   ) {
     const session = this.driver.session();
@@ -862,16 +880,48 @@ export class DependencyOptimizerService {
         }));
   
       // --- QUERY FOR TARGET PACKAGE DEPENDENCIES (by PURL) ---
-      // First, find the target package's PURL
+      // For watchlist packages (version is null/empty), find the latest version in Memgraph
+      let effectiveVersion = packageVersion;
+      if (!effectiveVersion || effectiveVersion === 'null' || effectiveVersion === '' || effectiveVersion === 'unknown') {
+        const latestVersionResult = await session.run(
+          `
+          MATCH (p:Package)
+          WHERE toLower(p.name) = toLower($name)
+            AND p.version IS NOT NULL 
+            AND p.version <> ''
+            AND p.version <> 'unknown'
+          WITH p.version AS version
+          ORDER BY version DESC
+          LIMIT 1
+          RETURN version
+          `,
+          { name: packageName },
+        );
+        if (latestVersionResult.records.length > 0) {
+          effectiveVersion = latestVersionResult.records[0].get('version');
+          this.logger.debug(`Found latest version for watchlist package ${packageName}: ${effectiveVersion}`);
+        } else {
+          // No version found in Memgraph, return empty stats
+          this.logger.warn(`No version found in Memgraph for watchlist package: ${packageName}`);
+          return {
+            separateCount: 0,
+            sharedCount: 0,
+            dependencyDetails: [],
+          };
+        }
+      }
+      
+      // First, find the target package's PURL using the effective version
       const findTargetPurlQuery = `
-        MATCH (p:Package {name: $name, version: $version})
+        MATCH (p:Package)
+        WHERE toLower(p.name) = toLower($name) AND p.version = $version
         RETURN p.purl AS purl
         LIMIT 1
       `;
       
       const targetPurlResult = await session.run(findTargetPurlQuery, { 
         name: packageName, 
-        version: packageVersion 
+        version: effectiveVersion 
       });
       
       let targetPurl: string | null = null;
@@ -881,7 +931,7 @@ export class DependencyOptimizerService {
       
       // If no PURL found, construct one (fallback)
       if (!targetPurl) {
-        targetPurl = `pkg:npm/${packageName}@${packageVersion}`;
+        targetPurl = `pkg:npm/${packageName}@${effectiveVersion}`;
       }
   
       const targetQuery = `
