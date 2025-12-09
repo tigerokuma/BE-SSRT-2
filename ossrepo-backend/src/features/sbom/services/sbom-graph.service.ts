@@ -512,4 +512,46 @@ export class SbomGraphService {
       await session.close();
     }
   }
+
+  /**
+   * Get package ID (db_package_id) from Memgraph by package name and version
+   */
+  async getPackageIdByNameAndVersion(
+    packageName: string,
+    version?: string,
+  ): Promise<string | null> {
+    const session = this.driver.session();
+    try {
+      const query = version
+        ? `
+        MATCH (p:Package {name: $packageName, version: $version})
+        RETURN p.db_package_id AS packageId
+        LIMIT 1
+        `
+        : `
+        MATCH (p:Package {name: $packageName})
+        RETURN p.db_package_id AS packageId
+        ORDER BY p.version DESC
+        LIMIT 1
+        `;
+
+      const params = version ? { packageName, version } : { packageName };
+      const result = await session.run(query, params);
+
+      if (result.records.length > 0) {
+        const packageId = result.records[0].get('packageId');
+        return packageId || null;
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `Error getting package ID for ${packageName}${version ? `@${version}` : ''}:`,
+        error,
+      );
+      return null;
+    } finally {
+      await session.close();
+    }
+  }
 }

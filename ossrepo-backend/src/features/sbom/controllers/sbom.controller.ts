@@ -85,4 +85,16 @@ export class SbomController {
     });
   }
 
+  @Get('package-id/:package_name')
+  async getPackageId(
+    @Param('package_name') packageName: string,
+    @Query('version') version?: string,
+  ) {
+    const packageId = await this.sbomGraphService.getPackageIdByNameAndVersion(
+      packageName,
+      version,
+    );
+    return { packageId };
+  }
+
 }
