@@ -554,4 +554,40 @@ export class SbomGraphService {
       await session.close();
     }
   }
+
+  /**
+   * Check if package exists in Memgraph by package name and version
+   */
+  async packageExistsInMemgraph(
+    packageName: string,
+    version?: string,
+  ): Promise<boolean> {
+    const session = this.driver.session();
+    try {
+      const query = version
+        ? `
+        MATCH (p:Package {name: $packageName, version: $version})
+        RETURN p
+        LIMIT 1
+        `
+        : `
+        MATCH (p:Package {name: $packageName})
+        RETURN p
+        LIMIT 1
+        `;
+
+      const params = version ? { packageName, version } : { packageName };
+      const result = await session.run(query, params);
+
+      return result.records.length > 0;
+    } catch (error) {
+      this.logger.error(
+        `Error checking if package exists in Memgraph for ${packageName}${version ? `@${version}` : ''}:`,
+        error,
+      );
+      return false;
+    } finally {
+      await session.close();
+    }
+  }
 }

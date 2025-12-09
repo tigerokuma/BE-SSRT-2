@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import neo4j from 'neo4j-driver';
 import { SbomRepository } from '../repositories/sbom.repository';
 import { ConnectionService } from '../../../common/azure/azure.service';
+import { DependencyQueueService } from '../../dependencies/services/dependency-queue.service';
 
 /**
  * Service for Memgraph CRUD operations
@@ -18,6 +19,8 @@ export class SbomMemgraphService {
   constructor(
     private readonly sbomRepo: SbomRepository,
     private readonly connectionService: ConnectionService,
+    @Optional() @Inject(forwardRef(() => DependencyQueueService))
+    private readonly dependencyQueueService?: DependencyQueueService,
   ) {}
 
   /**
@@ -182,9 +185,18 @@ export class SbomMemgraphService {
   async importCycloneDxSbom(sbomJson: any, sbomId: string) {
     this.logger.log(`Importing SBOM components and dependencies`);
     
-    const projectId = sbomJson.metadata?.properties?.find(
+    // Try to get projectId from SBOM metadata, or try to find it from package
+    let projectId = sbomJson.metadata?.properties?.find(
       (prop: any) => prop.name === 'deply:project:id'
-    )?.value || sbomId;
+    )?.value;
+    
+    // If not in metadata, try to find project from package dependencies
+    // Note: For package-level SBOMs, we may not have a projectId
+    // In that case, we'll use sbomId as fallback but tasks may not be created
+    if (!projectId) {
+      this.logger.log(`No projectId found in SBOM metadata, using sbomId as fallback: ${sbomId}`);
+      projectId = sbomId;
+    }
     
     // Create root package node
     const rootComponent = sbomJson.metadata?.component;
@@ -350,12 +362,38 @@ export class SbomMemgraphService {
       }
     }
 
-    // Batch create all dependencies
+    // Batch create all dependencies and collect dependency packages for task creation
     const dependencies = [];
+    const dependencyPackages = new Map<string, { name: string; version?: string; repoUrl?: string }>();
+    
     for (const dep of (sbomJson.dependencies || [])) {
       const fromRef = dep.ref;
       for (const toRef of (dep.dependsOn || [])) {
         dependencies.push({ from: fromRef, to: toRef });
+        
+        // Find the component for the dependency to get its details
+        const depComponent = sbomJson.components?.find((c: any) => {
+          const compRef = c.purl || c['bom-ref'] || `${c.name}@${c.version || ''}`;
+          return compRef === toRef;
+        });
+        
+        if (depComponent) {
+          const depName = depComponent.name;
+          const depVersion = depComponent.version;
+          const depPurl = depComponent.purl || depComponent['bom-ref'] || `${depName}@${depVersion || ''}`;
+          const purlName = this.extractNameFromPurl(depPurl);
+          const finalDepName = purlName || depName;
+          
+          // Only add if not already in map (avoid duplicates)
+          if (!dependencyPackages.has(finalDepName)) {
+            const repoUrl = await this.getRepoUrlFromNpm(finalDepName);
+            dependencyPackages.set(finalDepName, {
+              name: finalDepName,
+              version: depVersion,
+              repoUrl: repoUrl || undefined,
+            });
+          }
+        }
       }
     }
 
@@ -375,6 +413,35 @@ export class SbomMemgraphService {
         this.logger.error(`Error batch creating dependencies:`, error);
       } finally {
         await session.close();
+      }
+    }
+    
+    // Create dependency tasks for each dependency found in SBOM
+    if (this.dependencyQueueService && dependencyPackages.size > 0) {
+      this.logger.log(`Creating dependency tasks for ${dependencyPackages.size} dependencies found in SBOM`);
+      
+      for (const [depName, depInfo] of dependencyPackages.entries()) {
+        try {
+          // Check if package exists in database
+          const existingPackage = await this.sbomRepo.findPackageByName(depName);
+          
+          if (existingPackage) {
+            // Package exists, queue full setup task
+            await this.dependencyQueueService.queueFullSetup({
+              packageId: existingPackage.id,
+              packageName: depName,
+              repoUrl: depInfo.repoUrl,
+              projectId: projectId,
+            });
+            this.logger.log(`Queued full setup task for existing dependency: ${depName}`);
+          } else {
+            // Package doesn't exist, we need to create it first or queue fast setup
+            // For now, we'll just log it - the package will be created when needed
+            this.logger.log(`Dependency ${depName} not found in database, skipping task creation`);
+          }
+        } catch (error) {
+          this.logger.error(`Error creating dependency task for ${depName}:`, error);
+        }
       }
     }
     

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { AiModule } from '../../common/ai/ai.module';
@@ -30,7 +30,7 @@ import { SbomModule } from '../sbom/sbom.module';
     PackagesModule,
     GraphModule,
     AzureModule,
-    SbomModule,
+    forwardRef(() => SbomModule),
   ],
   providers: [
     FastSetupProcessor,

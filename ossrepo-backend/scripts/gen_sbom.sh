@@ -6,8 +6,8 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
 if [ -z "$1" ]; then
-  echo "Usage: ./gen_sbom_remote.sh <package[@version]>"
-  echo "Example: ./gen_sbom_remote.sh express@4.18.0"
+  echo "Usage: ./scripts/gen_sbom.sh <package[@version]>"
+  echo "Example: ./scripts/gen_sbom.sh express@4.18.0"
   exit 1
 fi
 

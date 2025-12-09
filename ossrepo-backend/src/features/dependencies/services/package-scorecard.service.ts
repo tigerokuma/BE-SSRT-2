@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { ConnectionService } from '../../../common/azure/azure.service';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as path from 'path';
+
+const execAsync = promisify(exec);
 
 export interface ScorecardResult {
   score: number;
@@ -12,7 +17,6 @@ export interface ScorecardResult {
 @Injectable()
 export class PackageScorecardService {
   private readonly logger = new Logger(PackageScorecardService.name);
-  private readonly scorecardPath = 'scorecard'; // Assuming scorecard is in PATH
 
   constructor(
     private readonly prisma: PrismaService,
@@ -54,37 +58,89 @@ export class PackageScorecardService {
   }
 
   /**
-   * Run scorecard locally on a repository
+   * Run scorecard on a repository (local or remote based on SCORECARD_LOCATION env)
    */
-  async runScorecardLocally(
+  async runScorecardRemotely(
     repoPath: string,
-    commitSha?: string
+    commitSha?: string,
+    owner?: string,
+    repo?: string
   ): Promise<ScorecardResult | null> {
     try {
-      let command: string;
-
-      if (commitSha) {
-        command = `docker run --rm gcr.io/openssf/scorecard:stable --local=${repoPath} --commit=${commitSha} --format=json --show-details`;
-        this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}@${commitSha.substring(0, 8)}`);
-      } else {
-        command = `docker run --rm gcr.io/openssf/scorecard:stable --local=${repoPath} --format=json --show-details`;
-        this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}`);
-      }
-
+      // Check SCORECARD_LOCATION environment variable
+      const scorecardLocation = process.env.SCORECARD_LOCATION?.toLowerCase() || 'remote';
+      
+      const useLocal = scorecardLocation === 'local';
       let stdout: string;
       let stderr: string;
 
-      try {
-        const result = await this.azureService.executeRemoteCommand(command);
-        stdout = result.stdout;
-        stderr = result.stderr;
+      if (useLocal) {
+        // Execute local command using the script
+        const scriptPath = path.join(process.cwd(), 'scripts', 'run_scorecard.sh');
         
-        if (result.code !== 0) {
-          this.logger.warn(`⚠️ Scorecard command exited with code ${result.code}`);
+        // Build command with proper escaping
+        let command: string;
+        if (commitSha && owner && repo) {
+          command = `bash "${scriptPath}" "${repoPath}" "${commitSha}" "${owner}" "${repo}"`;
+          this.logger.log(`🔍 Running Scorecard locally on repository ${repoPath}@${commitSha.substring(0, 8)}`);
+        } else if (commitSha) {
+          command = `bash "${scriptPath}" "${repoPath}" "${commitSha}"`;
+          this.logger.log(`🔍 Running Scorecard locally on repository ${repoPath}@${commitSha.substring(0, 8)}`);
+        } else if (owner && repo) {
+          command = `bash "${scriptPath}" "${repoPath}" "" "${owner}" "${repo}"`;
+          this.logger.log(`🔍 Running Scorecard locally on repository ${repoPath}`);
+        } else {
+          command = `bash "${scriptPath}" "${repoPath}"`;
+          this.logger.log(`🔍 Running Scorecard locally on repository ${repoPath}`);
         }
-      } catch (execError: any) {
-        this.logger.error(`❌ Scorecard failed for ${repoPath}: ${execError.message}`);
-        return null;
+
+        try {
+          const result = await execAsync(command, {
+            cwd: process.cwd(),
+            maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+          });
+          stdout = result.stdout;
+          stderr = result.stderr;
+        } catch (execError: any) {
+          this.logger.error(`❌ Scorecard failed for ${repoPath}: ${execError.message}`);
+          return null;
+        }
+      } else {
+        // Execute remote command using the script
+        const scriptPath = './scripts/run_scorecard.sh';
+        
+        // Build command with proper escaping
+        let command: string;
+        if (commitSha && owner && repo) {
+          command = `bash ${scriptPath} "${repoPath}" "${commitSha}" "${owner}" "${repo}"`;
+          this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}@${commitSha.substring(0, 8)}`);
+        } else if (commitSha) {
+          command = `bash ${scriptPath} "${repoPath}" "${commitSha}"`;
+          this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}@${commitSha.substring(0, 8)}`);
+        } else if (owner && repo) {
+          command = `bash ${scriptPath} "${repoPath}" "" "${owner}" "${repo}"`;
+          this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}`);
+        } else {
+          command = `bash ${scriptPath} "${repoPath}"`;
+          this.logger.log(`🔍 Running Scorecard remotely on repository ${repoPath}`);
+        }
+
+        try {
+          const result = await this.azureService.executeRemoteCommand(command);
+          stdout = result.stdout;
+          stderr = result.stderr;
+          
+          if (result.code !== 0) {
+            this.logger.warn(`⚠️ Scorecard command exited with code ${result.code}`);
+            if (stderr) {
+              this.logger.warn(`⚠️ stderr: ${stderr}`);
+            }
+            return null;
+          }
+        } catch (execError: any) {
+          this.logger.error(`❌ Scorecard failed for ${repoPath}: ${execError.message}`);
+          return null;
+        }
       }
 
       let scorecardData;
@@ -92,6 +148,9 @@ export class PackageScorecardService {
         scorecardData = JSON.parse(stdout);
       } catch (parseError) {
         this.logger.error(`❌ Failed to parse Scorecard JSON for ${repoPath}`);
+        if (stderr) {
+          this.logger.error(`❌ stderr: ${stderr}`);
+        }
         return null;
       }
 
@@ -109,7 +168,7 @@ export class PackageScorecardService {
         commitSha
       };
     } catch (error) {
-      this.logger.error(`❌ Failed to run local scorecard:`, error);
+      this.logger.error(`❌ Failed to run scorecard:`, error);
       return null;
     }
   }
@@ -162,7 +221,7 @@ export class PackageScorecardService {
           continue;
         }
 
-        const localResult = await this.runScorecardLocally(repoPath, commit.sha);
+        const localResult = await this.runScorecardRemotely(repoPath, commit.sha, owner, repo);
         
         if (localResult) {
           await this.storeScorecard(

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { SbomRepository } from './repositories/sbom.repository';
 import { SbomBuilderService } from './services/sbom-builder.service';
 import { SbomQueryService } from './services/sbom-query.service';
@@ -13,11 +13,13 @@ import { AzureModule } from '../../common/azure/azure.module';
 import { SbomGenerationService } from './services/sbom-generation.service';
 import { SbomMemgraphService } from './services/sbom-memgraph.service';
 import { SbomGraphService } from './services/sbom-graph.service';
+import { DependenciesModule } from '../dependencies/dependencies.module';
 
 @Module({
   imports: [
     QueueModule,
     AzureModule,
+    forwardRef(() => DependenciesModule),
   ],
   providers: [
     SbomRepository,

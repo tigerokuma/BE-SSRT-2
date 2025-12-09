@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
 import { CreateSbomDto } from '../dto/sbom.dto';
+import { ConnectionService } from '../../../common/azure/azure.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
@@ -15,7 +16,10 @@ const execAsync = promisify(exec);
 export class SbomGenerationService {
   private readonly logger = new Logger(SbomGenerationService.name);
 
-  constructor(private readonly sbomRepo: SbomRepository) {}
+  constructor(
+    private readonly sbomRepo: SbomRepository,
+    private readonly azureService: ConnectionService,
+  ) {}
 
   /**
    * Generate SBOM for a package
@@ -62,8 +66,40 @@ export class SbomGenerationService {
           }
         }
       } else {
-        // Remote execution is currently disabled
-        throw new Error('Remote SBOM generation is not currently supported');
+        // Execute remote command to generate SBOM
+        const scriptPath = './scripts/gen_sbom.sh';
+        const command = `bash ${scriptPath} ${packageVersion}`;
+        
+        this.logger.log(`Executing remote SBOM generation command: ${command}`);
+        
+        const remoteResult = await this.azureService.executeRemoteCommand(command);
+        result = {
+          stdout: remoteResult.stdout,
+          stderr: remoteResult.stderr,
+        };
+
+        // Filter out npm notices and deprecated warnings from stderr
+        if (result.stderr && result.stderr.trim().length > 0) {
+          const filteredStderr = result.stderr
+            .split('\n')
+            .filter(line => {
+              // Remove npm notice lines
+              if (line.includes('npm notice')) return false;
+              // Remove npm deprecated warnings
+              if (line.includes('npm warn deprecated')) return false;
+              // Keep everything else (actual errors)
+              return true;
+            })
+            .join('\n');
+
+          if (filteredStderr.trim().length > 0) {
+            this.logger.warn(`SBOM generation stderr: ${filteredStderr}`);
+          }
+        }
+
+        if (remoteResult.code !== 0) {
+          this.logger.warn(`SBOM generation command exited with code ${remoteResult.code}`);
+        }
       }
       
       // Parse the SBOM from stdout
