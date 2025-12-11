@@ -42,12 +42,35 @@ fi
 echo "📦 Installing dependencies inside repo/"
 cd repo
 
-# Use npm from PATH (works both locally and remotely)
-npm install --ignore-scripts --no-audit --no-fund || {
-  echo "⚠️ npm install failed; continuing anyway"
-}
+# Patch package.json to remove dev/build dependencies
+if [ -f package.json ]; then
+  echo "🛠️  Patching package.json to remove dev/build dependencies..."
+  jq 'del(.devDependencies, .optionalDependencies, .peerDependencies, .resolutions, .overrides)' package.json > package.tmp.json
+  mv package.tmp.json package.json
 
-# Remove tests
+  # Remove a known broken package if present
+  jq 'if .dependencies["@repo/builder"] then .dependencies |= del(.["@repo/builder"]) else . end' package.json > package.tmp.json
+  mv package.tmp.json package.json
+fi
+
+# Install the main package first
+echo "📦 Installing main package: $PACKAGE"
+if ! npm install "$PACKAGE" --ignore-scripts --no-audit --no-fund --omit=dev; then
+  echo "⚠️ Failed to install $PACKAGE, continuing..."
+fi
+
+# Install each runtime dependency individually
+if [ -f package.json ]; then
+  DEPENDENCIES=$(jq -r '.dependencies // {} | keys[]' package.json)
+  for dep in $DEPENDENCIES; do
+    echo "📦 Installing dependency: $dep ..."
+    if ! npm install "$dep" --ignore-scripts --no-audit --no-fund --omit=dev; then
+      echo "⚠️ Failed to install $dep, skipping..."
+    fi
+  done
+fi
+
+# Remove test folders
 for dir in test tests __tests__; do
   if [ -d "$dir" ]; then
     echo "🧹 Removing $dir"

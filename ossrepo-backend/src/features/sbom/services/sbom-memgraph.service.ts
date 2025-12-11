@@ -255,20 +255,56 @@ export class SbomMemgraphService {
       
       let packageName = sbomId;
       let packageVersion = '';
+      
+      // Try to get package name and version from the SBOM node in Memgraph first
+      // (these were stored when createSbom was called)
+      const session = this.driver.session();
       try {
-        const existingPackage = await this.sbomRepo.getPackageById(sbomId);
-        if (existingPackage) {
-          packageName = existingPackage.package_name || sbomId;
-          packageVersion = (existingPackage as any).version || '';
+        const sbomResult = await session.run(
+          `MATCH (s:SBOM {id: $sbomId}) RETURN s.package_name AS package_name, s.version AS version`,
+          { sbomId }
+        );
+        
+        if (sbomResult.records.length > 0) {
+          const record = sbomResult.records[0];
+          const sbomPackageName = record.get('package_name');
+          const sbomVersion = record.get('version');
+          
+          if (sbomPackageName) {
+            packageName = sbomPackageName;
+          }
+          if (sbomVersion) {
+            packageVersion = sbomVersion;
+          }
         }
       } catch (error) {
-        this.logger.error(`Error checking for existing package ${sbomId}:`, error);
+        this.logger.warn(`Could not get package info from SBOM node: ${error}`);
       }
       
-      const fallbackPurl = `pkg:generic/${packageName}@${packageVersion || 'unknown'}`;
+      // Fallback to database if not found in SBOM node
+      if (packageName === sbomId || !packageVersion) {
+        try {
+          const existingPackage = await this.sbomRepo.getPackageById(sbomId);
+          if (existingPackage) {
+            if (packageName === sbomId) {
+              packageName = existingPackage.package_name || sbomId;
+            }
+            if (!packageVersion) {
+              packageVersion = (existingPackage as any).version || '';
+            }
+          }
+        } catch (error) {
+          this.logger.error(`Error checking for existing package ${sbomId}:`, error);
+        }
+      }
+      
+      // Use npm PURL format for npm packages, generic for others
+      const isNpmPackage = packageName.includes('@') || packageName.includes('/');
+      const fallbackPurl = isNpmPackage 
+        ? (packageVersion ? `pkg:npm/${packageName}@${packageVersion}` : `pkg:npm/${packageName}`)
+        : (packageVersion ? `pkg:generic/${packageName}@${packageVersion}` : `pkg:generic/${packageName}`);
       const rootDbPackageId = sbomId;
       
-      const session = this.driver.session();
       try {
         await session.run(
           `
@@ -289,7 +325,8 @@ export class SbomMemgraphService {
             sbomId
           }
         );
-        this.logger.log(`✅ Created fallback root package node: ${packageName}@${packageVersion || 'unknown'} with db_package_id: ${rootDbPackageId}`);
+        const versionStr = packageVersion ? `@${packageVersion}` : '';
+        this.logger.log(`✅ Created fallback root package node: ${packageName}${versionStr} with db_package_id: ${rootDbPackageId}`);
       } catch (error) {
         this.logger.error(`❌ Error creating fallback root package node:`, error);
       } finally {

@@ -133,8 +133,18 @@ export class FastSetupProcessor {
             }
 
             try {
-              await this.sbomQueueService.fullProcessSbom(finalPackageId);
-              this.logger.log(`📦 Queued SBOM generation for package: ${packageName}`);
+              // Get package version from branch dependency if available
+              let packageVersion: string | undefined = undefined;
+              if (branchDependencyId) {
+                const branchDep = await this.prisma.branchDependency.findUnique({
+                  where: { id: branchDependencyId },
+                  select: { version: true }
+                });
+                packageVersion = branchDep?.version || undefined;
+              }
+              await this.sbomQueueService.fullProcessSbom(finalPackageId, packageVersion);
+              const versionStr = packageVersion ? `@${packageVersion}` : '';
+              this.logger.log(`📦 Queued SBOM generation for package: ${packageName}${versionStr}`);
             } catch (sbomError: any) {
               this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
             }
@@ -403,24 +413,39 @@ export class FastSetupProcessor {
         await this.linkBranchDependencyAndCheckCompletion(branchDependencyId, finalPackageId, branchId, projectId);
       }
 
-      // Queue SBOM generation after fast-setup processor is completely done
-      try {
-        await this.sbomQueueService.fullProcessSbom(finalPackageId);
-        this.logger.log(`📦 Queued SBOM generation for package: ${packageName}`);
-      } catch (sbomError: any) {
-        this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
-      }
-
     } catch (error) {
       this.logger.error(`❌ Fast setup failed for package ${packageName}:`, error);
 
       // Update package status to failed
-      await this.prisma.packages.update({
-        where: { id: finalPackageId },
-        data: { status: 'failed' }
-      });
+      if (finalPackageId) {
+        await this.prisma.packages.update({
+          where: { id: finalPackageId },
+          data: { status: 'failed' }
+        });
+      }
 
       throw error;
+    } finally {
+      // Queue SBOM generation regardless of fast-setup success or failure
+      // This ensures SBOM generation is attempted even if fast-setup fails
+      if (finalPackageId) {
+        try {
+          // Get package version from branch dependency if available, otherwise undefined
+          let packageVersion: string | undefined = undefined;
+          if (branchDependencyId) {
+            const branchDep = await this.prisma.branchDependency.findUnique({
+              where: { id: branchDependencyId },
+              select: { version: true }
+            });
+            packageVersion = branchDep?.version || undefined;
+          }
+          await this.sbomQueueService.fullProcessSbom(finalPackageId, packageVersion);
+          const versionStr = packageVersion ? `@${packageVersion}` : '';
+          this.logger.log(`📦 Queued SBOM generation for package: ${packageName}${versionStr}`);
+        } catch (sbomError: any) {
+          this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
+        }
+      }
     }
   }
 
