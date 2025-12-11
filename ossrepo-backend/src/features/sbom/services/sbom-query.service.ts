@@ -287,7 +287,6 @@ export class SbomQueryService {
     format?: 'cyclonedx' | 'spdx';
     version?: '1.4' | '1.5';
     include_dependencies?: boolean;
-    include_watchlist_dependencies?: boolean;
     exclude_packages?: string[];
     include_extra_packages?: string[];
   }) {
@@ -411,11 +410,6 @@ export class SbomQueryService {
     // Apply filters
     if (options.exclude_packages && options.exclude_packages.length > 0) {
       mergedSbom = this.excludePackages(mergedSbom, options.exclude_packages);
-    }
-    
-    // Add watchlist dependencies if requested
-    if (options.include_watchlist_dependencies) {
-      mergedSbom = await this.addWatchlistDependencies(mergedSbom, options.project_id);
     }
     
     // Dependencies are included by default unless explicitly disabled
@@ -719,32 +713,6 @@ export class SbomQueryService {
     };
   }
 
-  private async addWatchlistDependencies(sbom: any, projectId: string): Promise<any> {
-    // Get watchlist packages for the project
-    const watchlistDeps = await this.sbomRepo.getProjectWatchlist(projectId);
-    
-    // Add watchlist packages as components if not already present
-    const componentMap = new Map(sbom.components.map((c: any) => [
-      c.purl || c['bom-ref'], c
-    ]));
-    
-    for (const dep of watchlistDeps) {
-      const key = `pkg:npm/${dep.package_name}`;
-      if (!componentMap.has(key)) {
-        componentMap.set(key, {
-          type: 'library',
-          name: dep.package_name,
-          purl: key,
-          'bom-ref': key,
-        });
-      }
-    }
-    
-    return {
-      ...sbom,
-      components: Array.from(componentMap.values()),
-    };
-  }
 
   private convertToSpdx(sbom: any, version: string): any {
     return {

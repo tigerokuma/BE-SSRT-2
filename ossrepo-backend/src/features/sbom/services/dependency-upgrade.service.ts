@@ -435,11 +435,9 @@ export class DependencyOptimizerService {
     const limit = options?.limit ?? 10;
 
     let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
-    const projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
-    projectDeps = [...projectDeps, ...projectWatchlist];
 
     const uniquePackages = new Map<string, { package_id: string; package_name?: string; version?: string }>();
-    const packageNames = new Map<string, string>(); // Map package_id to package_name for watchlist packages
+    const packageNames = new Map<string, string>();
     for (const dep of projectDeps) {
       uniquePackages.set(dep.package_id, dep);
       if (dep.package_name) {
@@ -455,7 +453,7 @@ export class DependencyOptimizerService {
     const session = this.driver.session();
 
     try {
-      // Query by db_package_id first, then fallback to package name for watchlist packages
+      // Query by db_package_id first, then fallback to package name
       const result = await session.run(
         `
         MATCH (p:Package)
@@ -583,8 +581,6 @@ export class DependencyOptimizerService {
 
     // Get all project packages
     let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
-    const projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
-    projectDeps = [...projectDeps, ...projectWatchlist];
 
     if (projectDeps.length === 0) {
       return [];
@@ -709,8 +705,6 @@ export class DependencyOptimizerService {
 
       // Get all project package names
       let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
-      let projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
-      projectDeps = [...projectDeps, ...projectWatchlist];
       const projectPackageNames = projectDeps.map((dep) => dep.package_name);
       const otherProjectPackages = projectPackageNames.filter(
         (name) => name.toLowerCase() !== packageName.toLowerCase(),
@@ -834,10 +828,8 @@ export class DependencyOptimizerService {
   ) {
     const session = this.driver.session();
     try {
-      // Get project packages + watchlist
+      // Get project packages
       let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
-      let projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
-      projectDeps = [...projectDeps, ...projectWatchlist];
       
       // Always check BranchDependency to ensure we have all packages
       const project = await this.prisma.project.findUnique({
@@ -880,7 +872,7 @@ export class DependencyOptimizerService {
         }));
   
       // --- QUERY FOR TARGET PACKAGE DEPENDENCIES (by PURL) ---
-      // For watchlist packages (version is null/empty), find the latest version in Memgraph
+      // For packages without version, find the latest version in Memgraph
       let effectiveVersion = packageVersion;
       if (!effectiveVersion || effectiveVersion === 'null' || effectiveVersion === '' || effectiveVersion === 'unknown') {
         const latestVersionResult = await session.run(
@@ -899,10 +891,10 @@ export class DependencyOptimizerService {
         );
         if (latestVersionResult.records.length > 0) {
           effectiveVersion = latestVersionResult.records[0].get('version');
-          this.logger.debug(`Found latest version for watchlist package ${packageName}: ${effectiveVersion}`);
+          this.logger.debug(`Found latest version for package ${packageName}: ${effectiveVersion}`);
         } else {
           // No version found in Memgraph, return empty stats
-          this.logger.warn(`No version found in Memgraph for watchlist package: ${packageName}`);
+          this.logger.warn(`No version found in Memgraph for package: ${packageName}`);
           return {
             separateCount: 0,
             sharedCount: 0,
@@ -1109,8 +1101,6 @@ export class DependencyOptimizerService {
     try {
       // Get all project packages
       let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
-      let projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
-      projectDeps = [...projectDeps, ...projectWatchlist];
       
       if (projectDeps.length === 0) {
         return { separateCount: 0, sharedCount: 0, dependencyDetails: [] };
@@ -1314,8 +1304,6 @@ export class DependencyOptimizerService {
 
     // Get current project dependencies to find old versions
     let projectDeps = await this.sbomRepo.getProjectDependencies(projectId);
-    let projectWatchlist = await this.sbomRepo.getProjectWatchlist(projectId);
-    projectDeps = [...projectDeps, ...projectWatchlist];
     
     // Create a map of package name to current version
     const currentVersions = new Map<string, string>();

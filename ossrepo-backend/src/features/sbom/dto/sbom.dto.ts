@@ -51,10 +51,6 @@ export class CreateSbomOptionsDto {
 
   @IsOptional()
   @IsBoolean()
-  include_watchlist_dependencies?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
   compressed?: boolean;
 
   @IsOptional()
