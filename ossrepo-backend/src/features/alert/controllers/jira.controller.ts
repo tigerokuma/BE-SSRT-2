@@ -6,15 +6,18 @@ import {
   Post,
   Query,
   Res,
+  Req,
   BadGatewayException,
   BadRequestException,
   InternalServerErrorException,
   UnauthorizedException,
   Logger,
+  UseGuards,
 } from '@nestjs/common';
 import { JiraService } from '../services/jira.service';
 import { Response } from 'express';
-import { CheckJira, TempJiraInfo, JiraIssue, LinkJira } from '../dto/jira.dto';
+import { JiraIssue } from '../dto/jira.dto';
+import { ClerkAuthGuard } from '../../../common/guards/clerk.guard';
 
 @Controller('jira')
 export class JiraController {
@@ -22,94 +25,111 @@ export class JiraController {
 
   constructor(private readonly jiraService: JiraService) {}
 
-  @Get('oAuth/:user_id')
-  async jiraAuth(
-    @Query('code') code: string,
-    @Param('user_id') user_id: string,
-    @Res() res: Response,
-  ) {
-    if (!code) {
-      this.logger.warn(`Missing Jira authorization code for user: ${user_id}`);
-      throw new BadRequestException('Missing Jira authorization code');
+  @Get('connect')
+  @UseGuards(ClerkAuthGuard)
+  async redirectToJira(@Req() req: any, @Res() res: Response, @Query('project_id') projectId?: string) {
+    // Get clerk_id from authenticated user
+    const clerkId = (req.user as any)?.sub;
+    if (!clerkId) {
+      throw new UnauthorizedException('User not authenticated');
     }
-
-    const link_jira: LinkJira = { user_id, code };
-
-    try {
-      await this.jiraService.linkProject(link_jira);
-      return res.json({ id: user_id });
-    } catch (err) {
-      this.logger.error(
-        `Failed to link Jira project for user: ${user_id}`,
-        err.stack,
-      );
-      throw new BadGatewayException('Failed to link Jira project');
-    }
+    
+    // If project_id is provided and not empty, this is a project-level connection
+    // Otherwise, it's a user-level connection
+    const type = projectId && projectId.trim() !== '' ? 'project' : 'user';
+    // Only pass projectId if it's valid
+    const validProjectId = projectId && projectId.trim() !== '' ? projectId : undefined;
+    return this.jiraService.redirectToJira(res, clerkId, type, validProjectId);
   }
 
-  @Get('gen-code')
-  async genCode() {
-    try {
-      return await this.jiraService.generateCode();
-    } catch (err) {
-      this.logger.error('Failed to generate Jira code', err.stack);
-      throw new InternalServerErrorException('Failed to generate Jira code');
-    }
+  @Get('oauth/callback')
+  // No guard - OAuth callback comes from Atlassian, not from authenticated frontend
+  // The user's clerk_id is encoded in the state parameter
+  async handleOAuthCallback(@Req() req: any, @Query() query: any, @Res() res: Response) {
+    // clerk_id will be extracted from state parameter in the service
+    // No authentication required - this is called by Atlassian's OAuth service
+    return this.jiraService.handleOAuthCallback(req, query, res);
   }
 
-  @Post('insert-code')
-  async codeJira(@Body() temp_jira_info: TempJiraInfo) {
-    try {
-      return await this.jiraService.addTempUrl(temp_jira_info);
-    } catch (err) {
-      this.logger.error('Failed to insert Jira code', err.stack);
-      throw new BadGatewayException('Failed to insert Jira code');
+  @Get('projects')
+  @UseGuards(ClerkAuthGuard)
+  async getProjects(@Req() req: any, @Query('cloud_id') cloudId?: string) {
+    const clerkId = (req.user as any)?.sub;
+    if (!clerkId) {
+      throw new UnauthorizedException('User not authenticated');
     }
+    return this.jiraService.getProjects(clerkId, cloudId);
+  }
+
+  @Post('update-project')
+  @UseGuards(ClerkAuthGuard)
+  async updateSelectedProject(@Req() req: any, @Body() body: { project_key: string }) {
+    const clerkId = (req.user as any)?.sub;
+    if (!clerkId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    if (!body.project_key) {
+      throw new BadRequestException('project_key is required');
+    }
+    return this.jiraService.updateSelectedProject(clerkId, body.project_key);
   }
 
   @Post('create-issue')
-  async createJiraIssue(@Body() jira_issue: JiraIssue) {
-    try {
-      return await this.jiraService.createIssue(jira_issue);
-    } catch (err) {
-      this.logger.error('Failed to create Jira issue', err.stack);
-      throw new BadGatewayException('Failed to create Jira issue');
+  @UseGuards(ClerkAuthGuard)
+  async createIssue(@Req() req: any, @Body() body: JiraIssue) {
+    const clerkId = (req.user as any)?.sub;
+    if (!clerkId) {
+      throw new UnauthorizedException('User not authenticated');
     }
+    return this.jiraService.createIssue(clerkId, body);
   }
 
-  @Get('user-info/:user_id')
-  async getJiraInfo(@Param('user_id') user_id: string) {
-    try {
-      return await this.jiraService.getUserInfo(user_id);
-    } catch (err) {
-      this.logger.error(
-        `Failed to fetch Jira user info for user: ${user_id}`,
-        err.stack,
-      );
-      if (err.response?.status === 401) {
-        throw new UnauthorizedException('Invalid Jira credentials');
-      }
-      throw new BadGatewayException('Failed to fetch Jira user info');
+  @Get('user-info/:userId')
+  @UseGuards(ClerkAuthGuard)
+  async getUserJiraInfo(@Req() req: any, @Param('userId') userId: string) {
+    // Get clerk_id from authenticated user
+    const clerkId = (req.user as any)?.sub;
+    if (!clerkId) {
+      throw new UnauthorizedException('User not authenticated');
     }
+    return this.jiraService.getUserJiraInfo(clerkId);
   }
 
-  @Post('check-link')
-  async checkJiraLink(@Body() check_jira: CheckJira) {
-    try {
-      return await this.jiraService.linkExists(check_jira);
-    } catch (err) {
-      this.logger.error('Failed to check Jira link', err.stack);
-      throw new BadGatewayException('Failed to check Jira link');
-    }
+  // Project-level endpoints
+  @Get('projects/:projectId/projects')
+  @UseGuards(ClerkAuthGuard)
+  async getProjectsForProject(@Param('projectId') projectId: string, @Query('cloud_id') cloudId?: string) {
+    return this.jiraService.getProjectsForProject(projectId, cloudId);
   }
 
-  @Get('check-link/:user_watchlist_id')
-  async checkJiraCon(@Param('user_watchlist_id') user_watchlist_id: string) {
-    try {
-      return await this.jiraService.checkJiraUserWatch(user_watchlist_id);
-    } catch (err) {
-      this.logger.error('Failed to check Jira connection', err.stack);
-      throw new BadGatewayException('Failed to check Jira connection');
+  @Post('projects/:projectId/update-project')
+  @UseGuards(ClerkAuthGuard)
+  async updateSelectedProjectForProject(@Param('projectId') projectId: string, @Body() body: { project_key: string }) {
+    if (!body.project_key) {
+      throw new BadRequestException('project_key is required');
     }
+    return this.jiraService.updateSelectedProjectForProject(projectId, body.project_key);
+  }
+
+  @Post('projects/:projectId/create-issue')
+  @UseGuards(ClerkAuthGuard)
+  async createIssueForProject(@Param('projectId') projectId: string, @Body() body: JiraIssue) {
+    return this.jiraService.createIssueForProject(projectId, body);
+  }
+
+  @Get('projects/:projectId/status')
+  @UseGuards(ClerkAuthGuard)
+  async getProjectJiraStatus(@Param('projectId') projectId: string) {
+    return this.jiraService.checkProjectJiraConnection(projectId);
+  }
+
+  @Post('projects/:projectId/alerts/:alertId/create-issue')
+  @UseGuards(ClerkAuthGuard)
+  async createIssueFromAlert(
+    @Param('projectId') projectId: string,
+    @Param('alertId') alertId: string,
+    @Body() body?: { summary?: string; description?: string },
+  ) {
+    return this.jiraService.createIssueFromAlert(projectId, alertId, body);
   }
 }

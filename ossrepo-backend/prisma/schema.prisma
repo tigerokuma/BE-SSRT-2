@@ -21,6 +21,10 @@ model User {
   github_username           String?
   last_login                DateTime?
   refresh_token             String?
+  jira_access_token         String?
+  jira_refresh_token        String?
+  slack_access_token        String?
+  slack_refresh_token       String?
   EmailConfirmation         EmailConfirmation?
   emailTime                 EmailTime?
   jira                      Jira?
@@ -533,6 +537,27 @@ model Jira {
   user           User    @relation(fields: [id], references: [user_id])
 }
 
+model ProjectJira {
+  id             String  @id @default(uuid())
+  project_id     String  @unique
+  webtrigger_url String
+  project_key    String?
+  cloud_id       String?
+  project        Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@map("project_jira")
+}
+
+model ProjectSlack {
+  id            String  @id @default(uuid())
+  project_id    String  @unique
+  slack_token   String
+  slack_channel String?
+  project       Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@map("project_slack")
+}
+
 model GraphSnapshot {
   snapshot_id  String       @id @default(uuid())
   subtask_id   String
@@ -753,6 +778,12 @@ model Project {
   dependencies_json           Json?
   github_app_installation_id  String?                   // GitHub installation ID for this repo
   github_actions_enabled      Boolean                   @default(true) // Auto-enable for GitHub repos
+  jira_access_token           String?                   // Jira OAuth access token for this project
+  jira_refresh_token          String?                   // Jira OAuth refresh token for this project
+  slack_access_token          String?                   // Slack OAuth access token for this project
+  slack_refresh_token         String?                   // Slack OAuth refresh token for this project
+  projectJira                 ProjectJira?
+  projectSlack                ProjectSlack?
   project_dependencies        project_dependencies[]
   projectUsers                ProjectUser[]
   projectWatchlistPackages    ProjectWatchlistPackage[]

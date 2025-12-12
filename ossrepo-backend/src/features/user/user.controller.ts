@@ -5,6 +5,7 @@ import {
   CreateOrUpdateFromClerkDto,
   UpdateUserDto,
   IngestClerkGithubDto,
+  IngestClerkJiraDto,
 } from './user.dto'
 
 @Controller('users')
@@ -31,6 +32,35 @@ export class UserController {
     @Body() body: IngestClerkGithubDto
   ) {
     return this.userService.ingestGithubFromClerk(user_id, body)
+  }
+
+  // Save Jira tokens/id/username after user connected Jira in Clerk
+  @Post(':id/ingest-clerk-jira')
+  async ingestJira(
+    @Param('id') user_id: string,
+    @Body() body: IngestClerkJiraDto
+  ) {
+    return this.userService.ingestJiraFromClerk(user_id, body)
+  }
+
+  // Ingest GitHub by clerk_id (used by SSO callback)
+  @Post('ingest-clerk-github-by-clerk-id')
+  async ingestGithubByClerkId(@Body() body: IngestClerkGithubDto) {
+    const user = await this.userService.getUserByClerkId(body.clerk_id);
+    if (!user) {
+      throw new Error(`User not found for clerk_id: ${body.clerk_id}`);
+    }
+    return this.userService.ingestGithubFromClerk(user.user_id, body);
+  }
+
+  // Ingest Jira by clerk_id (used by SSO callback)
+  @Post('ingest-clerk-jira-by-clerk-id')
+  async ingestJiraByClerkId(@Body() body: IngestClerkJiraDto) {
+    const user = await this.userService.getUserByClerkId(body.clerk_id);
+    if (!user) {
+      throw new Error(`User not found for clerk_id: ${body.clerk_id}`);
+    }
+    return this.userService.ingestJiraFromClerk(user.user_id, body);
   }
 
   // --- existing routes (optional to keep) ---
