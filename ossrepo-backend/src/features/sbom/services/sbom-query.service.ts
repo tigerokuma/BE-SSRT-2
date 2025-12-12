@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SbomRepository } from '../repositories/sbom.repository';
-import { SbomMemgraph } from './sbom-graph-builder.service';
+import { SbomGraphService } from './sbom-graph.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
@@ -9,7 +9,7 @@ export class SbomQueryService {
 
   constructor(
     private readonly sbomRepo: SbomRepository,
-    private readonly sbomMemgraph: SbomMemgraph,
+    private readonly sbomGraphService: SbomGraphService,
     private readonly prisma: PrismaService
   ) {}
 
@@ -193,13 +193,100 @@ export class SbomQueryService {
     return await this.sbomRepo.getProjectDependencies(projectId);
   }
 
+  /**
+   * Create dependency SBOM for a package
+   */
+  async createDependencySbom(packageId: string) {
+    try {
+      const { components, dependencies } = await this.sbomGraphService.getFullDependencyTree(packageId);
+      const packageInfo = await this.sbomRepo.getPackageInfo(packageId);
+      
+      const { v4: uuidv4 } = await import('uuid');
+
+      const metadata = {
+        timestamp: new Date().toISOString(),
+        tools: [
+          {
+            vendor: 'Deply',
+            name: 'Deply SBOM Generator',
+            version: '1.0.0',
+          },
+          {
+            vendor: 'CycloneDX',
+            name: 'CycloneDX',
+            version: '1.5',
+          },
+        ],
+        authors: [
+          {
+            name: 'Deply Platform',
+            email: 'support@deply.com',
+          },
+        ],
+        component: {
+          type: 'application',
+          name: packageInfo?.name || 'Unknown Project',
+          ...(packageInfo?.license && { 
+            licenses: packageInfo.license
+              .replace(/[()]/g, '')
+              .split(/\s*(?:AND|OR)\s*/)
+              .map(id => {
+                const trimmed = id.trim();
+                if (/public\s*domain/i.test(trimmed)) {
+                  return { license: { name: 'Public Domain' } };
+                }
+                return {
+                  license: /^[A-Za-z0-9\.\-\+]+$/.test(trimmed)
+                    ? { id: trimmed }
+                    : { name: trimmed }
+                };
+              })
+          }),
+        },
+        properties: [
+          {
+            name: 'deply:sbom:type',
+            value: 'package',
+          },
+          {
+            name: 'deply:sbom:components',
+            value: (components?.length || 0).toString(),
+          },
+          ...(packageInfo?.id ? [{
+            name: 'deply:project:id',
+            value: packageInfo.id,
+          }] : []),
+          ...(packageInfo?.license ? [{
+            name: 'deply:project:license',
+            value: packageInfo.license,
+          }] : []),
+        ],
+      };
+      
+      const sbomData = {
+        $schema: 'http://cyclonedx.org/schema/bom-1.5.schema.json',
+        bomFormat: 'CycloneDX',
+        specVersion: '1.5',
+        serialNumber: `urn:uuid:${uuidv4()}`,
+        version: 1,
+        metadata,
+        components: components || [],
+        dependencies: dependencies || []
+      };
+
+      return sbomData;
+    } catch (error) {
+      this.logger.error(`Error creating dependency SBOM:`, error);
+      return null;
+    }
+  }
+
   // --- Create custom SBOM with options ---
   async createCustomSbom(options: {
     project_id: string;
     format?: 'cyclonedx' | 'spdx';
     version?: '1.4' | '1.5';
     include_dependencies?: boolean;
-    include_watchlist_dependencies?: boolean;
     exclude_packages?: string[];
     include_extra_packages?: string[];
   }) {
@@ -217,28 +304,30 @@ export class SbomQueryService {
     // Get all project dependencies
     const dependencies = await this.sbomRepo.getProjectDependencies(options.project_id);
     
-    // Fetch full dependency tree from Memgraph recursively
+    // Try to get stored SBOMs first (more memory efficient than loading from Memgraph)
+    const storedSboms = await this.sbomRepo.getProjectDependencySboms(options.project_id);
+    
     const allComponents = new Map();
     const allDependencies = new Map();
+    let hasStoredData = false;
     
-    // Process each top-level dependency to get full tree from Memgraph
-    for (const dep of dependencies) {
-      const memgraphData = await this.sbomMemgraph.getFullDependencyTree(dep.package_id);
+    // Use stored SBOMs if available (much more memory efficient)
+    if (storedSboms && storedSboms.length > 0) {
+      hasStoredData = true;
+      this.logger.log(`Using ${storedSboms.length} stored SBOMs for project ${options.project_id}`);
       
-      if (memgraphData) {
-        // Merge components
-        if (memgraphData.components) {
-          for (const comp of memgraphData.components) {
+      for (const storedSbom of storedSboms) {
+        const sbomJson = storedSbom.sbom as any;
+        if (sbomJson.components) {
+          for (const comp of sbomJson.components) {
             const key = comp.purl || comp['bom-ref'];
             if (!allComponents.has(key)) {
               allComponents.set(key, comp);
             }
           }
         }
-        
-        // Merge dependencies
-        if (memgraphData.dependencies) {
-          for (const depRel of memgraphData.dependencies) {
+        if (sbomJson.dependencies) {
+          for (const depRel of sbomJson.dependencies) {
             if (depRel.ref) {
               if (!allDependencies.has(depRel.ref)) {
                 allDependencies.set(depRel.ref, depRel);
@@ -260,7 +349,58 @@ export class SbomQueryService {
       }
     }
     
-    // Build the merged SBOM from Memgraph data
+    // Fallback to Memgraph only if no stored SBOMs available
+    if (!hasStoredData && dependencies.length > 0) {
+      this.logger.log(`No stored SBOMs found, falling back to Memgraph for ${dependencies.length} dependencies`);
+      
+      // Process each top-level dependency to get full tree from Memgraph
+      // Limit to avoid memory issues - only process first 10 dependencies
+      const depsToProcess = dependencies.slice(0, 10);
+      
+      for (const dep of depsToProcess) {
+        try {
+          const memgraphData = await this.sbomGraphService.getFullDependencyTree(dep.package_id);
+          
+          if (memgraphData) {
+            // Merge components
+            if (memgraphData.components) {
+              for (const comp of memgraphData.components) {
+                const key = comp.purl || comp['bom-ref'];
+                if (!allComponents.has(key)) {
+                  allComponents.set(key, comp);
+                }
+              }
+            }
+            
+            // Merge dependencies
+            if (memgraphData.dependencies) {
+              for (const depRel of memgraphData.dependencies) {
+                if (depRel.ref) {
+                  if (!allDependencies.has(depRel.ref)) {
+                    allDependencies.set(depRel.ref, depRel);
+                  } else {
+                    // Merge dependsOn arrays
+                    const existing = allDependencies.get(depRel.ref);
+                    const mergedDependsOn = new Set([
+                      ...(existing.dependsOn || []),
+                      ...(depRel.dependsOn || []),
+                    ]);
+                    allDependencies.set(depRel.ref, {
+                      ...existing,
+                      dependsOn: Array.from(mergedDependsOn),
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to get dependency tree from Memgraph for ${dep.package_id}: ${error.message}`);
+        }
+      }
+    }
+    
+    // Build the merged SBOM from components and dependencies
     let mergedSbom = this.buildMergedSbomFromComponents(
       Array.from(allComponents.values()),
       Array.from(allDependencies.values()),
@@ -270,11 +410,6 @@ export class SbomQueryService {
     // Apply filters
     if (options.exclude_packages && options.exclude_packages.length > 0) {
       mergedSbom = this.excludePackages(mergedSbom, options.exclude_packages);
-    }
-    
-    // Add watchlist dependencies if requested
-    if (options.include_watchlist_dependencies) {
-      mergedSbom = await this.addWatchlistDependencies(mergedSbom, options.project_id);
     }
     
     // Dependencies are included by default unless explicitly disabled
@@ -578,32 +713,6 @@ export class SbomQueryService {
     };
   }
 
-  private async addWatchlistDependencies(sbom: any, projectId: string): Promise<any> {
-    // Get watchlist packages for the project
-    const watchlistDeps = await this.sbomRepo.getProjectWatchlist(projectId);
-    
-    // Add watchlist packages as components if not already present
-    const componentMap = new Map(sbom.components.map((c: any) => [
-      c.purl || c['bom-ref'], c
-    ]));
-    
-    for (const dep of watchlistDeps) {
-      const key = `pkg:npm/${dep.package_name}`;
-      if (!componentMap.has(key)) {
-        componentMap.set(key, {
-          type: 'library',
-          name: dep.package_name,
-          purl: key,
-          'bom-ref': key,
-        });
-      }
-    }
-    
-    return {
-      ...sbom,
-      components: Array.from(componentMap.values()),
-    };
-  }
 
   private convertToSpdx(sbom: any, version: string): any {
     return {

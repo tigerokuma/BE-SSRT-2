@@ -6,6 +6,7 @@ import { GitHubApiService } from '../../activity/services/github-api.service';
 import { ActivityAnalysisService, CommitData } from '../../activity/services/activity-analysis.service';
 import { DependencyQueueService } from '../services/dependency-queue.service';
 import { GraphService } from '../../graph/services/graph.service';
+import { SbomQueueService } from '../../sbom/services/sbom-queue.service';
 interface FastSetupJobData {
   packageId?: string;
   branchDependencyId?: string;
@@ -26,6 +27,7 @@ export class FastSetupProcessor {
     private activityAnalysisService: ActivityAnalysisService,
     private dependencyQueueService: DependencyQueueService,
     private readonly graphService: GraphService,
+    private readonly sbomQueueService: SbomQueueService,
   ) {
     this.logger.log(`🔧 FastSetupProcessor initialized and ready to process jobs`);
   }
@@ -129,6 +131,24 @@ export class FastSetupProcessor {
                 `❌ [FastSetup] Failed to queue graph build for already-analysed package ${packageName}: ${err.message}`,
               );
             }
+
+            try {
+              // Get package version from branch dependency if available
+              let packageVersion: string | undefined = undefined;
+              if (branchDependencyId) {
+                const branchDep = await this.prisma.branchDependency.findUnique({
+                  where: { id: branchDependencyId },
+                  select: { version: true }
+                });
+                packageVersion = branchDep?.version || undefined;
+              }
+              await this.sbomQueueService.fullProcessSbom(finalPackageId, packageVersion);
+              const versionStr = packageVersion ? `@${packageVersion}` : '';
+              this.logger.log(`📦 Queued SBOM generation for package: ${packageName}${versionStr}`);
+            } catch (sbomError: any) {
+              this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
+            }
+      
           } else {
             this.logger.warn(
               `⚠️ [FastSetup] Package ${packageName} is done but has an invalid repo URL (${effectiveRepoUrl}), skipping graph build.`,
@@ -397,12 +417,35 @@ export class FastSetupProcessor {
       this.logger.error(`❌ Fast setup failed for package ${packageName}:`, error);
 
       // Update package status to failed
-      await this.prisma.packages.update({
-        where: { id: finalPackageId },
-        data: { status: 'failed' }
-      });
+      if (finalPackageId) {
+        await this.prisma.packages.update({
+          where: { id: finalPackageId },
+          data: { status: 'failed' }
+        });
+      }
 
       throw error;
+    } finally {
+      // Queue SBOM generation regardless of fast-setup success or failure
+      // This ensures SBOM generation is attempted even if fast-setup fails
+      if (finalPackageId) {
+        try {
+          // Get package version from branch dependency if available, otherwise undefined
+          let packageVersion: string | undefined = undefined;
+          if (branchDependencyId) {
+            const branchDep = await this.prisma.branchDependency.findUnique({
+              where: { id: branchDependencyId },
+              select: { version: true }
+            });
+            packageVersion = branchDep?.version || undefined;
+          }
+          await this.sbomQueueService.fullProcessSbom(finalPackageId, packageVersion);
+          const versionStr = packageVersion ? `@${packageVersion}` : '';
+          this.logger.log(`📦 Queued SBOM generation for package: ${packageName}${versionStr}`);
+        } catch (sbomError: any) {
+          this.logger.warn(`⚠️ Failed to queue SBOM generation for ${packageName}: ${sbomError?.message || sbomError}`);
+        }
+      }
     }
   }
 

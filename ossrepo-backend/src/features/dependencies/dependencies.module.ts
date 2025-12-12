@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { QueueModule } from '../../common/queue/queue.module';
 import { AiModule } from '../../common/ai/ai.module';
@@ -20,6 +20,7 @@ import { GitManagerService } from '../activity/services/git-manager.service';
 import { AISummaryService } from '../activity/services/ai-summary.service';
 import { PackagesModule } from '../packages/packages.module';
 import {GraphModule} from "../graph/graph.module";
+import { SbomModule } from '../sbom/sbom.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import {GraphModule} from "../graph/graph.module";
     PackagesModule,
     GraphModule,
     AzureModule,
+    forwardRef(() => SbomModule),
   ],
   providers: [
     FastSetupProcessor,

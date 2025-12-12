@@ -9,76 +9,15 @@ export class SbomRepository {
 
 
   async upsertPackageSbom(data: CreateSbomDto) {
-    // Get package info from Packages table
-    const packageId = data.id;
-    const pkg = await this.prisma.packages.findUnique({
-      where: { id: packageId },
-      select: { name: true, repo_url: true, license: true },
-    });
-
-    if (!pkg) {
-      throw new Error(`Package ${packageId} not found`);
-    }
-
-    // Find or create Package entry (old table) using name
-    let packageEntry = await this.prisma.package.findUnique({
-      where: { package_name: pkg.name },
-    });
-
-    if (!packageEntry) {
-      // Create Package entry if it doesn't exist
-      packageEntry = await this.prisma.package.create({
-        data: {
-          package_name: pkg.name,
-          repo_url: pkg.repo_url || '',
-          repo_name: pkg.name,
-          license: pkg.license,
-          keywords: [],
-          maintainers: [],
-        },
-      });
-    }
-
-    // Check if watchlist exists for this package
-    const existingWatchlist = await this.prisma.watchlist.findFirst({
-      where: { package_id: packageEntry.package_id },
-    });
-
-    let watchlistId: string;
-    if (existingWatchlist) {
-      watchlistId = existingWatchlist.watchlist_id;
-    } else {
-      // Create watchlist entry
-      const newWatchlist = await this.prisma.watchlist.create({
-        data: {
-          package_id: packageEntry.package_id,
-          alert_cve_ids: [],
-          status: 'processing',
-        },
-      });
-      watchlistId = newWatchlist.watchlist_id;
-    }
-
-    // Now upsert the SBOM data
-    return await this.prisma.watchlistSbom.upsert({
-      where: { watchlist_id: watchlistId },
-      update: { sbom: data.sbom, updated_at: new Date() },
-      create: { watchlist_id: watchlistId, sbom: data.sbom },
-    });
+    // SBOMs are stored in Memgraph only, not in Prisma database
+    // This method is kept for backward compatibility but does nothing
+    return null;
   }
 
   async upsertProjectSbom(data: CreateSbomDto) {
-    // Map project_id to user_id for storage
-    const mappedData = {
-      user_id: data.id,
-      sbom: data.sbom,
-    };
-
-    return await this.prisma.userWatchlistSbom.upsert({
-      where: { user_id: mappedData.user_id },
-      update: { sbom: mappedData.sbom, updated_at: new Date() },
-      create: mappedData,
-    });
+    // SBOMs are stored in Memgraph only, not in Prisma database
+    // This method is kept for backward compatibility but does nothing
+    return null;
   }
 
   async getUrl(packageId: string) {
@@ -96,41 +35,8 @@ export class SbomRepository {
   }
 
   async getPackageSbom(id: string) {
-    // Get package from Packages table
-    const pkg = await this.prisma.packages.findUnique({
-      where: { id },
-      select: { name: true },
-    });
-
-    if (!pkg) {
-      return null;
-    }
-
-    // Find the corresponding Package entry
-    const packageEntry = await this.prisma.package.findUnique({
-      where: { package_name: pkg.name },
-      select: { package_id: true },
-    });
-
-    if (!packageEntry) {
-      return null;
-    }
-
-    // Find the watchlist for this package
-    const watchlist = await this.prisma.watchlist.findFirst({
-      where: { package_id: packageEntry.package_id },
-      select: { watchlist_id: true },
-    });
-
-    if (!watchlist) {
-      return null;
-    }
-
-    // Return the SBOM data
-    return await this.prisma.watchlistSbom.findUnique({
-      where: { watchlist_id: watchlist.watchlist_id },
-      select: { sbom: true, updated_at: true },
-    });
+    // SBOMs are stored in Memgraph only, not in Prisma database
+    return null;
   }
   async upsertPackage(packageName: string, repoUrl: string, license: string) {
     return await this.prisma.packages.upsert({
@@ -141,60 +47,46 @@ export class SbomRepository {
   }
 
   async getProjectSbom(id: string) {
-    return await this.prisma.userWatchlistSbom.findUnique({
-      where: { user_id: id },
-      select: { sbom: true, updated_at: true },
-    });
+    // SBOMs are stored in Memgraph only, not in Prisma database
+    return null;
   }
 
   async getProjectDependencySboms(projectId: string) {
-    // Get all project dependencies for a project through project_dependencies table
-    const projectDeps = await this.prisma.project_dependencies.findMany({
-      where: { project_id: projectId },
-      include: { 
-        Package: {
-          select: { package_name: true }
-        }
-      },
-    });
-
-    // Get corresponding watchlist IDs for these packages
-    const packageNames = projectDeps
-      .map((dep) => dep.Package?.package_name)
-      .filter((name): name is string => name !== null && name !== undefined);
-
-    if (packageNames.length === 0) {
-      return [];
-    }
-
-    // Find all Package entries for these package names
-    const packageEntries = await this.prisma.package.findMany({
-      where: { package_name: { in: packageNames } },
-      select: { package_id: true },
-    });
-
-    const packageIds = packageEntries.map(p => p.package_id);
-
-    // Find watchlists for these packages
-    const watchlists = await this.prisma.watchlist.findMany({
-      where: { package_id: { in: packageIds } },
-      select: { watchlist_id: true },
-    });
-
-    const watchlistIds = watchlists.map(w => w.watchlist_id);
-
-    if (watchlistIds.length === 0) {
-      return [];
-    }
-
-    return await this.prisma.watchlistSbom.findMany({
-      where: { watchlist_id: { in: watchlistIds } },
-      select: { sbom: true },
-    });
+    // SBOMs are stored in Memgraph only, not in Prisma database
+    // Return empty array as SBOMs should be retrieved from Memgraph
+    return [];
   }
 
   async getProjectDependencies(projectId: string) {
-    // Get all project dependencies for a project
+    // First, get the project to find its monitored branch
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        monitored_branch_id: true,
+      },
+    });
+
+    // Get branch dependencies from the monitored branch (these are the actual project dependencies)
+    if (project?.monitored_branch_id) {
+      const branchDeps = await this.prisma.branchDependency.findMany({
+        where: { monitored_branch_id: project.monitored_branch_id },
+        select: {
+          package_id: true,
+          name: true,
+          version: true,
+        },
+      });
+
+      return branchDeps
+        .filter((dep) => dep.package_id !== null)
+        .map((dep) => ({
+          package_id: dep.package_id!,
+          package_name: dep.name,
+          version: dep.version,
+        }));
+    }
+
+    // Fallback to project_dependencies if no monitored branch
     const projectDeps = await this.prisma.project_dependencies.findMany({
       where: { project_id: projectId },
       select: {
@@ -213,28 +105,6 @@ export class SbomRepository {
       }));
   }
 
-  async getProjectWatchlist(projectId: string) {
-    // Get all watchlist packages for a project
-    const watchlistDeps = await this.prisma.projectWatchlistPackage.findMany({
-      where: { project_id: projectId },
-      select: {
-        package_id: true,
-        package: {
-          select: {
-            name: true,
-          },
-        },
-      },
-    });
-
-    return watchlistDeps
-      .filter((item) => item.package_id !== null && item.package !== null)
-      .map((item) => ({
-        package_id: item.package_id!,
-        package_name: item.package!.name,
-        version: null, // Watchlist packages don't have specific versions
-      }));
-  }
   
   async getProjectInfo(projectId: string) {
     const project = await this.prisma.project.findUnique({
@@ -250,7 +120,7 @@ export class SbomRepository {
   }
 
   async getPackageInfo(packageId: string) {
-    const watchlist = await this.prisma.packages.findUnique({
+    const pkg = await this.prisma.packages.findUnique({
       where: { id: packageId },
       select: {
         id: true,
@@ -258,7 +128,7 @@ export class SbomRepository {
         license: true,
       },
     });
-    return watchlist;
+    return pkg;
   }
 
   // --- Find package by name (read-only) ---
@@ -305,27 +175,17 @@ export class SbomRepository {
 
   async getPackageRiskScore(packageName: string): Promise<number | null> {
     try {
-      // Try the new Packages table first (using total_score)
-      const newPackage = await this.prisma.packages.findUnique({
+      // Get total_score from Packages table and invert to risk score
+      const pkg = await this.prisma.packages.findUnique({
         where: { name: packageName },
         select: { total_score: true },
       });
       
-      if (newPackage?.total_score !== null && newPackage?.total_score !== undefined) {
+      if (pkg?.total_score !== null && pkg?.total_score !== undefined) {
         // Invert total_score (health score) to risk score
         // Health score: higher is better (0-100)
         // Risk score: higher is worse (0-100)
-        return 100 - newPackage.total_score;
-      }
-      
-      // Fallback to old Package table (using risk_score)
-      const oldPackage = await this.prisma.package.findUnique({
-        where: { package_name: packageName },
-        select: { risk_score: true },
-      });
-      
-      if (oldPackage?.risk_score !== null && oldPackage?.risk_score !== undefined) {
-        return oldPackage.risk_score;
+        return 100 - pkg.total_score;
       }
       
       return null;
@@ -355,7 +215,7 @@ export class SbomRepository {
   }
 
   async getPackageById(packageId: string) {
-    // Try the new Packages table first (using id)
+    // Get package from Packages table
     const packageEntry = await this.prisma.packages.findUnique({
       where: { id: packageId },
       select: {
@@ -371,14 +231,6 @@ export class SbomRepository {
       };
     }
     
-    // Fallback to old package table (using package_id)
-    const oldPackageEntry = await this.prisma.package.findUnique({
-      where: { package_id: packageId },
-      select: {
-        package_id: true,
-        package_name: true,
-      },
-    });
-    return oldPackageEntry;
+    return null;
   }
 }

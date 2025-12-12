@@ -22,7 +22,7 @@ export class GitManagerService {
   ) {
     this.baseDir = this.configService.get<string>(
       'GIT_CLONE_DIR',
-      './temp-repos',
+      path.join(os.tmpdir(), 'repos'),
     );
     this.ensureBaseDir();
   }
