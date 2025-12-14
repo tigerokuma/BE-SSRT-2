@@ -1019,15 +1019,16 @@ export class FastSetupProcessor {
         include: { package: true }
       });
 
+      // Count packages that have at least completed fast-setup ('fast' or 'done')
       const completedDependencies = allDependencies.filter(dep =>
-        dep.package_id && dep.package && dep.package.status === 'done'
+        dep.package_id && dep.package && (dep.package.status === 'fast' || dep.package.status === 'done')
       );
 
-      this.logger.log(`📊 Branch ${branchId} progress: ${completedDependencies.length}/${allDependencies.length} dependencies complete`);
+      this.logger.log(`📊 Branch ${branchId} progress: ${completedDependencies.length}/${allDependencies.length} dependencies ready (fast or done)`);
 
-      // If all dependencies are complete, update project status
+      // If all dependencies have completed fast-setup, mark project as ready
       if (completedDependencies.length === allDependencies.length) {
-        this.logger.log(`🎉 All dependencies complete for branch ${branchId}, marking project ${projectId} as ready`);
+        this.logger.log(`🎉 All dependencies have completed fast-setup for branch ${branchId}, marking project ${projectId} as ready`);
 
         // Calculate average health score from all completed dependencies
         const totalScores = completedDependencies
