@@ -2,8 +2,12 @@
 
 # Script to run OpenSSF Scorecard on a repository (local or remote)
 # Usage: ./run_scorecard.sh <repo_path> [commit_sha] [owner] [repo]
+# Includes 5 minute timeout to prevent hanging
 
 set -e
+
+# 5 minute timeout (300 seconds)
+TIMEOUT_SECONDS=300
 
 cleanup() {
   exit_code=$?
@@ -25,16 +29,16 @@ fi
 # If local path doesn't exist, try GitHub mode
 if [ ! -d "$REPO_PATH" ]; then
   if [ -n "$OWNER" ] && [ -n "$REPO" ]; then
-    echo "Local repo not found, using GitHub remote instead..."
+    echo "Local repo not found, using GitHub remote instead..." >&2
 
     if [ -n "$COMMIT_SHA" ]; then
-      scorecard \
+      timeout $TIMEOUT_SECONDS scorecard \
         --repo="github.com/${OWNER}/${REPO}" \
         --commit="$COMMIT_SHA" \
         --format=json \
         --show-details
     else
-      scorecard \
+      timeout $TIMEOUT_SECONDS scorecard \
         --repo="github.com/${OWNER}/${REPO}" \
         --format=json \
         --show-details
@@ -49,13 +53,13 @@ fi
 
 # Local repository mode
 if [ -n "$COMMIT_SHA" ]; then
-  scorecard \
+  timeout $TIMEOUT_SECONDS scorecard \
     --local="$REPO_PATH" \
     --commit="$COMMIT_SHA" \
     --format=json \
     --show-details
 else
-  scorecard \
+  timeout $TIMEOUT_SECONDS scorecard \
     --local="$REPO_PATH" \
     --format=json \
     --show-details
