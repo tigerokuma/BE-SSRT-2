@@ -14,6 +14,10 @@ export class DependencyOptimizerService {
     return this.connectionService.getMemgraph();
   }
 
+  private get isMemgraphAvailable() {
+    return this.connectionService.isMemgraphConnected();
+  }
+
   constructor(
     private readonly sbomRepo: SbomRepository,
     private readonly prisma: PrismaService,
@@ -24,7 +28,11 @@ export class DependencyOptimizerService {
    * Count total unique packages in the graph.
    */
   async getTotalUniquePackages(): Promise<number> {
-    const session = this.driver.session();
+    if (!this.isMemgraphAvailable) {
+      this.logger.warn('⏭️ Memgraph not connected - returning 0');
+      return 0;
+    }
+    const session = this.driver!.session();
     const query = `
       MATCH (m:Package {isMain: true})-[:DEPENDS_ON*1..]->(d:Package)
       WITH collect(DISTINCT d.db_package_id) AS allDeps
@@ -450,7 +458,12 @@ export class DependencyOptimizerService {
     }
 
     const packageIds = Array.from(uniquePackages.keys());
-    const session = this.driver.session();
+    
+    if (!this.isMemgraphAvailable) {
+      this.logger.warn('⏭️ Memgraph not connected - returning empty results');
+      return [];
+    }
+    const session = this.driver!.session();
 
     try {
       // Query by db_package_id first, then fallback to package name

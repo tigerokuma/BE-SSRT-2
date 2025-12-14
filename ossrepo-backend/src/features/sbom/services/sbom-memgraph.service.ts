@@ -16,6 +16,10 @@ export class SbomMemgraphService {
     return this.connectionService.getMemgraph();
   }
 
+  private get isMemgraphAvailable() {
+    return this.connectionService.isMemgraphConnected();
+  }
+
   constructor(
     private readonly sbomRepo: SbomRepository,
     private readonly connectionService: ConnectionService,
@@ -34,7 +38,11 @@ export class SbomMemgraphService {
     packageName?: string,
     version?: string,
   ) {
-    const session = this.driver.session();
+    if (!this.isMemgraphAvailable) {
+      this.logger.warn(`⏭️ Skipping Memgraph SBOM creation - Memgraph not connected`);
+      return;
+    }
+    const session = this.driver!.session();
     try {
       let purl: string | null = null;
       if (metadata?.component) {
@@ -66,7 +74,8 @@ export class SbomMemgraphService {
    * Add Package node to Memgraph
    */
   async addPackage(purl: string, name: string, version: string, license?: string) {
-    const session = this.driver.session();
+    if (!this.isMemgraphAvailable) return;
+    const session = this.driver!.session();
     try {
       await session.run(
         `
@@ -86,7 +95,8 @@ export class SbomMemgraphService {
    * Link Package to SBOM
    */
   async linkPackageToSbom(purl: string, sbomId: string) {
-    const session = this.driver.session();
+    if (!this.isMemgraphAvailable) return;
+    const session = this.driver!.session();
     try {
       await session.run(
         `
@@ -104,7 +114,8 @@ export class SbomMemgraphService {
    * Add dependency relationship between packages
    */
   async addDependency(fromPurl: string, toPurl: string) {
-    const session = this.driver.session();
+    if (!this.isMemgraphAvailable) return;
+    const session = this.driver!.session();
     try {
       await session.run(
         `

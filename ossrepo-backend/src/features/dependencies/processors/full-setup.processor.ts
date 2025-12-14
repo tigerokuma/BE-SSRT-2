@@ -37,7 +37,7 @@ export class FullSetupProcessor {
     this.logger.log(`🔧 FullSetupProcessor initialized and ready to process jobs`);
   }
 
-  @Process({ name: 'full-setup', concurrency: 5 })
+  @Process({ name: 'full-setup', concurrency: 1 })
   async handleFullSetup(job: Job<FullSetupJobData>) {
     this.logger.log(`🔥 FULL SETUP PROCESSOR TRIGGERED! Job ID: ${job.id}`);
     const { packageId, packageName, repoUrl, projectId } = job.data;
@@ -101,15 +101,10 @@ export class FullSetupProcessor {
       await this.detectAnomaliesInStoredCommits(packageId, recentCommits);
       this.logger.log(`🔍 Detected anomalies in stored commits`);
 
-      // 9. Process scorecard data (API first, then local)
-      await this.packageScorecard.processHistoricalScores(
-        packageId,
-        recentCommits.map(c => ({ sha: c.sha, timestamp: c.timestamp })),
-        repoPath,
-        owner,
-        repo
-      );
-      this.logger.log(`🛡️ Processed scorecard data`);
+      // 9. Scorecard - DISABLED (too slow for full-setup, uses API result from fast-setup instead)
+      // The API scorecard is fetched during fast-setup which is sufficient
+      // Historical scorecard analysis was causing timeouts on large repos
+      this.logger.log(`⏭️ Skipping scorecard in full-setup (using API result from fast-setup)`);
 
       // 10. Process vulnerabilities (NPM versions + OSV API)
       await this.packageVulnerability.processPackageVulnerabilities(packageId, packageName);
