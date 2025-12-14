@@ -267,8 +267,10 @@ export class GitHubApiService {
     };
 
     if (this.token) {
-      headers['Authorization'] = `token ${this.token}`;
-      this.logger.log(`🔐 Using GitHub token for API calls`);
+      // Fine-grained PATs (github_pat_) use Bearer, classic tokens use token
+      const authPrefix = this.token.startsWith('github_pat_') ? 'Bearer' : 'token';
+      headers['Authorization'] = `${authPrefix} ${this.token}`;
+      this.logger.log(`🔐 Using GitHub token for API calls (${authPrefix} format)`);
     } else {
       this.logger.warn(`⚠️ No GitHub token available - API calls may be rate limited`);
     }
