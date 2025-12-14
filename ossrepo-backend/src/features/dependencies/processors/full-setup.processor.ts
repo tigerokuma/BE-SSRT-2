@@ -9,6 +9,7 @@ import { AISummaryService } from '../../activity/services/ai-summary.service';
 import { PackageVulnerabilityService } from '../services/package-vulnerability.service';
 import { MonthlyCommitsService } from '../services/monthly-commits.service';
 import { AnomalyDetectionService } from '../services/anomaly-detection.service';
+import { GitHubApiService } from '../../activity/services/github-api.service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -33,6 +34,7 @@ export class FullSetupProcessor {
     private readonly packageVulnerability: PackageVulnerabilityService,
     private readonly monthlyCommits: MonthlyCommitsService,
     private readonly anomalyDetection: AnomalyDetectionService,
+    private readonly githubApiService: GitHubApiService,
   ) {
     this.logger.log(`🔧 FullSetupProcessor initialized and ready to process jobs`);
   }
@@ -150,17 +152,16 @@ export class FullSetupProcessor {
    */
   private async cloneRepositoryWithDepth(owner: string, repo: string): Promise<string> {
     try {
-      // First try to get the default branch from GitHub API
+      // First try to get the default branch from GitHub API (authenticated)
       let defaultBranch = 'main';
       try {
-        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
-        if (response.ok) {
-          const repoData = await response.json();
-          defaultBranch = repoData.default_branch || 'main';
-          this.logger.log(`📋 Using default branch '${defaultBranch}' for ${owner}/${repo}`);
-        }
+        this.logger.log(`📡 Fetching repository info for ${owner}/${repo} to get default branch...`);
+        const repoInfo = await this.githubApiService.getRepositoryInfo(owner, repo);
+        defaultBranch = repoInfo.default_branch || 'main';
+        this.logger.log(`📋 Using default branch '${defaultBranch}' for ${owner}/${repo}`);
       } catch (apiError) {
-        this.logger.warn(`⚠️ Could not fetch default branch for ${owner}/${repo}, using 'main'`);
+        this.logger.warn(`⚠️ Could not fetch default branch for ${owner}/${repo}: ${apiError.message}`);
+        this.logger.warn(`⚠️ Will try 'main', then 'master' as fallbacks`);
       }
 
       // Try cloning with the detected default branch
@@ -168,18 +169,20 @@ export class FullSetupProcessor {
       try {
         repoPath = await this.gitManager.cloneRepository(owner, repo, defaultBranch, 5000);
       } catch (cloneError) {
-        // If main branch fails, try master as fallback
-        if (defaultBranch === 'main') {
-          this.logger.log(`🔄 Main branch failed, trying 'master' branch for ${owner}/${repo}`);
+        // If detected branch fails and it's not master, try master as fallback
+        if (defaultBranch !== 'master') {
+          this.logger.log(`🔄 Branch '${defaultBranch}' failed, trying 'master' branch for ${owner}/${repo}`);
           try {
             repoPath = await this.gitManager.cloneRepository(owner, repo, 'master', 5000);
           } catch (masterError) {
             // If both fail, try without specifying branch (clone default)
-            this.logger.log(`🔄 Both main and master failed, trying default branch for ${owner}/${repo}`);
+            this.logger.log(`🔄 Both '${defaultBranch}' and 'master' failed, trying without branch specification for ${owner}/${repo}`);
             repoPath = await this.gitManager.cloneRepository(owner, repo, undefined, 5000);
           }
         } else {
-          throw cloneError;
+          // Already tried master, try without branch specification
+          this.logger.log(`🔄 'master' branch failed, trying without branch specification for ${owner}/${repo}`);
+          repoPath = await this.gitManager.cloneRepository(owner, repo, undefined, 5000);
         }
       }
       
