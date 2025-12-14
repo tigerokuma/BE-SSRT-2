@@ -358,11 +358,11 @@ export class FastSetupProcessor {
         total: totalScore.score
       });
 
-      // Update package with real data
+      // Update package with real data - status stays 'fast' until full-setup completes
       await this.prisma.packages.update({
         where: { id: finalPackageId },
         data: {
-          status: 'done',
+          status: 'fast', // Keep as 'fast' - full-setup will set to 'done'
           activity_score: activityScore.score,
           bus_factor_score: busFactorScore.score,
           scorecard_score: scorecardScore.score ? scorecardScore.score * 10 : null, // Multiply by 10 to convert from 0-10 to 0-100 scale
@@ -375,7 +375,7 @@ export class FastSetupProcessor {
         }
       });
 
-      this.logger.log(`✅ Fast setup completed for package: ${packageName}`);
+      this.logger.log(`✅ Fast setup completed for package: ${packageName} (status: fast, awaiting full-setup)`);
 
       // 🧠 NEW: Queue initial graph build for this dependency's repo
       if (effectiveRepoUrl) {
