@@ -203,8 +203,22 @@ export class PackageScorecardService {
         this.logger.log(`✅ Stored API scorecard for commit ${latestCommit.sha}`);
       }
 
+      // Skip historical analysis if SKIP_HISTORICAL_SCORECARD is set (saves time, avoids rate limits)
+      const skipHistorical = process.env.SKIP_HISTORICAL_SCORECARD === 'true';
+      if (skipHistorical) {
+        this.logger.log(`⏭️ Skipping historical scorecard analysis (SKIP_HISTORICAL_SCORECARD=true)`);
+        return;
+      }
+
+      // Skip historical analysis for very large repos (next.js, react, etc.) - API result is enough
+      const largeRepos = ['next.js', 'react', 'vue', 'angular', 'typescript', 'node', 'vscode'];
+      if (largeRepos.includes(repo.toLowerCase())) {
+        this.logger.log(`⏭️ Skipping historical scorecard for large repo ${owner}/${repo} - using API result only`);
+        return;
+      }
+
       // Sample commits evenly throughout history for health trend analysis
-      const commitsToProcess = this.sampleCommitsEvenly(commits, 10);
+      const commitsToProcess = this.sampleCommitsEvenly(commits, 5); // Reduced from 10 to 5
       this.logger.log(`📈 Selected ${commitsToProcess.length} commits for historical analysis: ${commitsToProcess.map(c => c.sha.substring(0, 8)).join(', ')}`);
       
       for (const commit of commitsToProcess) {

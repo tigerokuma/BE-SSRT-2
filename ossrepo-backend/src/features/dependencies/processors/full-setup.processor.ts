@@ -37,7 +37,7 @@ export class FullSetupProcessor {
     this.logger.log(`🔧 FullSetupProcessor initialized and ready to process jobs`);
   }
 
-  @Process({ name: 'full-setup', concurrency: 5 })
+  @Process({ name: 'full-setup', concurrency: 1 })
   async handleFullSetup(job: Job<FullSetupJobData>) {
     this.logger.log(`🔥 FULL SETUP PROCESSOR TRIGGERED! Job ID: ${job.id}`);
     const { packageId, packageName, repoUrl, projectId } = job.data;
@@ -101,7 +101,7 @@ export class FullSetupProcessor {
       await this.detectAnomaliesInStoredCommits(packageId, recentCommits);
       this.logger.log(`🔍 Detected anomalies in stored commits`);
 
-      // 9. Process scorecard data (API first, then local)
+      // 9. Process scorecard data (API first, then historical if not a large repo)
       await this.packageScorecard.processHistoricalScores(
         packageId,
         recentCommits.map(c => ({ sha: c.sha, timestamp: c.timestamp })),

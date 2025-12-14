@@ -19,8 +19,9 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
       await this.connect();
       this.logger.log('✅ Connections established successfully');
     } catch (error) {
-      this.logger.error('❌ Failed to initialize connections', error);
-      throw error;
+      this.logger.error('❌ Failed to initialize connections - running without Azure/Memgraph', error);
+      this.logger.warn('⚠️ App will continue running, but graph features will be unavailable');
+      // Don't throw - allow app to run without Memgraph connection
     }
   }
 
@@ -70,9 +71,16 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
     return this.ssh;
   }
 
-  getMemgraph(): Driver {
-    if (!this.memgraphDriver) throw new Error('Memgraph not connected yet');
+  getMemgraph(): Driver | null {
+    if (!this.memgraphDriver) {
+      this.logger.warn('⚠️ Memgraph not connected - graph features unavailable');
+      return null;
+    }
     return this.memgraphDriver;
+  }
+
+  isMemgraphConnected(): boolean {
+    return this.memgraphDriver !== null;
   }
 
   async disconnect() {
@@ -85,6 +93,33 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('🔌 SSH disconnected');
     }
     this.connected = false;
+  }
+
+  /**
+   * Ensure SSH connection is alive, reconnect if needed
+   */
+  private async ensureSSHConnected(): Promise<void> {
+    // Check if SSH is actually connected (not just the flag)
+    if (!this.ssh.isConnected()) {
+      this.logger.warn('⚠️ SSH connection dropped, reconnecting...');
+      this.connected = false;
+      
+      // Create a new SSH instance
+      this.ssh = new NodeSSH();
+      
+      const host = process.env.AZURE_HOST!;
+      const username = process.env.AZURE_USER!;
+      const privateKey = process.env.AZURE_PRIVATE_KEY!;
+      
+      await this.ssh.connect({
+        host,
+        username,
+        privateKey,
+      });
+      
+      this.connected = true;
+      this.logger.log('✅ SSH reconnected successfully');
+    }
   }
 
   /**
@@ -101,9 +136,8 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
       cwd?: string;
     }
   ): Promise<{ stdout: string; stderr: string; code: number }> {
-    if (!this.connected) {
-      throw new Error('SSH not connected. Call connect() first.');
-    }
+    // Auto-reconnect if connection dropped
+    await this.ensureSSHConnected();
 
     this.logger.log(`🔧 Executing remote command: ${command}`);
     
@@ -131,6 +165,30 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
         code: result.code || 0,
       };
     } catch (error) {
+      // If command failed due to connection issue, try to reconnect once
+      if (error.message?.includes('Not connected') || error.message?.includes('connection')) {
+        this.logger.warn('⚠️ SSH connection error, attempting reconnect...');
+        this.connected = false;
+        await this.ensureSSHConnected();
+        
+        // Retry the command once
+        const result = await this.ssh.execCommand(command, {
+          execOptions: {
+            env: {
+              ...process.env,
+              ...(options?.env || {}),
+            },
+            cwd: options?.cwd,
+          },
+        });
+        
+        return {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          code: result.code || 0,
+        };
+      }
+      
       this.logger.error(`❌ Failed to execute remote command: ${error.message}`);
       throw error;
     }
