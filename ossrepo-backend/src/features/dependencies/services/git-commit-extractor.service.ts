@@ -45,10 +45,21 @@ export class GitCommitExtractorService {
 
       const commits = this.parseGitLogOutput(stdout);
       
-      // NOTE: We no longer extract diff data for all commits here.
-      // Diff data extraction for 5000 commits takes too long (30s per commit = 41+ hours!)
-      // If diff data is needed, call extractCommitDiff separately for specific commits.
-      
+      // Extract diff data for each commit (only do this for reasonable commit counts)
+      if (commits.length <= 500) {
+        this.logger.log(`🔍 Extracting diff data for ${commits.length} commits...`);
+        for (const commit of commits) {
+          try {
+            commit.diffData = await this.extractCommitDiff(repoPath, commit.sha);
+          } catch (error) {
+            this.logger.warn(`⚠️ Failed to extract diff for commit ${commit.sha}: ${error.message}`);
+            commit.diffData = null;
+          }
+        }
+      } else {
+        this.logger.log(`⏭️ Skipping diff extraction for ${commits.length} commits (too many)`);
+      }
+
       return commits;
     } catch (error) {
       this.logger.error(`❌ Failed to extract commits from ${repoPath}:`, error);

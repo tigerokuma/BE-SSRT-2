@@ -77,12 +77,12 @@ export class FullSetupProcessor {
       [, owner, repo] = githubMatch;
       this.logger.log(`📦 Processing repository: ${owner}/${repo}`);
 
-      // 3. Clone repository with depth 5000
+      // 3. Clone repository with depth 500 (reduced from 5000 for faster processing)
       repoPath = await this.cloneRepositoryWithDepth(owner, repo);
       this.logger.log(`✅ Repository cloned to: ${repoPath}`);
 
-      // 4. Extract commits (up to 5000)
-      const allCommits = await this.gitCommitExtractor.extractCommitsFromRepo(repoPath, 5000);
+      // 4. Extract commits (up to 500 for reasonable processing time)
+      const allCommits = await this.gitCommitExtractor.extractCommitsFromRepo(repoPath, 500);
       this.logger.log(`📊 Extracted ${allCommits.length} commits`);
 
       // 5. Store most recent 100 commits
@@ -167,22 +167,22 @@ export class FullSetupProcessor {
       // Try cloning with the detected default branch
       let repoPath: string;
       try {
-        repoPath = await this.gitManager.cloneRepository(owner, repo, defaultBranch, 5000);
+        repoPath = await this.gitManager.cloneRepository(owner, repo, defaultBranch, 500);
       } catch (cloneError) {
         // If detected branch fails and it's not master, try master as fallback
         if (defaultBranch !== 'master') {
           this.logger.log(`🔄 Branch '${defaultBranch}' failed, trying 'master' branch for ${owner}/${repo}`);
           try {
-            repoPath = await this.gitManager.cloneRepository(owner, repo, 'master', 5000);
+            repoPath = await this.gitManager.cloneRepository(owner, repo, 'master', 500);
           } catch (masterError) {
             // If both fail, try without specifying branch (clone default)
             this.logger.log(`🔄 Both '${defaultBranch}' and 'master' failed, trying without branch specification for ${owner}/${repo}`);
-            repoPath = await this.gitManager.cloneRepository(owner, repo, undefined, 5000);
+            repoPath = await this.gitManager.cloneRepository(owner, repo, undefined, 500);
           }
         } else {
           // Already tried master, try without branch specification
           this.logger.log(`🔄 'master' branch failed, trying without branch specification for ${owner}/${repo}`);
-          repoPath = await this.gitManager.cloneRepository(owner, repo, undefined, 5000);
+          repoPath = await this.gitManager.cloneRepository(owner, repo, undefined, 500);
         }
       }
       
