@@ -32,7 +32,7 @@ export class FastSetupProcessor {
     this.logger.log(`🔧 FastSetupProcessor initialized and ready to process jobs`);
   }
 
-  @Process({ name: 'fast-setup', concurrency: 25 })
+  @Process({ name: 'fast-setup', concurrency: 1 })
   async handleFastSetup(job: Job<FastSetupJobData>) {
     this.logger.log(`🔥 PROCESSOR TRIGGERED! Job ID: ${job.id}, Job Name: ${job.name}`);
     const { packageId, branchDependencyId, branchId, packageName, repoUrl, projectId } = job.data;

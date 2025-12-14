@@ -141,8 +141,12 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(`🔧 Executing remote command: ${command}`);
     
+    // Default timeout of 5 minutes to prevent hanging
+    const timeout = options?.timeout || 300000; // 5 minutes
+    
     try {
-      const result = await this.ssh.execCommand(command, {
+      // Wrap in a timeout to prevent hanging forever
+      const execPromise = this.ssh.execCommand(command, {
         execOptions: {
           env: {
             ...process.env,
@@ -151,6 +155,12 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
           cwd: options?.cwd,
         },
       });
+      
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`SSH command timed out after ${timeout/1000}s`)), timeout);
+      });
+      
+      const result = await Promise.race([execPromise, timeoutPromise]);
 
       if (result.code !== 0 && result.code !== null) {
         this.logger.warn(`⚠️ Command exited with code ${result.code}`);
@@ -165,14 +175,24 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
         code: result.code || 0,
       };
     } catch (error) {
+      // If it's a timeout, log and return failure instead of throwing
+      if (error.message?.includes('timed out')) {
+        this.logger.error(`❌ SSH command timed out: ${command}`);
+        return {
+          stdout: '',
+          stderr: `Command timed out after ${timeout/1000}s`,
+          code: 124, // Standard timeout exit code
+        };
+      }
+      
       // If command failed due to connection issue, try to reconnect once
       if (error.message?.includes('Not connected') || error.message?.includes('connection')) {
         this.logger.warn('⚠️ SSH connection error, attempting reconnect...');
         this.connected = false;
         await this.ensureSSHConnected();
         
-        // Retry the command once
-        const result = await this.ssh.execCommand(command, {
+        // Retry the command once with timeout
+        const retryExecPromise = this.ssh.execCommand(command, {
           execOptions: {
             env: {
               ...process.env,
@@ -182,11 +202,27 @@ export class ConnectionService implements OnModuleInit, OnModuleDestroy {
           },
         });
         
-        return {
-          stdout: result.stdout,
-          stderr: result.stderr,
-          code: result.code || 0,
-        };
+        const retryTimeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`SSH command timed out after ${timeout/1000}s`)), timeout);
+        });
+        
+        try {
+          const result = await Promise.race([retryExecPromise, retryTimeoutPromise]);
+          return {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            code: result.code || 0,
+          };
+        } catch (retryError) {
+          if (retryError.message?.includes('timed out')) {
+            return {
+              stdout: '',
+              stderr: `Command timed out after ${timeout/1000}s`,
+              code: 124,
+            };
+          }
+          throw retryError;
+        }
       }
       
       this.logger.error(`❌ Failed to execute remote command: ${error.message}`);
