@@ -166,6 +166,13 @@ export class GitHubApiService {
       });
 
       if (!response.ok) {
+        // Log the actual response for debugging
+        const responseBody = await response.text();
+        this.logger.error(`❌ GitHub API Response Status: ${response.status}`);
+        this.logger.error(`❌ GitHub API Response Body: ${responseBody}`);
+        this.logger.error(`❌ Rate Limit Remaining: ${response.headers.get('x-ratelimit-remaining')}`);
+        this.logger.error(`❌ Rate Limit Limit: ${response.headers.get('x-ratelimit-limit')}`);
+        
         if (response.status === 404) {
           throw new Error(`Repository ${owner}/${repo} not found`);
         }
