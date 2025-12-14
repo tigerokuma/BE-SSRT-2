@@ -45,14 +45,19 @@ export class GitCommitExtractorService {
 
       const commits = this.parseGitLogOutput(stdout);
       
-      // Extract diff data for each commit
-      for (const commit of commits) {
-        try {
-          commit.diffData = await this.extractCommitDiff(repoPath, commit.sha);
-        } catch (error) {
-          this.logger.warn(`⚠️ Failed to extract diff for commit ${commit.sha}: ${error.message}`);
-          commit.diffData = null;
+      // Extract diff data for each commit (only do this for reasonable commit counts)
+      if (commits.length <= 500) {
+        this.logger.log(`🔍 Extracting diff data for ${commits.length} commits...`);
+        for (const commit of commits) {
+          try {
+            commit.diffData = await this.extractCommitDiff(repoPath, commit.sha);
+          } catch (error) {
+            this.logger.warn(`⚠️ Failed to extract diff for commit ${commit.sha}: ${error.message}`);
+            commit.diffData = null;
+          }
         }
+      } else {
+        this.logger.log(`⏭️ Skipping diff extraction for ${commits.length} commits (too many)`);
       }
 
       return commits;
@@ -64,8 +69,9 @@ export class GitCommitExtractorService {
 
   /**
    * Extract diff data for a specific commit
+   * Call this separately for commits that need detailed diff information
    */
-  private async extractCommitDiff(repoPath: string, commitSha: string): Promise<any> {
+  async extractCommitDiff(repoPath: string, commitSha: string): Promise<any> {
     try {
       // Get the diff for this commit
       const { stdout } = await execAsync(`git show --stat ${commitSha}`, {
